@@ -21,7 +21,7 @@ use std::os::unix::fs::FileExt;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_keyboard::{self, KeyState, KeymapFormat, WlKeyboard};
 use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, event_created_child};
+use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, event_created_child};
 use xkbcommon::xkb;
 
 /// Preedit style value for "underline" (see text-input-v1 `preedit_style`).
@@ -103,16 +103,20 @@ impl App {
     /// Finish any composition and drop the current context and keyboard grab.
     fn release_focus(&mut self) {
         let leftover = self.engine.flush();
+        // Release the grab first. The proxy reports version 1 (it inherits the
+        // context's), but the compositor's wl_keyboard is newer and the client
+        // library does not enforce `since` on requests.
+        if let Some(keyboard) = self.keyboard.take() {
+            keyboard.release();
+        }
         if let Some(context) = self.context.take() {
+            // KWin usually ignores text after `deactivate`; the `commit` argument
+            // of the last `preedit_string` is what keeps the text. This is a
+            // harmless fallback for compositors that do honour it.
             if !leftover.is_empty() {
                 context.commit_string(self.commit_serial, leftover);
             }
             context.destroy();
-        }
-        if let Some(keyboard) = self.keyboard.take()
-            && keyboard.version() >= 3
-        {
-            keyboard.release();
         }
     }
 
