@@ -31,11 +31,11 @@ pub fn init() {
 
 #[doc(hidden)]
 pub fn write(args: std::fmt::Arguments<'_>) {
-    if let Some(file) = LOG.get() {
-        if let Ok(mut file) = file.lock() {
-            let _ = writeln!(file, "{args}");
-            let _ = file.flush();
-        }
+    if let Some(file) = LOG.get()
+        && let Ok(mut file) = file.lock()
+    {
+        let _ = writeln!(file, "{args}");
+        let _ = file.flush();
     }
 }
 
