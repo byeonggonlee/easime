@@ -1,0 +1,345 @@
+//! The input method client: talks `zwp_input_method_v1` with KWin.
+//!
+//! Flow (see the protocol XML for details):
+//! 1. KWin sends `activate` when a text field gets focus, handing us a
+//!    `zwp_input_method_context_v1`.
+//! 2. We `grab_keyboard`, so every key goes to us first.
+//! 3. For each key we either consume it (engine composes, we send
+//!    `commit_string` / `preedit_string`) or forward it back with `key`.
+
+use crate::log;
+use crate::protocol::client::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
+use crate::protocol::client::zwp_input_method_v1::{self, ZwpInputMethodV1};
+use crate::translate::{is_language_toggle, is_modifier_keysym, translate};
+use engine_hangul::HangulEngine;
+use ime_core::{EngineOutput, InputEngine, Modifiers};
+use std::collections::HashSet;
+use std::error::Error;
+use std::fs::File;
+use std::os::unix::fs::FileExt;
+use wayland_client::globals::{GlobalListContents, registry_queue_init};
+use wayland_client::protocol::wl_keyboard::{self, KeyState, KeymapFormat, WlKeyboard};
+use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, event_created_child};
+use xkbcommon::xkb;
+
+/// Preedit style value for "underline" (see text-input-v1 `preedit_style`).
+const PREEDIT_STYLE_UNDERLINE: u32 = 5;
+
+/// evdev keycodes are offset by 8 in XKB.
+const EVDEV_OFFSET: u32 = 8;
+
+struct Xkb {
+    state: xkb::State,
+}
+
+struct App {
+    engine: HangulEngine,
+    /// True: compose Hangul. False: pass every key through (English).
+    korean: bool,
+    context: Option<ZwpInputMethodContextV1>,
+    keyboard: Option<WlKeyboard>,
+    /// Serial of the latest `commit_state`, used for text requests.
+    commit_serial: u32,
+    xkb_context: xkb::Context,
+    xkb: Option<Xkb>,
+    /// Keys whose press we consumed; their release must be dropped too.
+    swallowed: HashSet<u32>,
+}
+
+impl App {
+    fn new() -> Self {
+        Self {
+            engine: HangulEngine::new(),
+            korean: true,
+            context: None,
+            keyboard: None,
+            commit_serial: 0,
+            xkb_context: xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
+            xkb: None,
+            swallowed: HashSet::new(),
+        }
+    }
+
+    fn activate(&mut self, context: ZwpInputMethodContextV1, qh: &QueueHandle<App>) {
+        log!("activate");
+        self.release_focus();
+        self.keyboard = Some(context.grab_keyboard(qh, ()));
+        self.context = Some(context);
+        self.engine.reset();
+        self.swallowed.clear();
+    }
+
+    fn deactivate(&mut self) {
+        log!("deactivate");
+        self.release_focus();
+    }
+
+    /// Finish any composition and drop the current context and keyboard grab.
+    fn release_focus(&mut self) {
+        let leftover = self.engine.flush();
+        if let Some(context) = self.context.take() {
+            if !leftover.is_empty() {
+                context.commit_string(self.commit_serial, leftover);
+            }
+            context.destroy();
+        }
+        if let Some(keyboard) = self.keyboard.take()
+            && keyboard.version() >= 3
+        {
+            keyboard.release();
+        }
+    }
+
+    fn set_keymap(&mut self, file: File, size: u32) {
+        let mut buf = vec![0u8; size as usize];
+        if let Err(e) = file.read_exact_at(&mut buf, 0) {
+            log!("keymap read failed: {e}");
+            return;
+        }
+        // The keymap is a NUL-terminated string.
+        while buf.last() == Some(&0) {
+            buf.pop();
+        }
+        let Ok(text) = String::from_utf8(buf) else {
+            log!("keymap is not valid UTF-8");
+            return;
+        };
+        let keymap = xkb::Keymap::new_from_string(
+            &self.xkb_context,
+            text,
+            xkb::KEYMAP_FORMAT_TEXT_V1,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        );
+        match keymap {
+            Some(keymap) => {
+                log!("keymap loaded");
+                self.xkb = Some(Xkb {
+                    state: xkb::State::new(&keymap),
+                });
+            }
+            None => log!("keymap compile failed"),
+        }
+    }
+
+    fn on_modifiers(&mut self, serial: u32, depressed: u32, latched: u32, locked: u32, group: u32) {
+        if let Some(xkb) = &mut self.xkb {
+            xkb.state
+                .update_mask(depressed, latched, locked, 0, 0, group);
+        }
+        // Applications must see the modifier state for keys we forward.
+        if let Some(context) = &self.context {
+            context.modifiers(serial, depressed, latched, locked, group);
+        }
+    }
+
+    fn current_modifiers(&self) -> Modifiers {
+        let Some(xkb) = &self.xkb else {
+            return Modifiers::NONE;
+        };
+        let active = |name| {
+            xkb.state
+                .mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE)
+        };
+        Modifiers {
+            ctrl: active(xkb::MOD_NAME_CTRL),
+            alt: active(xkb::MOD_NAME_ALT),
+            meta: active(xkb::MOD_NAME_LOGO),
+        }
+    }
+
+    fn on_key(&mut self, serial: u32, time: u32, key: u32, pressed: bool) {
+        if !pressed {
+            if !self.swallowed.remove(&key) {
+                self.forward_key(serial, time, key, false);
+            }
+            return;
+        }
+
+        let keysym = match &self.xkb {
+            Some(xkb) => xkb
+                .state
+                .key_get_one_sym(xkb::Keycode::new(key + EVDEV_OFFSET))
+                .raw(),
+            None => {
+                self.forward_key(serial, time, key, true);
+                return;
+            }
+        };
+
+        if is_language_toggle(keysym) {
+            self.toggle_language();
+            self.swallowed.insert(key);
+            return;
+        }
+        if !self.korean || is_modifier_keysym(keysym) {
+            self.forward_key(serial, time, key, true);
+            return;
+        }
+
+        let output = self
+            .engine
+            .process_key(translate(keysym, self.current_modifiers()));
+        let handled = output.handled;
+        self.apply(output);
+        if handled {
+            self.swallowed.insert(key);
+        } else {
+            self.forward_key(serial, time, key, true);
+        }
+    }
+
+    fn toggle_language(&mut self) {
+        // Finish the syllable in progress before switching.
+        let leftover = self.engine.flush();
+        self.korean = !self.korean;
+        log!(
+            "language -> {}",
+            if self.korean { "korean" } else { "english" }
+        );
+        self.apply(EngineOutput {
+            commit: leftover,
+            ..EngineOutput::default()
+        });
+    }
+
+    fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
+        if let Some(context) = &self.context {
+            let state = if pressed {
+                KeyState::Pressed
+            } else {
+                KeyState::Released
+            };
+            context.key(serial, time, key, u32::from(state));
+        }
+    }
+
+    /// Send the engine's result to the application.
+    fn apply(&self, output: EngineOutput) {
+        let Some(context) = &self.context else {
+            return;
+        };
+        let serial = self.commit_serial;
+        if !output.commit.is_empty() {
+            context.commit_string(serial, output.commit);
+        }
+        // Styling and cursor must precede the `preedit_string` they apply to.
+        let text = output.preedit.text;
+        if !text.is_empty() {
+            context.preedit_styling(0, text.len() as u32, PREEDIT_STYLE_UNDERLINE);
+        }
+        context.preedit_cursor(text.len() as i32);
+        context.preedit_string(serial, text.clone(), text);
+    }
+}
+
+impl Dispatch<WlRegistry, GlobalListContents> for App {
+    fn event(
+        _: &mut Self,
+        _: &WlRegistry,
+        _: <WlRegistry as wayland_client::Proxy>::Event,
+        _: &GlobalListContents,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpInputMethodV1, ()> for App {
+    fn event(
+        app: &mut Self,
+        _: &ZwpInputMethodV1,
+        event: zwp_input_method_v1::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwp_input_method_v1::Event::Activate { id } => app.activate(id, qh),
+            zwp_input_method_v1::Event::Deactivate { .. } => app.deactivate(),
+        }
+    }
+
+    event_created_child!(App, ZwpInputMethodV1, [
+        zwp_input_method_v1::EVT_ACTIVATE_OPCODE => (ZwpInputMethodContextV1, ()),
+    ]);
+}
+
+impl Dispatch<ZwpInputMethodContextV1, ()> for App {
+    fn event(
+        app: &mut Self,
+        _: &ZwpInputMethodContextV1,
+        event: zwp_input_method_context_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwp_input_method_context_v1::Event::CommitState { serial } => {
+                app.commit_serial = serial;
+            }
+            zwp_input_method_context_v1::Event::Reset => {
+                // The application discarded its text state.
+                app.engine.reset();
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlKeyboard, ()> for App {
+    fn event(
+        app: &mut Self,
+        _: &WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_keyboard::Event::Keymap { format, fd, size } => {
+                if format == WEnum::Value(KeymapFormat::XkbV1) {
+                    app.set_keymap(File::from(fd), size);
+                }
+            }
+            wl_keyboard::Event::Key {
+                serial,
+                time,
+                key,
+                state,
+            } => {
+                let pressed = state == WEnum::Value(KeyState::Pressed);
+                app.on_key(serial, time, key, pressed);
+            }
+            wl_keyboard::Event::Modifiers {
+                serial,
+                mods_depressed,
+                mods_latched,
+                mods_locked,
+                group,
+            } => app.on_modifiers(serial, mods_depressed, mods_latched, mods_locked, group),
+            _ => {}
+        }
+    }
+}
+
+/// Connect to the compositor and serve input until the connection closes.
+///
+/// Fails if the compositor does not offer `zwp_input_method_v1`; KWin only
+/// does so to the program configured as the virtual keyboard.
+pub fn run() -> Result<(), Box<dyn Error>> {
+    log::init();
+    log!("easime starting");
+    let connection = Connection::connect_to_env()?;
+    let (globals, mut queue) = registry_queue_init::<App>(&connection)?;
+    let qh = queue.handle();
+    let _input_method: ZwpInputMethodV1 = globals.bind(&qh, 1..=1, ()).map_err(|e| {
+        format!("zwp_input_method_v1 is not available ({e}); start easime via System Settings > Keyboard > Virtual Keyboard")
+    })?;
+    log!("bound zwp_input_method_v1");
+
+    let mut app = App::new();
+    loop {
+        queue.blocking_dispatch(&mut app)?;
+    }
+}
