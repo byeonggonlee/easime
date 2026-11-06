@@ -1,0 +1,15 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Local Claude Code settings
+.claude/settings.local.json
