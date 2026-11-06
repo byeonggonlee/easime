@@ -14,6 +14,10 @@ It does not depend on ibus or fcitx.
 6. Japanese (romaji → kana, then kana → kanji using Mozc OSS data)
 7. Chinese (pinyin, Simplified and Traditional)
 
+## Platforms
+Linux first (KDE Plasma 6, then GNOME), followed by Windows (TSF) and macOS (InputMethodKit).
+Linux packages will be published as `.deb` / `.rpm` on GitHub Releases.
+
 ## License
 Licensed under either of
 
