@@ -9,16 +9,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: fmt, clippy, test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Engine crates are OS independent; keep them building everywhere.
-        os: [ubuntu-latest, windows-latest, macos-latest]
+  linux:
+    name: Linux (whole workspace)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -26,3 +22,22 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  portable:
+    name: OS-independent crates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      # Crates that must build on every OS (no Wayland/X11/Qt dependencies).
+      PORTABLE: -p ime-core -p engine-hangul -p easime-cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy ${{ env.PORTABLE }} --all-targets -- -D warnings
+      - run: cargo test ${{ env.PORTABLE }}
