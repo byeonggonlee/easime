@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ime-core"]
+members = ["crates/ime-core", "crates/engine-hangul"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,11 @@
+[package]
+name = "engine-hangul"
+description = "Pure Rust Hangul composition engine (Dubeolsik) for easime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ime-core = { path = "../ime-core" }
