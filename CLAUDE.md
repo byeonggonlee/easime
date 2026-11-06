@@ -149,6 +149,23 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 12. **중국어** (장기) — 병음 엔진, 간체/번체.
 13. **macOS** — InputMethodKit, SwiftUI 설정 앱, pkg.
 
+## 현재 상태 (2026-11-07)
+- 완료: `ime-core`, `engine-hangul`(두벌식, 겹모음/겹받침, 자모/글자 단위 백스페이스), `easime-cli`(데모),
+  `frontend-wayland`(KWin `zwp_input_method_v1` 클라이언트), `easime`(데몬), CI(GitHub Actions)
+- **아직 KWin에서 실제로 시험하지 않았다.** 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
+  (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
+- 알려진 미구현: 키 자동 반복(key repeat), 설정 파일, 트레이/상태 박스, 후보창, XIM
+
+## 개발 모드로 KWin에서 시험하기 (사용자 환경을 바꾸므로 사용자가 직접 실행)
+```sh
+./scripts/install-dev.sh     # release 빌드 + ~/.local/share/applications/easime.desktop 등록
+```
+1. 시스템 설정 → 키보드 → 가상 키보드 → easime 선택 → 로그아웃/로그인
+2. 로그: `~/.local/state/easime/easime.log`
+3. 문제가 생겨 입력이 안 되면 같은 화면에서 원래 항목(Plasma Keyboard 등)을 고르거나
+   `kwriteconfig6 --file kwinrc --group Wayland --key InputMethod ""` 후 재로그인
+- 현재 `kwinrc [Wayland] InputMethod` 값: `/usr/share/applications/org.kde.plasma.keyboard.desktop` (복구용으로 기억할 것)
+
 ## 개발 규칙
 - **사용자와의 대화는 항상 한국어로 한다** (전역 규칙). 코드 식별자, 주석, 커밋 메시지는 영어.
 - 엔진 crate(`ime-core`, `engine-*`)에는 OS/UI 의존성(Wayland, X11, Qt, Win32 등)을 넣지 않는다.
