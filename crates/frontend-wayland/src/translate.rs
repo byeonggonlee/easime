@@ -7,7 +7,7 @@ use ime_core::{Key, KeyEvent, Modifiers};
 
 const KEY_ISO_LEVEL3_SHIFT: u32 = 0xfe03;
 const KEY_ISO_LEFT_TAB: u32 = 0xfe20;
-const KEY_HANGUL: u32 = 0xff31;
+pub(crate) const KEY_HANGUL: u32 = 0xff31;
 const KEY_BACKSPACE: u32 = 0xff08;
 const KEY_TAB: u32 = 0xff09;
 const KEY_RETURN: u32 = 0xff0d;
@@ -21,7 +21,7 @@ const KEY_NUM_LOCK: u32 = 0xff7f;
 const KEY_KP_ENTER: u32 = 0xff8d;
 const KEY_SHIFT_L: u32 = 0xffe1;
 const KEY_HYPER_R: u32 = 0xffee;
-const KEY_ALT_R: u32 = 0xffea;
+pub(crate) const KEY_ALT_R: u32 = 0xffea;
 const KEY_SPACE: u32 = 0x20;
 
 /// True for keys that only change modifier state (Shift, Ctrl, Alt, Super,
@@ -33,12 +33,6 @@ pub fn is_modifier_keysym(keysym: u32) -> bool {
             keysym,
             KEY_ISO_LEVEL3_SHIFT | KEY_MODE_SWITCH | KEY_NUM_LOCK
         )
-}
-
-/// True for the keys that switch between English and the current language:
-/// the Hangul key and Right Alt (which is AltGr on some layouts).
-pub fn is_language_toggle(keysym: u32) -> bool {
-    matches!(keysym, KEY_HANGUL | KEY_ALT_R | KEY_ISO_LEVEL3_SHIFT)
 }
 
 /// Convert a keysym plus modifier state to an engine key event.
@@ -106,13 +100,5 @@ mod tests {
         }
         assert!(!is_modifier_keysym(0x72));
         assert!(!is_modifier_keysym(0xff08));
-    }
-
-    #[test]
-    fn detects_language_toggle_keys() {
-        assert!(is_language_toggle(0xff31)); // Hangul
-        assert!(is_language_toggle(0xffea)); // Alt_R
-        assert!(!is_language_toggle(0xffe9)); // Alt_L
-        assert!(!is_language_toggle(0x20));
     }
 }

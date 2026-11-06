@@ -10,7 +10,8 @@
 use crate::log;
 use crate::protocol::client::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
 use crate::protocol::client::zwp_input_method_v1::{self, ZwpInputMethodV1};
-use crate::translate::{is_language_toggle, is_modifier_keysym, translate};
+use crate::toggle::{Decision, ToggleTracker};
+use crate::translate::{is_modifier_keysym, translate};
 use engine_hangul::HangulEngine;
 use ime_core::{EngineOutput, InputEngine, Modifiers};
 use std::collections::HashSet;
@@ -66,6 +67,7 @@ struct App {
     xkb: Option<Xkb>,
     /// Keys whose press we consumed; their release must be dropped too.
     swallowed: HashSet<u32>,
+    toggle: ToggleTracker,
 }
 
 impl App {
@@ -79,6 +81,7 @@ impl App {
             xkb_context: xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
             xkb: None,
             swallowed: HashSet::new(),
+            toggle: ToggleTracker::new(),
         }
     }
 
@@ -89,6 +92,7 @@ impl App {
         self.context = Some(context);
         self.engine.reset();
         self.swallowed.clear();
+        self.toggle.clear();
     }
 
     fn deactivate(&mut self) {
@@ -172,14 +176,16 @@ impl App {
     fn on_key(&mut self, serial: u32, time: u32, key: u32, action: KeyAction) {
         match action {
             KeyAction::Released => {
-                if !self.swallowed.remove(&key) {
+                if self.toggle.on_release(key) == Decision::Toggle {
+                    self.toggle_language();
+                } else if !self.swallowed.remove(&key) {
                     self.forward_key(serial, time, key, KeyAction::Released);
                 }
                 return;
             }
             KeyAction::Repeated => {
                 // Keys we consumed are not repeated yet; the rest go to the app.
-                if !self.swallowed.contains(&key) {
+                if !self.swallowed.contains(&key) && !self.toggle.holds(key) {
                     self.forward_key(serial, time, key, KeyAction::Repeated);
                 }
                 return;
@@ -198,10 +204,18 @@ impl App {
             }
         };
 
-        if is_language_toggle(keysym) {
-            self.toggle_language();
-            self.swallowed.insert(key);
-            return;
+        let (held_back, decision) = self.toggle.on_press(serial, time, key, keysym);
+        if let Some(p) = held_back {
+            self.forward_key(p.serial, p.time, p.key, KeyAction::Pressed);
+        }
+        match decision {
+            Decision::Toggle => {
+                self.toggle_language();
+                self.swallowed.insert(key);
+                return;
+            }
+            Decision::Swallow => return,
+            Decision::Pass => {}
         }
         if !self.korean || is_modifier_keysym(keysym) {
             self.forward_key(serial, time, key, KeyAction::Pressed);
