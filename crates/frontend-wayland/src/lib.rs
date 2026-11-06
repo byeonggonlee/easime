@@ -6,4 +6,4 @@ pub mod protocol;
 pub mod toggle;
 pub mod translate;
 
-pub use app::run;
+pub use app::{RunError, run};

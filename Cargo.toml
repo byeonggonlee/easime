@@ -8,3 +8,8 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/byeonggonlee/easime"
 authors = ["Byeonggon Lee"]
+
+# KWin restarts a crashed input method only if it died from a signal, so a
+# panic must abort instead of unwinding to a normal exit code.
+[profile.release]
+panic = "abort"

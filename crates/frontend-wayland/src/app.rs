@@ -384,24 +384,52 @@ impl Dispatch<WlKeyboard, ()> for App {
     }
 }
 
+/// Why [`run`] stopped.
+#[derive(Debug)]
+pub enum RunError {
+    /// Could not start (no compositor, or no input method interface because
+    /// easime was not launched by KWin). Restarting would not help.
+    Startup(String),
+    /// Failed after startup (e.g. the connection dropped). The process should
+    /// die abnormally so KWin starts it again.
+    Runtime(String),
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RunError::Startup(m) | RunError::Runtime(m) => f.write_str(m),
+        }
+    }
+}
+
+impl Error for RunError {}
+
 /// Connect to the compositor and serve input until the connection closes.
 ///
-/// Fails if the compositor does not offer `zwp_input_method_v1`; KWin only
-/// does so to the program configured as the virtual keyboard.
-pub fn run() -> Result<(), Box<dyn Error>> {
+/// Fails with [`RunError::Startup`] if the compositor does not offer
+/// `zwp_input_method_v1`; KWin only does so to the program configured as the
+/// virtual keyboard.
+pub fn run() -> Result<std::convert::Infallible, RunError> {
     log::init();
     log!("easime starting");
-    let connection = Connection::connect_to_env()?;
-    let (globals, mut queue) = registry_queue_init::<App>(&connection)?;
+    let startup = |e: &dyn std::fmt::Display| RunError::Startup(e.to_string());
+    let connection = Connection::connect_to_env().map_err(|e| startup(&e))?;
+    let (globals, mut queue) = registry_queue_init::<App>(&connection).map_err(|e| startup(&e))?;
     let qh = queue.handle();
     let _input_method: ZwpInputMethodV1 = globals.bind(&qh, 1..=1, ()).map_err(|e| {
-        format!("zwp_input_method_v1 is not available ({e}); start easime via System Settings > Keyboard > Virtual Keyboard")
+        RunError::Startup(format!(
+            "zwp_input_method_v1 is not available ({e}); start easime via \
+             System Settings > Keyboard > Virtual Keyboard"
+        ))
     })?;
     log!("bound zwp_input_method_v1");
 
     let mut app = App::new();
     loop {
-        queue.blocking_dispatch(&mut app)?;
+        queue
+            .blocking_dispatch(&mut app)
+            .map_err(|e| RunError::Runtime(e.to_string()))?;
     }
 }
 
