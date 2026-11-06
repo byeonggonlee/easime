@@ -68,6 +68,7 @@ version = "0.1.0"
 dependencies = [
  "engine-hangul",
  "ime-core",
+ "rustix",
  "wayland-client",
  "wayland-scanner",
  "xkbcommon",

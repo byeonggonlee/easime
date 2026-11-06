@@ -3,6 +3,8 @@
 pub mod app;
 pub mod log;
 pub mod protocol;
+pub mod repeat;
+pub mod timer;
 pub mod toggle;
 pub mod translate;
 
