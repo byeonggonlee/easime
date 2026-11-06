@@ -29,6 +29,27 @@ const PREEDIT_STYLE_UNDERLINE: u32 = 5;
 /// evdev keycodes are offset by 8 in XKB.
 const EVDEV_OFFSET: u32 = 8;
 
+/// What happened to a key. `Repeated` (wl_keyboard key state 2, since
+/// version 10) is sent by KWin when it repeats keys on the client's behalf.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyAction {
+    Pressed,
+    Released,
+    Repeated,
+}
+
+impl KeyAction {
+    fn from_wire(state: WEnum<KeyState>) -> Option<Self> {
+        match state {
+            WEnum::Value(KeyState::Pressed) => Some(Self::Pressed),
+            WEnum::Value(KeyState::Released) => Some(Self::Released),
+            // The generated enum predates `repeated`, so it arrives as raw 2.
+            WEnum::Unknown(2) => Some(Self::Repeated),
+            _ => None,
+        }
+    }
+}
+
 struct Xkb {
     state: xkb::State,
 }
@@ -148,12 +169,22 @@ impl App {
         }
     }
 
-    fn on_key(&mut self, serial: u32, time: u32, key: u32, pressed: bool) {
-        if !pressed {
-            if !self.swallowed.remove(&key) {
-                self.forward_key(serial, time, key, false);
+    fn on_key(&mut self, serial: u32, time: u32, key: u32, action: KeyAction) {
+        match action {
+            KeyAction::Released => {
+                if !self.swallowed.remove(&key) {
+                    self.forward_key(serial, time, key, KeyAction::Released);
+                }
+                return;
             }
-            return;
+            KeyAction::Repeated => {
+                // Keys we consumed are not repeated yet; the rest go to the app.
+                if !self.swallowed.contains(&key) {
+                    self.forward_key(serial, time, key, KeyAction::Repeated);
+                }
+                return;
+            }
+            KeyAction::Pressed => {}
         }
 
         let keysym = match &self.xkb {
@@ -162,7 +193,7 @@ impl App {
                 .key_get_one_sym(xkb::Keycode::new(key + EVDEV_OFFSET))
                 .raw(),
             None => {
-                self.forward_key(serial, time, key, true);
+                self.forward_key(serial, time, key, KeyAction::Pressed);
                 return;
             }
         };
@@ -173,7 +204,7 @@ impl App {
             return;
         }
         if !self.korean || is_modifier_keysym(keysym) {
-            self.forward_key(serial, time, key, true);
+            self.forward_key(serial, time, key, KeyAction::Pressed);
             return;
         }
 
@@ -185,7 +216,7 @@ impl App {
         if handled {
             self.swallowed.insert(key);
         } else {
-            self.forward_key(serial, time, key, true);
+            self.forward_key(serial, time, key, KeyAction::Pressed);
         }
     }
 
@@ -203,14 +234,14 @@ impl App {
         });
     }
 
-    fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
+    fn forward_key(&self, serial: u32, time: u32, key: u32, action: KeyAction) {
         if let Some(context) = &self.context {
-            let state = if pressed {
-                KeyState::Pressed
-            } else {
-                KeyState::Released
+            let state = match action {
+                KeyAction::Pressed => u32::from(KeyState::Pressed),
+                KeyAction::Released => u32::from(KeyState::Released),
+                KeyAction::Repeated => 2,
             };
-            context.key(serial, time, key, u32::from(state));
+            context.key(serial, time, key, state);
         }
     }
 
@@ -308,8 +339,9 @@ impl Dispatch<WlKeyboard, ()> for App {
                 key,
                 state,
             } => {
-                let pressed = state == WEnum::Value(KeyState::Pressed);
-                app.on_key(serial, time, key, pressed);
+                if let Some(action) = KeyAction::from_wire(state) {
+                    app.on_key(serial, time, key, action);
+                }
             }
             wl_keyboard::Event::Modifiers {
                 serial,
@@ -341,5 +373,28 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     loop {
         queue.blocking_dispatch(&mut app)?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_key_states() {
+        assert_eq!(
+            KeyAction::from_wire(WEnum::Value(KeyState::Pressed)),
+            Some(KeyAction::Pressed)
+        );
+        assert_eq!(
+            KeyAction::from_wire(WEnum::Value(KeyState::Released)),
+            Some(KeyAction::Released)
+        );
+        // `repeated` is raw value 2 in the wire protocol.
+        assert_eq!(
+            KeyAction::from_wire(WEnum::Unknown(2)),
+            Some(KeyAction::Repeated)
+        );
+        assert_eq!(KeyAction::from_wire(WEnum::Unknown(9)), None);
     }
 }
