@@ -1,0 +1,15 @@
+[package]
+name = "frontend-wayland"
+description = "Wayland input method frontend (zwp_input_method_v1) for KWin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ime-core = { path = "../ime-core" }
+engine-hangul = { path = "../engine-hangul" }
+wayland-client = "0.31"
+wayland-scanner = "0.31"
+xkbcommon = "0.8"
