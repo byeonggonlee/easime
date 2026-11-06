@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "easime-cli"
+version = "0.1.0"
+dependencies = [
+ "engine-hangul",
+ "ime-core",
+]
+
+[[package]]
 name = "engine-hangul"
 version = "0.1.0"
 dependencies = [
