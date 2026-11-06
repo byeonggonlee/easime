@@ -5,4 +5,4 @@ pub mod engine;
 pub mod jamo;
 pub mod keymap;
 
-pub use engine::HangulEngine;
+pub use engine::{BackspaceMode, HangulEngine};

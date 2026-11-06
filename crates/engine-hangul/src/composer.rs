@@ -139,6 +139,14 @@ impl Composer {
         true
     }
 
+    /// Remove the whole syllable under construction.
+    /// Returns false if there was nothing to remove.
+    pub fn backspace_syllable(&mut self) -> bool {
+        let had = !self.is_empty();
+        self.reset();
+        had
+    }
+
     /// The text of the syllable under construction.
     pub fn preedit(&self) -> String {
         match (self.cho, self.jung) {
@@ -268,6 +276,17 @@ mod tests {
         assert_eq!(c.preedit(), "왜");
         c.backspace();
         assert_eq!(c.preedit(), "오");
+    }
+
+    #[test]
+    fn backspace_syllable_clears_everything() {
+        let mut c = Composer::new();
+        for j in "ㄱㅏㅂㅅ".chars() {
+            c.input(j);
+        }
+        assert!(c.backspace_syllable());
+        assert!(c.is_empty());
+        assert!(!c.backspace_syllable());
     }
 
     #[test]

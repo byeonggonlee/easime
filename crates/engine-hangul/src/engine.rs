@@ -4,6 +4,16 @@ use crate::composer::Composer;
 use crate::keymap::dubeolsik;
 use ime_core::{EngineOutput, InputEngine, Key, KeyEvent, Preedit};
 
+/// How much Backspace removes while a syllable is being composed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackspaceMode {
+    /// One jamo at a time: 한 → 하 → ㅎ → (nothing).
+    #[default]
+    Jamo,
+    /// The whole syllable: 한 → (nothing).
+    Syllable,
+}
+
 /// Hangul input engine using the Dubeolsik layout.
 ///
 /// For keys it does not consume (`handled == false`), the returned `commit`
@@ -12,11 +22,23 @@ use ime_core::{EngineOutput, InputEngine, Key, KeyEvent, Preedit};
 #[derive(Debug, Default)]
 pub struct HangulEngine {
     composer: Composer,
+    backspace_mode: BackspaceMode,
 }
 
 impl HangulEngine {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_backspace_mode(mode: BackspaceMode) -> Self {
+        Self {
+            backspace_mode: mode,
+            ..Self::default()
+        }
+    }
+
+    pub fn set_backspace_mode(&mut self, mode: BackspaceMode) {
+        self.backspace_mode = mode;
     }
 
     fn output(&self, commit: String, handled: bool) -> EngineOutput {
@@ -49,7 +71,10 @@ impl InputEngine for HangulEngine {
                 }
             },
             Key::Backspace => {
-                let handled = self.composer.backspace();
+                let handled = match self.backspace_mode {
+                    BackspaceMode::Jamo => self.composer.backspace(),
+                    BackspaceMode::Syllable => self.composer.backspace_syllable(),
+                };
                 self.output(String::new(), handled)
             }
             _ => {
@@ -147,6 +172,16 @@ mod tests {
         // Nothing left to edit: the application should handle Backspace.
         let out = e.process_key(KeyEvent::new(Key::Backspace));
         assert!(!out.handled);
+    }
+
+    #[test]
+    fn syllable_backspace_mode_removes_whole_syllable() {
+        let mut e = HangulEngine::with_backspace_mode(BackspaceMode::Syllable);
+        type_keys(&mut e, "gks");
+        let out = e.process_key(KeyEvent::new(Key::Backspace));
+        assert!(out.handled);
+        assert!(out.preedit.is_empty());
+        assert!(!e.process_key(KeyEvent::new(Key::Backspace)).handled);
     }
 
     #[test]
