@@ -11,7 +11,7 @@ use crate::log;
 use crate::protocol::client::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
 use crate::protocol::client::zwp_input_method_v1::{self, ZwpInputMethodV1};
 use crate::toggle::{Decision, ToggleTracker};
-use crate::translate::{is_modifier_keysym, translate};
+use crate::translate::{case_from_shift, is_modifier_keysym, translate};
 use engine_hangul::HangulEngine;
 use ime_core::{EngineOutput, InputEngine, Modifiers};
 use std::collections::HashSet;
@@ -158,6 +158,16 @@ impl App {
         }
     }
 
+    /// True if a Shift key is physically held (Caps Lock does not count).
+    fn shift_held(&self) -> bool {
+        self.xkb.as_ref().is_some_and(|xkb| {
+            xkb.state.mod_name_is_active(
+                xkb::MOD_NAME_SHIFT,
+                xkb::STATE_MODS_DEPRESSED | xkb::STATE_MODS_LATCHED,
+            )
+        })
+    }
+
     fn current_modifiers(&self) -> Modifiers {
         let Some(xkb) = &self.xkb else {
             return Modifiers::NONE;
@@ -222,6 +232,7 @@ impl App {
             return;
         }
 
+        let keysym = case_from_shift(keysym, self.shift_held());
         let output = self
             .engine
             .process_key(translate(keysym, self.current_modifiers()));

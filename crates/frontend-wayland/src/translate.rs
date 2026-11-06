@@ -35,6 +35,19 @@ pub fn is_modifier_keysym(keysym: u32) -> bool {
         )
 }
 
+/// Make ASCII letter case depend on the Shift key alone.
+///
+/// With Caps Lock on, xkb reports `R` for the unshifted R key, which would type
+/// ㄲ instead of ㄱ. Dubeolsik only wants Shift (ㄲ ㄸ ㅃ ㅆ ㅉ ㅒ ㅖ), so letters
+/// are re-cased from `shift`; every other keysym is returned unchanged.
+pub fn case_from_shift(keysym: u32, shift: bool) -> u32 {
+    match keysym {
+        0x41..=0x5a if !shift => keysym + 0x20,
+        0x61..=0x7a if shift => keysym - 0x20,
+        _ => keysym,
+    }
+}
+
 /// Convert a keysym plus modifier state to an engine key event.
 pub fn translate(keysym: u32, modifiers: Modifiers) -> KeyEvent {
     let key = match keysym {
@@ -91,6 +104,28 @@ mod tests {
         let e = translate(0x63, ctrl);
         assert_eq!(e.key, Key::Char('c'));
         assert!(e.modifiers.ctrl);
+    }
+
+    #[test]
+    fn caps_lock_does_not_change_letters_without_shift() {
+        // Caps Lock on, no Shift: xkb gives 'R' but we want plain 'r'.
+        assert_eq!(case_from_shift(0x52, false), 0x72);
+        // Caps Lock on plus Shift: xkb gives 'r' but we want 'R'.
+        assert_eq!(case_from_shift(0x72, true), 0x52);
+    }
+
+    #[test]
+    fn case_is_unchanged_when_it_already_matches() {
+        assert_eq!(case_from_shift(0x72, false), 0x72);
+        assert_eq!(case_from_shift(0x52, true), 0x52);
+    }
+
+    #[test]
+    fn case_from_shift_leaves_non_letters_alone() {
+        for k in [0x31, 0x21, 0x2e, 0x20, 0xff08, 0x5b, 0x7b] {
+            assert_eq!(case_from_shift(k, true), k, "{k:#x}");
+            assert_eq!(case_from_shift(k, false), k, "{k:#x}");
+        }
     }
 
     #[test]
