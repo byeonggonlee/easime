@@ -41,3 +41,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy ${{ env.PORTABLE }} --all-targets -- -D warnings
       - run: cargo test ${{ env.PORTABLE }}
+
+  packages:
+    name: .deb and .rpm build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-deb cargo-generate-rpm
+      - run: cargo build --release --locked -p easime
+      - run: cargo deb -p easime --no-build
+      - run: cargo generate-rpm -p crates/easime
+      - name: Show package contents
+        run: |
+          dpkg-deb -I target/debian/*.deb
+          dpkg-deb -c target/debian/*.deb
+          rpm -qpl target/generate-rpm/*.rpm || true
