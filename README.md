@@ -7,8 +7,8 @@ It does not depend on ibus or fcitx.
 > against a fake compositor. A user reported working Korean/English input on Fedora KDE at commit `107bb4b`;
 > broader real-desktop testing remains incomplete. No release has been published.
 
-Implemented so far: Korean (Dubeolsik) input, Japanese romaji to kana with dictionary conversion
-(Mozc OSS dictionary, not wired into the daemon yet), key repeat, language cycling, live settings reload,
+Implemented so far: Korean (Dubeolsik) input, Japanese romaji to kana with word-by-word dictionary
+conversion (Mozc OSS dictionary, shown in the candidate popup; only tested against a fake compositor so far), key repeat, language cycling, live settings reload,
 a language indicator shown next to the cursor only when switching languages, and `.deb` / `.rpm` packaging. Single-syllable Korean Hanja
 conversion and a numbered candidate popup are implemented; real-KDE validation is pending. Still to do:
 tray icon, settings app, XWayland (XIM), Chinese, GNOME, Windows, macOS.
@@ -24,7 +24,7 @@ All agents should start with [AGENTS.md](AGENTS.md) and read DESIGN.md before wo
 3. Language indicator near the text cursor: done. Tray icon: todo
 4. Settings app (Qt 6 / Kirigami, native Plasma look): in progress
 5. XIM frontend for XWayland apps (games, Wine, Steam)
-6. Japanese: romaji → kana done; kana → kanji with Mozc OSS data: engine and dictionary done, daemon dictionary wiring and full conversion validation todo
+6. Japanese: romaji → kana done; kana → kanji with Mozc OSS data: engine, dictionary, daemon wiring and candidate popup done (fake-compositor tests only); validation on a real KDE desktop and clause conversion todo
 7. Chinese (pinyin, Simplified and Traditional)
 
 ## Platforms

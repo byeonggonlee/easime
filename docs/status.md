@@ -23,7 +23,9 @@
   - `engine-hangul`: 두벌식, 겹모음/겹받침, 자모/글자 단위 백스페이스. 조합 중 한 글자 한자 변환 코드와 후보창 추가(실제 KDE 재검증 필요). 한자 키 → ↑↓/Space 이동, PgUp/PgDn 페이지, Enter/1–9 확정, Esc/Backspace로 한글 복귀.
   - `engine-japanese`: 로마자 → 히라가나/가타카나, Space로 변환 시작(후보 순환 Space/↑↓, Enter 확정, Esc/Backspace 가나로 복귀, 숫자 선택).
     사전: `Dictionary` trait, `MemoryDictionary`(TSV), `FileDictionary`(이진, 로드 약 0.1초), `LayeredDictionary`, `load_default()`.
-    **데몬에는 아직 연결하지 않았다** (연결 시 시작할 때 한 번 `engine_japanese::load_default()` 호출). 문절 분할/문맥 변환은 없다(단어 단위).
+    **데몬에 연결했다**: 첫 일본어 엔진을 만들 때 사용자(`~/.local/share/easime/dictionary`)와 시스템(`/usr/share/easime/dictionary`) 폴더의 `*.bin`/`*.tsv`를 한 번 열고, 설정이 바뀌어 엔진을 다시 만들어도 그대로 공유한다. 결과(읽은 파일, 읽지 못한 파일, 아무것도 없음)는 로그의 `japanese dictionary:` 줄에 남는다. 사전이 없으면 가나(히라가나·가타카나)만 후보로 나온다. 문절 분할/문맥 변환은 없다(단어 단위).
+    변환 중에는 한국어 한자와 같은 후보창을 쓴다: 머리글에 읽기, 일본어 글꼴 우선, PgUp/PgDn으로 페이지 이동, 숫자 1–9는 화면에 보이는 페이지 기준. 프리에딧에는 선택한 후보가 보이고 Enter로 확정(앱에는 전달하지 않음), Esc/Backspace는 읽기로 복귀, 한영 전환과 포커스 이탈은 보이는 후보를 한 번 확정한다.
+    **가짜 컴포지터 테스트로만 확인했고 실제 KDE에서는 시험하지 않았다.** 후보창을 띄울 수 없으면 변환을 시작하지 않고 읽기를 유지한다. 사전이 없거나 읽지 못했을 때 창에서 알려 주는 문구는 아직 없다(로그만).
   - `easime-dict-tool`: Mozc OSS 사전 → easime 이진 사전 변환기. `scripts/fetch-mozc-dictionary.sh`(고정 SHA, 체크섬 검증),
     `scripts/build-dictionary.sh sample|mozc`. 라이선스(BSD-3, IPAdic, 오키나와 사전)는 `THIRD_PARTY_LICENSES.md`와 `data/mozc/`.
   - 설정 즉시 반영: 설정 파일을 inotify로 감시해 한/영 키, 백스페이스 단위, 언어 목록을 재시작 없이 적용(깨진 파일은 무시)
@@ -39,7 +41,7 @@
   검증). 실제 KWin이 없어도 프로토콜 흐름을 시험할 수 있고, 이미 실제 버그(`KeyState::Repeated` 처리)를 잡았다.
 - **실사용 보고(2026-11-07)**: Fedora 최신 + `107bb4bbcc24bfc83b063cfd69c4a052b44fb616`에서 사용자가 한·영 입력 동작을 확인했다. 앱별 범위는 미확인이다. 하단 패널 전체 이동은 KWin bug 527067 경로와 일치했고, 재부팅 전에는 박스 등장/퇴장 때 DBus visible=true/false 변화가 확인됐다. 이후 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용하자 문제가 재현되지 않는다고 사용자가 확인했다. 재부팅 후 DBus 속성은 재측정하지 않았다. 구버전 easime의 포커스 표시 문제와 새 한자 기능은 수정본 설치 후 검증이 남아 있다. [진단과 한자 재검증](kde-testing.md). 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
   (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
-- 알려진 미구현: 트레이 아이콘, 일본어 사전의 데몬 연결과 변환 검증, 설정 GUI(`settings-gui-kde` 브랜치에 중간본), XIM, 문절 변환, 중국어, GNOME/Windows/macOS
+- 알려진 미구현: 트레이 아이콘, 일본어 변환의 실제 KDE 검증과 사전 상태 안내 문구, 설정 GUI(`settings-gui-kde` 브랜치에 중간본), XIM, 문절 변환, 중국어, GNOME/Windows/macOS
 - 알려진 한계: 상태 박스와 후보창은 고정 다크 테마다. Plasma 색상 연동은 아직 없다.
 - 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
 
