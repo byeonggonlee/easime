@@ -439,3 +439,86 @@ fn the_input_method_can_be_activated_again_after_deactivation() {
     assert_eq!(last_preedit(&requests), Some("ㅏ"), "{requests:#?}");
 }
 
+// ---- Modifiers and serials -----------------------------------------------
+
+#[test]
+fn modifiers_events_are_forwarded_with_the_same_masks() {
+    let mut fake = Fake::start();
+    fake.activate();
+    let shift = fake.mod_mask("Shift");
+    let ctrl = fake.mod_mask("Control");
+    let caps = fake.mod_mask("Lock");
+    let first = fake.modifiers(shift, 0, 0, 0);
+    let second = fake.modifiers(shift, ctrl, caps, 0);
+    let requests = fake.settle();
+    assert_eq!(
+        requests,
+        [
+            Req::Modifiers {
+                serial: first,
+                depressed: shift,
+                latched: 0,
+                locked: 0,
+                group: 0
+            },
+            Req::Modifiers {
+                serial: second,
+                depressed: shift,
+                latched: ctrl,
+                locked: caps,
+                group: 0
+            },
+        ]
+    );
+}
+
+#[test]
+fn text_requests_carry_the_latest_commit_state_serial() {
+    let mut fake = Fake::start();
+    fake.activate();
+    let first = fake.commit_serial;
+    fake.press(KEY_G);
+    let requests = fake.settle();
+    let serials = text_serials(&requests);
+    assert!(!serials.is_empty(), "{requests:#?}");
+    assert!(serials.iter().all(|s| *s == first), "{requests:#?}");
+
+    // After a new commit_state, the new serial is used, including for the
+    // commit that ends a syllable.
+    let second = fake.commit_state();
+    assert_ne!(first, second);
+    fake.tap_all(&[KEY_K, KEY_S, KEY_R]);
+    let requests = fake.settle();
+    assert_eq!(commits(&requests), ["한"], "{requests:#?}");
+    let serials = text_serials(&requests);
+    assert!(!serials.is_empty(), "{requests:#?}");
+    assert!(serials.iter().all(|s| *s == second), "{requests:#?}");
+}
+
+#[test]
+fn key_and_modifiers_requests_carry_the_keyboard_event_serial() {
+    let mut fake = Fake::start();
+    fake.activate();
+    let commit_serial = fake.commit_serial;
+    let shift = fake.mod_mask("Shift");
+    let mod_serial = fake.modifiers(shift, 0, 0, 0);
+    let press_serial = fake.press(KEY_TAB);
+    let release_serial = fake.release(KEY_TAB);
+    let requests = fake.settle();
+
+    assert_eq!(
+        forwarded_with_serial(&requests),
+        [(press_serial, KEY_TAB, 1), (release_serial, KEY_TAB, 0)],
+        "{requests:#?}"
+    );
+    assert!(
+        matches!(requests.first(), Some(Req::Modifiers { serial, .. }) if *serial == mod_serial),
+        "{requests:#?}"
+    );
+    // The keyboard serials are not the text-input serial.
+    assert!(
+        [mod_serial, press_serial, release_serial]
+            .iter()
+            .all(|s| *s != commit_serial)
+    );
+}
