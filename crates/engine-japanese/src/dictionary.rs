@@ -1,11 +1,23 @@
 //! Reading to candidate lookup used for kana to kanji conversion.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Looks up conversion candidates for a hiragana reading.
-pub trait Dictionary: Send {
+///
+/// `Sync` as well as `Send` so one loaded dictionary can be shared (see the
+/// `Arc` implementation) instead of being loaded again for every engine.
+pub trait Dictionary: Send + Sync {
     /// Candidates for exactly `reading`, best first. Empty if unknown.
     fn lookup(&self, reading: &str) -> Vec<String>;
+}
+
+/// A shared dictionary: the daemon loads the big file once and hands a clone
+/// of the `Arc` to each engine it builds.
+impl<D: Dictionary + ?Sized> Dictionary for Arc<D> {
+    fn lookup(&self, reading: &str) -> Vec<String> {
+        (**self).lookup(reading)
+    }
 }
 
 /// A dictionary that knows nothing (conversion then only offers kana).
@@ -133,6 +145,27 @@ mod tests {
     fn merges_repeated_readings_without_duplicates() {
         let (d, _) = MemoryDictionary::parse("かみ\t神,紙\nかみ\t髪,紙\n");
         assert_eq!(d.lookup("かみ"), ["神", "紙", "髪"]);
+    }
+
+    #[test]
+    fn a_shared_dictionary_serves_several_owners() {
+        let (d, _) = MemoryDictionary::parse("ひと\t人\n");
+        let shared: Arc<dyn Dictionary> = Arc::new(d);
+        let first: Box<dyn Dictionary> = Box::new(shared.clone());
+        let second: Box<dyn Dictionary> = Box::new(shared.clone());
+        assert_eq!(first.lookup("ひと"), ["人"]);
+        assert_eq!(second.lookup("ひと"), ["人"]);
+        assert!(second.lookup("いぬ").is_empty());
+        assert_eq!(Arc::strong_count(&shared), 3);
+    }
+
+    #[test]
+    fn dictionaries_can_be_shared_between_threads() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<MemoryDictionary>();
+        assert_send_sync::<EmptyDictionary>();
+        assert_send_sync::<Box<dyn Dictionary>>();
+        assert_send_sync::<Arc<dyn Dictionary>>();
     }
 
     #[test]
