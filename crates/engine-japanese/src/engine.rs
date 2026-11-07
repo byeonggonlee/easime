@@ -1,8 +1,9 @@
 //! The Japanese engine (kana input only for now).
 
+use crate::dictionary::{Dictionary, EmptyDictionary};
 use crate::kana::to_katakana;
 use crate::romaji::Romaji;
-use ime_core::{EngineOutput, InputEngine, Key, KeyEvent, Preedit};
+use ime_core::{CandidateList, EngineOutput, InputEngine, Key, KeyEvent, Preedit};
 
 /// Which script the engine writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -15,16 +16,46 @@ pub enum KanaMode {
 /// Punctuation keys that are part of the romaji table.
 const PUNCTUATION: &str = "-,./[]~?!";
 
-/// Romaji input to kana.
+/// A conversion in progress: the reading and its candidates.
+#[derive(Debug)]
+struct Conversion {
+    reading: String,
+    candidates: Vec<String>,
+    selected: usize,
+}
+
+impl Conversion {
+    fn current(&self) -> &str {
+        &self.candidates[self.selected]
+    }
+}
+
+/// Romaji input to kana, with dictionary conversion.
 ///
-/// While composing: Enter commits (and is consumed), Space commits and is
-/// forwarded, Escape cancels, Backspace edits. For keys it does not consume
-/// (`handled == false`), `commit` holds finished text that the frontend must
-/// insert before forwarding the key.
-#[derive(Debug, Default)]
+/// While composing: Enter commits the kana (and is consumed), Space starts a
+/// conversion, Escape cancels, Backspace edits. While converting: Space/Down
+/// and Up move through the candidates, Enter commits the chosen one, Escape or
+/// Backspace go back to the kana, a digit 1-9 picks a candidate, and any other
+/// key commits the chosen candidate first.
+///
+/// For keys it does not consume (`handled == false`), `commit` holds finished
+/// text that the frontend must insert before forwarding the key.
 pub struct JapaneseEngine {
     romaji: Romaji,
     mode: KanaMode,
+    dictionary: Box<dyn Dictionary>,
+    conversion: Option<Conversion>,
+}
+
+impl Default for JapaneseEngine {
+    fn default() -> Self {
+        Self {
+            romaji: Romaji::new(),
+            mode: KanaMode::default(),
+            dictionary: Box::new(EmptyDictionary),
+            conversion: None,
+        }
+    }
 }
 
 impl JapaneseEngine {
@@ -35,6 +66,14 @@ impl JapaneseEngine {
     pub fn with_mode(mode: KanaMode) -> Self {
         Self {
             mode,
+            ..Self::default()
+        }
+    }
+
+    /// Use `dictionary` for kana to kanji conversion.
+    pub fn with_dictionary(dictionary: Box<dyn Dictionary>) -> Self {
+        Self {
+            dictionary,
             ..Self::default()
         }
     }
@@ -51,6 +90,20 @@ impl JapaneseEngine {
     }
 
     fn output(&self, commit: String, handled: bool) -> EngineOutput {
+        if let Some(conv) = &self.conversion {
+            let text = conv.current().to_string();
+            let mut preedit = Preedit::new(text.clone());
+            preedit.highlight = Some(0..text.chars().count());
+            return EngineOutput {
+                commit,
+                preedit,
+                candidates: Some(CandidateList {
+                    items: conv.candidates.clone(),
+                    selected: conv.selected,
+                }),
+                handled,
+            };
+        }
         EngineOutput {
             commit,
             preedit: Preedit::new(self.render(self.romaji.preedit())),
@@ -59,9 +112,95 @@ impl JapaneseEngine {
         }
     }
 
+    /// Finish whatever is in progress and return the text to commit.
     fn finish(&mut self) -> String {
+        if let Some(conv) = self.conversion.take() {
+            return conv.current().to_string();
+        }
         let text = self.romaji.flush();
         self.render(text)
+    }
+
+    /// Begin converting the kana typed so far.
+    fn start_conversion(&mut self) {
+        let reading = self.romaji.flush();
+        let mut candidates = self.dictionary.lookup(&reading);
+        // Kana is always an option, after what the dictionary suggests.
+        for fallback in [reading.clone(), to_katakana(&reading)] {
+            if !candidates.contains(&fallback) {
+                candidates.push(fallback);
+            }
+        }
+        self.conversion = Some(Conversion {
+            reading,
+            candidates,
+            selected: 0,
+        });
+    }
+
+    /// Give up the conversion and return to editing the kana.
+    fn cancel_conversion(&mut self) {
+        if let Some(conv) = self.conversion.take() {
+            self.romaji.restore(&conv.reading);
+        }
+    }
+
+    fn move_selection(&mut self, forward: bool) {
+        if let Some(conv) = &mut self.conversion {
+            let n = conv.candidates.len();
+            conv.selected = if forward {
+                (conv.selected + 1) % n
+            } else {
+                (conv.selected + n - 1) % n
+            };
+        }
+    }
+
+    fn process_converting(&mut self, event: KeyEvent) -> EngineOutput {
+        match event.key {
+            Key::Space | Key::Down => {
+                self.move_selection(true);
+                self.output(String::new(), true)
+            }
+            Key::Up => {
+                self.move_selection(false);
+                self.output(String::new(), true)
+            }
+            Key::Left | Key::Right => self.output(String::new(), true),
+            Key::Enter => {
+                let commit = self.finish();
+                self.output(commit, true)
+            }
+            Key::Escape | Key::Backspace => {
+                self.cancel_conversion();
+                self.output(String::new(), true)
+            }
+            Key::Char(c @ '1'..='9') => {
+                let index = c as usize - '1' as usize;
+                let count = self.conversion.as_ref().map_or(0, |c| c.candidates.len());
+                if index < count {
+                    if let Some(conv) = &mut self.conversion {
+                        conv.selected = index;
+                    }
+                    let commit = self.finish();
+                    self.output(commit, true)
+                } else {
+                    // No such candidate: treat it like any other key.
+                    let commit = self.finish();
+                    self.output(commit, false)
+                }
+            }
+            Key::Char(c) if c.is_ascii_alphabetic() => {
+                // Typing on: commit the choice and start the next word.
+                let commit = self.finish();
+                self.romaji.push(c);
+                self.output(commit, true)
+            }
+            _ => {
+                let commit = self.finish();
+                self.output(commit, false)
+            }
+        }
     }
 }
 
@@ -73,8 +212,16 @@ impl InputEngine for JapaneseEngine {
             return self.output(commit, false);
         }
 
+        if self.conversion.is_some() {
+            return self.process_converting(event);
+        }
+
         let composing = !self.romaji.is_empty();
         match event.key {
+            Key::Space if composing => {
+                self.start_conversion();
+                self.output(String::new(), true)
+            }
             Key::Char(c) if c.is_ascii_alphabetic() || PUNCTUATION.contains(c) => {
                 self.romaji.push(c);
                 self.output(String::new(), true)
@@ -99,6 +246,7 @@ impl InputEngine for JapaneseEngine {
     }
 
     fn reset(&mut self) {
+        self.conversion = None;
         self.romaji.reset();
     }
 
@@ -149,12 +297,12 @@ mod tests {
     }
 
     #[test]
-    fn space_commits_and_is_forwarded() {
+    fn space_without_composition_is_forwarded() {
         let mut e = JapaneseEngine::new();
-        type_keys(&mut e, "kana");
         let out = e.process_key(KeyEvent::new(Key::Space));
-        assert_eq!(out.commit, "かな");
         assert!(!out.handled);
+        assert!(out.commit.is_empty());
+        assert!(out.candidates.is_none());
     }
 
     #[test]
@@ -228,5 +376,185 @@ mod tests {
         type_keys(&mut e, "ka");
         e.reset();
         assert_eq!(e.flush(), "");
+    }
+
+    // ---- conversion -------------------------------------------------------
+
+    use crate::dictionary::MemoryDictionary;
+
+    fn engine_with_dictionary() -> JapaneseEngine {
+        let (dict, _) =
+            MemoryDictionary::parse("にほん\t日本,二本\nにほんご\t日本語\nかな\t仮名,かな\n");
+        JapaneseEngine::with_dictionary(Box::new(dict))
+    }
+
+    fn key(e: &mut JapaneseEngine, key: Key) -> EngineOutput {
+        e.process_key(KeyEvent::new(key))
+    }
+
+    #[test]
+    fn space_starts_a_conversion_with_dictionary_then_kana_candidates() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        let out = key(&mut e, Key::Space);
+        assert!(out.handled && out.commit.is_empty());
+        assert_eq!(out.preedit.text, "日本");
+        assert_eq!(out.preedit.highlight, Some(0..2));
+        let list = out.candidates.unwrap();
+        assert_eq!(list.items, ["日本", "二本", "にほん", "ニホン"]);
+        assert_eq!(list.selected, 0);
+    }
+
+    #[test]
+    fn unknown_words_offer_hiragana_then_katakana() {
+        let mut e = JapaneseEngine::new();
+        type_keys(&mut e, "kuruma");
+        let out = key(&mut e, Key::Space);
+        assert_eq!(out.preedit.text, "くるま");
+        assert_eq!(out.candidates.unwrap().items, ["くるま", "クルマ"]);
+    }
+
+    #[test]
+    fn a_dictionary_candidate_equal_to_the_reading_is_not_repeated() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "kana");
+        let out = key(&mut e, Key::Space);
+        assert_eq!(out.candidates.unwrap().items, ["仮名", "かな", "カナ"]);
+    }
+
+    #[test]
+    fn trailing_n_is_part_of_the_reading() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        // The waiting "n" must count as ん before the lookup.
+        assert_eq!(key(&mut e, Key::Space).preedit.text, "日本");
+    }
+
+    #[test]
+    fn space_and_down_move_forward_and_wrap_up_moves_back() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        assert_eq!(key(&mut e, Key::Space).preedit.text, "二本");
+        assert_eq!(key(&mut e, Key::Down).preedit.text, "にほん");
+        assert_eq!(key(&mut e, Key::Down).preedit.text, "ニホン");
+        assert_eq!(key(&mut e, Key::Space).preedit.text, "日本"); // wrapped
+        assert_eq!(key(&mut e, Key::Up).preedit.text, "ニホン"); // wrapped back
+        assert_eq!(key(&mut e, Key::Up).candidates.unwrap().selected, 2);
+    }
+
+    #[test]
+    fn enter_commits_the_selected_candidate() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        key(&mut e, Key::Space);
+        let out = key(&mut e, Key::Enter);
+        assert_eq!(out.commit, "二本");
+        assert!(out.handled && out.preedit.is_empty() && out.candidates.is_none());
+    }
+
+    #[test]
+    fn escape_returns_to_the_kana() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let out = key(&mut e, Key::Escape);
+        assert!(out.handled && out.candidates.is_none());
+        assert_eq!(out.preedit.text, "にほん");
+        // And editing continues from there.
+        assert_eq!(type_keys(&mut e, "go"), (String::new(), "にほんご".into()));
+        assert_eq!(key(&mut e, Key::Enter).commit, "にほんご");
+    }
+
+    #[test]
+    fn backspace_also_returns_to_the_kana_without_deleting() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let out = key(&mut e, Key::Backspace);
+        assert!(out.handled);
+        assert_eq!(out.preedit.text, "にほん");
+    }
+
+    #[test]
+    fn typing_a_letter_commits_the_choice_and_starts_a_new_word() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let out = e.process_key(KeyEvent::ch('k'));
+        assert_eq!(out.commit, "日本");
+        assert!(out.handled);
+        assert_eq!(out.preedit.text, "k");
+        assert!(out.candidates.is_none());
+    }
+
+    #[test]
+    fn a_digit_picks_that_candidate() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let out = e.process_key(KeyEvent::ch('2'));
+        assert_eq!(out.commit, "二本");
+        assert!(out.handled);
+    }
+
+    #[test]
+    fn a_digit_without_such_a_candidate_commits_and_passes_through() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let out = e.process_key(KeyEvent::ch('9'));
+        assert_eq!(out.commit, "日本");
+        assert!(!out.handled);
+    }
+
+    #[test]
+    fn other_keys_commit_the_choice_and_pass_through() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let out = key(&mut e, Key::Tab);
+        assert_eq!(out.commit, "日本");
+        assert!(!out.handled);
+        assert!(out.preedit.is_empty());
+    }
+
+    #[test]
+    fn shortcuts_commit_the_choice_and_pass_through() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let ctrl = KeyEvent {
+            key: Key::Char('c'),
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Modifiers::NONE
+            },
+        };
+        let out = e.process_key(ctrl);
+        assert_eq!(out.commit, "日本");
+        assert!(!out.handled);
+    }
+
+    #[test]
+    fn flush_commits_the_chosen_candidate() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        key(&mut e, Key::Space);
+        assert_eq!(e.flush(), "二本");
+        assert_eq!(e.flush(), "");
+    }
+
+    #[test]
+    fn reset_cancels_a_conversion() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        e.reset();
+        assert_eq!(e.flush(), "");
+        let out = key(&mut e, Key::Enter);
+        assert!(!out.handled, "nothing left to commit");
     }
 }
