@@ -32,7 +32,7 @@ jobs:
         os: [windows-latest, macos-latest]
     env:
       # Crates that must build on every OS (no Wayland/X11/Qt dependencies).
-      PORTABLE: -p ime-core -p engine-hangul -p engine-japanese -p easime-config -p easime-cli
+      PORTABLE: -p ime-core -p engine-hangul -p engine-japanese -p easime-dict-tool -p easime-config -p easime-cli
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -52,6 +52,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-deb cargo-generate-rpm
       - run: cargo build --release --locked -p easime
+      # CI packages a tiny dictionary built from the committed fixture so the
+      # job never downloads the big Mozc data; the release workflow builds the
+      # real one (same file name, see crates/easime/Cargo.toml).
+      - run: sh scripts/build-dictionary.sh sample
       - run: cargo deb -p easime --no-build
       - run: cargo generate-rpm -p crates/easime
       - name: Show package contents

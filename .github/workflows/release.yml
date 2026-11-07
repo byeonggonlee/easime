@@ -32,6 +32,19 @@ jobs:
           fi
 
       - run: cargo build --release --locked -p easime
+
+      # Download the pinned Mozc dictionary (checksums are verified, a
+      # mismatch fails the job) and convert it to
+      # target/dictionary/mozc.bin, which the package metadata installs as
+      # /usr/share/easime/dictionary/mozc.bin.
+      - name: Build the Mozc dictionary
+        run: sh scripts/build-dictionary.sh mozc
+      - name: The dictionary must be the real one, not the sample
+        run: |
+          size="$(stat -c %s target/dictionary/mozc.bin)"
+          echo "mozc.bin is $size bytes"
+          test "$size" -gt 10000000
+
       - run: cargo deb -p easime --no-build
       - run: cargo generate-rpm -p crates/easime
 
