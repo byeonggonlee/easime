@@ -272,4 +272,75 @@ mod tests {
         // Fully transparent pixels stay all zero.
         assert_eq!(&rgba[0..4], &[0, 0, 0, 0]);
     }
+
+    /// A system font with `ch`, or `None` (then the test skips itself).
+    fn any_system_font(ch: char) -> Option<FontVec> {
+        let found = crate::font::find_font(ch);
+        if found.is_none() {
+            eprintln!("SKIPPED: no installed font contains {ch:?}; glyph pixels not checked");
+        }
+        found
+    }
+
+    #[test]
+    fn latin_a_is_drawn_and_centred_when_any_font_exists() {
+        let Some(font) = any_system_font('A') else {
+            return;
+        };
+        let b = render('A', Some(&font), BOX_SIZE);
+        assert!(
+            b.glyph_pixels() > 20,
+            "got {} glyph pixels",
+            b.glyph_pixels()
+        );
+        assert_ink_centred(&b);
+    }
+
+    #[test]
+    fn cjk_glyphs_are_drawn_when_a_cjk_font_exists() {
+        for ch in ['한', 'あ', '中'] {
+            let Some(font) = any_system_font(ch) else {
+                continue;
+            };
+            let b = render(ch, Some(&font), BOX_SIZE);
+            assert!(
+                b.glyph_pixels() > 40,
+                "{ch}: {} glyph pixels",
+                b.glyph_pixels()
+            );
+            assert_ink_centred(&b);
+        }
+    }
+
+    #[test]
+    fn a_glyph_the_font_lacks_draws_no_tofu() {
+        let Some(font) = any_system_font('A') else {
+            return;
+        };
+        // A plane-16 private-use codepoint that no real font maps.
+        let b = render('\u{10FFFD}', Some(&font), BOX_SIZE);
+        assert_eq!(b.glyph_pixels(), 0);
+    }
+
+    /// The bright pixels' centre of mass is near the middle of the box.
+    fn assert_ink_centred(b: &Bitmap) {
+        let (mut sx, mut sy, mut n) = (0.0f32, 0.0f32, 0.0f32);
+        for y in 0..b.height {
+            for x in 0..b.width {
+                let p = b.argb(x, y);
+                if p[0] != 0 && p[1].max(p[2]).max(p[3]) > 0x70 {
+                    sx += x as f32;
+                    sy += y as f32;
+                    n += 1.0;
+                }
+            }
+        }
+        assert!(n > 0.0, "no ink");
+        let (cx, cy) = (sx / n, sy / n);
+        let mid = (b.width as f32 - 1.0) / 2.0;
+        assert!(
+            (cx - mid).abs() < 4.0 && (cy - mid).abs() < 4.0,
+            "ink centre {cx},{cy}"
+        );
+    }
 }
