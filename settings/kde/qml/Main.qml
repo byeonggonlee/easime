@@ -155,36 +155,67 @@ Kirigami.ApplicationWindow {
         console.info("SETTINGS-WINDOW-LOADED pages=" + entries.length)
     }
 
+    // What the screenshot tour does, one action per tick: show a page, take its
+    // picture, use its controls, take the picture again. A picture is taken
+    // while its page is still on screen and never right before the next page
+    // replaces it (the grab is rendered on the next frame).
+    function planTour() {
+        var plan = []
+        for (var i = 0; i < entries.length; ++i) {
+            var name = entries[i].name
+            plan.push({ kind: "show", index: i })
+            if (i === 0) {
+                plan.push({ kind: "sidebar" })
+            }
+            plan.push({ kind: "capture", name: name, describe: true })
+            if (name === "languages" || name === "shortcuts" || name === "appearance") {
+                plan.push({ kind: "interact", name: name })
+                plan.push({ kind: "capture", name: name + "-after", describe: false })
+            }
+        }
+        return plan
+    }
+
+    readonly property var tourPlan: planTour()
+
     Timer {
         id: tour
 
-        property int step: 0
+        property int next: 0
 
         interval: 900
         repeat: true
         running: root.screenshotDir !== ""
         onTriggered: {
-            if (step > 0) {
-                var name = root.entries[step - 1].name
-                var lines = []
-                describe(root.pageStack.currentItem, root.pageStack.currentItem, 0, lines)
-                console.info("STRUCTURE " + name + " (" + root.pageStack.currentItem.width + "x"
-                    + root.pageStack.currentItem.height + ")\n" + lines.join("\n"))
-                interact(name, root.pageStack.currentItem)
-                var path = root.screenshotDir + "/" + name + ".png"
-                var requested = root.pageStack.grabToImage(function (result) {
-                    console.info("SCREENSHOT " + name + " " + result.saveToFile(path))
-                })
-                console.info("GRAB-REQUESTED " + name + " " + requested
-                    + " size=" + root.pageStack.width + "x" + root.pageStack.height
-                    + " drawer=" + root.globalDrawer.visible + "/" + root.globalDrawer.width)
-            }
-            if (step < root.entries.length) {
-                root.show(step)
-                step += 1
-            } else {
+            var action = root.tourPlan[next]
+            next += 1
+            if (action === undefined) {
                 stop()
                 quitLater.start()
+                return
+            }
+            var page = root.pageStack.currentItem
+            if (action.kind === "show") {
+                root.show(action.index)
+            } else if (action.kind === "sidebar") {
+                var side = root.globalDrawer.contentItem
+                var rows = []
+                root.describe(side, side, 0, rows)
+                console.info("STRUCTURE sidebar (" + side.width + "x" + side.height + ")\n" + rows.join("\n"))
+            } else if (action.kind === "capture") {
+                if (action.describe) {
+                    var lines = []
+                    root.describe(page, page, 0, lines)
+                    console.info("STRUCTURE " + action.name + " (" + page.width + "x" + page.height + ")\n"
+                        + lines.join("\n"))
+                }
+                var path = root.screenshotDir + "/" + action.name + ".png"
+                var requested = root.pageStack.grabToImage(function (result) {
+                    console.info("SCREENSHOT " + action.name + " " + result.saveToFile(path))
+                })
+                console.info("GRAB-REQUESTED " + action.name + " " + requested)
+            } else if (action.kind === "interact") {
+                root.interact(action.name, page)
             }
         }
     }

@@ -119,6 +119,9 @@ enum Outcome {
 impl qobject::EasimeSettings {
     /// Run `action` on the model, show what it did, and refresh the pages.
     fn run(mut self: Pin<&mut Self>, action: impl FnOnce(&mut Model) -> Result<Outcome, Failure>) {
+        // Start from a blank result: two "saved" in a row are still two changes
+        // for the pages that react to them.
+        self.as_mut().set_result_kind(QString::default());
         let outcome = {
             let rust = self.as_mut().rust_mut();
             let rust = rust.get_mut();
@@ -128,9 +131,10 @@ impl qobject::EasimeSettings {
             Outcome::Done(kind, detail) => (kind.to_owned(), detail),
             Outcome::Failed(failure) => (failure_code(failure.kind).to_owned(), failure.detail),
         };
-        self.as_mut().set_result_kind(QString::from(kind.as_str()));
+        // The detail first: a page reads it when the kind changes.
         self.as_mut()
             .set_result_detail(QString::from(detail.as_str()));
+        self.as_mut().set_result_kind(QString::from(kind.as_str()));
         self.refresh();
     }
 

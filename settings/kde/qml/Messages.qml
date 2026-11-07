@@ -1,11 +1,44 @@
 // What went wrong with the settings file, and what the last action did.
+//
+// Good news ("saved") is a short message at the bottom of the window, so it
+// never moves the controls the user is working with; only problems take room
+// on the page.
 import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.easime.settings
 
 ColumnLayout {
+    id: messages
+
+    readonly property var failures: ["unreadable", "no_home", "write_failed", "invalid"]
+
+    function goodNews(kind, detail) {
+        switch (kind) {
+        case "saved":
+            return qsTr("저장했습니다. 실행 중인 easime에 곧 반영됩니다.")
+        case "reloaded":
+            return qsTr("설정 파일을 다시 읽었습니다.")
+        case "reset":
+            return detail !== ""
+                ? qsTr("기본값으로 되돌렸습니다. 이전 파일은 %1에 보관했습니다.").arg(detail)
+                : qsTr("기본값으로 되돌렸습니다.")
+        }
+        return ""
+    }
+
     spacing: Kirigami.Units.smallSpacing
+
+    Connections {
+        target: EasimeSettings
+
+        function onResultKindChanged() {
+            var text = messages.goodNews(EasimeSettings.resultKind, EasimeSettings.resultDetail)
+            if (text !== "" && Window.window) {
+                Window.window.showPassiveNotification(text, EasimeSettings.resultKind === "reset" ? 8000 : 3000)
+            }
+        }
+    }
 
     Kirigami.InlineMessage {
         Layout.fillWidth: true
@@ -32,20 +65,10 @@ ColumnLayout {
 
     Kirigami.InlineMessage {
         Layout.fillWidth: true
-        visible: EasimeSettings.resultKind !== ""
-        type: ["saved", "reset", "reloaded"].indexOf(EasimeSettings.resultKind) >= 0
-            ? Kirigami.MessageType.Positive
-            : Kirigami.MessageType.Warning
+        visible: messages.failures.indexOf(EasimeSettings.resultKind) >= 0
+        type: Kirigami.MessageType.Warning
         text: {
             switch (EasimeSettings.resultKind) {
-            case "saved":
-                return qsTr("저장했습니다. 실행 중인 easime에 곧 반영됩니다.")
-            case "reloaded":
-                return qsTr("설정 파일을 다시 읽었습니다.")
-            case "reset":
-                return EasimeSettings.resultDetail !== ""
-                    ? qsTr("기본값으로 되돌렸습니다. 이전 파일은 %1에 보관했습니다.").arg(EasimeSettings.resultDetail)
-                    : qsTr("기본값으로 되돌렸습니다.")
             case "unreadable":
                 return qsTr("설정 파일을 읽을 수 없어 저장하지 않았습니다.")
             case "no_home":

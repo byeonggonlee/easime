@@ -132,7 +132,7 @@ jobs:
           cat home/.config/easime/config.toml
           test "$code" = 0
           grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
-          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 5
+          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 8
           # Clicking the real controls must change the settings and the file.
           grep -q 'INTERACTION japanese-on languages=korean,japanese switch=true result=saved' settings.log
           grep -q 'INTERACTION toggle-key=hangul hangul=true both=false' settings.log
