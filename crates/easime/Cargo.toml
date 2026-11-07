@@ -9,3 +9,39 @@ authors.workspace = true
 
 [dependencies]
 frontend-wayland = { path = "../frontend-wayland" }
+
+# --- Linux packages -------------------------------------------------------
+# .deb: `cargo deb -p easime`   .rpm: `cargo generate-rpm -p crates/easime`
+# Both expect `cargo build --release -p easime` to have run first.
+
+[package.metadata.deb]
+name = "easime"
+maintainer = "Byeonggon Lee <byeonggonlee@gmail.com>"
+section = "utils"
+priority = "optional"
+depends = "$auto"
+extended-description = """\
+Easy Eastern Asian IME: a Korean (and soon Japanese and Chinese) input \
+method for KDE Plasma 6 on Wayland, written in Rust. After installing, \
+select it in System Settings > Keyboard > Virtual Keyboard."""
+assets = [
+    ["target/release/easime", "usr/bin/", "755"],
+    ["../../data/easime.desktop", "usr/share/applications/", "644"],
+    ["../../README.md", "usr/share/doc/easime/", "644"],
+    ["../../LICENSE-MIT", "usr/share/doc/easime/", "644"],
+    ["../../LICENSE-APACHE", "usr/share/doc/easime/", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "easime"
+summary = "Easy Eastern Asian IME for KDE Plasma 6 (Wayland)"
+assets = [
+    { source = "target/release/easime", dest = "/usr/bin/easime", mode = "0755" },
+    { source = "data/easime.desktop", dest = "/usr/share/applications/easime.desktop", mode = "0644" },
+    { source = "README.md", dest = "/usr/share/doc/easime/README.md", mode = "0644", doc = true },
+    { source = "LICENSE-MIT", dest = "/usr/share/licenses/easime/LICENSE-MIT", mode = "0644", license = true },
+    { source = "LICENSE-APACHE", dest = "/usr/share/licenses/easime/LICENSE-APACHE", mode = "0644", license = true },
+]
+
+[package.metadata.generate-rpm.requires]
+libxkbcommon = "*"
