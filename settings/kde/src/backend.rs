@@ -1,0 +1,222 @@
+//! The QObject the QML pages talk to. It owns the [`Model`], turns the
+//! model's state into properties (so bindings update), and reports what
+//! happened after each action in `resultKind` / `resultDetail`.
+
+use crate::model::{Failure, Model, backspace_from_code, language_from_code, toggle_key_from_code};
+use crate::view::{View, failure_code, log_file};
+use core::pin::Pin;
+use cxx_qt::CxxQtType;
+use cxx_qt_lib::QString;
+
+#[cxx_qt::bridge]
+pub mod qobject {
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/qstring.h");
+        type QString = cxx_qt_lib::QString;
+    }
+
+    unsafe extern "RustQt" {
+        #[qobject]
+        #[qml_element]
+        #[qml_singleton]
+        #[qproperty(QString, languages)]
+        #[qproperty(QString, toggle_key, cxx_name = "toggleKey")]
+        #[qproperty(QString, backspace)]
+        #[qproperty(bool, indicator_box, cxx_name = "indicatorBox")]
+        #[qproperty(i32, indicator_ms, cxx_name = "indicatorMs")]
+        #[qproperty(QString, problem_kind, cxx_name = "problemKind")]
+        #[qproperty(QString, problem_detail, cxx_name = "problemDetail")]
+        #[qproperty(QString, result_kind, cxx_name = "resultKind")]
+        #[qproperty(QString, result_detail, cxx_name = "resultDetail")]
+        #[qproperty(QString, config_path, cxx_name = "configPath")]
+        #[qproperty(QString, log_path, cxx_name = "logPath")]
+        type EasimeSettings = super::EasimeSettingsRust;
+
+        #[qinvokable]
+        #[cxx_name = "setLanguageEnabled"]
+        fn set_language_enabled(self: Pin<&mut EasimeSettings>, code: &QString, enabled: bool);
+
+        #[qinvokable]
+        #[cxx_name = "moveLanguage"]
+        fn move_language(self: Pin<&mut EasimeSettings>, code: &QString, up: bool);
+
+        #[qinvokable]
+        #[cxx_name = "applyToggleKey"]
+        fn set_toggle_key_code(self: Pin<&mut EasimeSettings>, code: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "applyBackspace"]
+        fn set_backspace_code(self: Pin<&mut EasimeSettings>, code: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "applyIndicatorBox"]
+        fn set_indicator_box_shown(self: Pin<&mut EasimeSettings>, shown: bool);
+
+        #[qinvokable]
+        #[cxx_name = "applyIndicatorMs"]
+        fn set_indicator_milliseconds(self: Pin<&mut EasimeSettings>, milliseconds: i32);
+
+        #[qinvokable]
+        fn reload(self: Pin<&mut EasimeSettings>);
+
+        #[qinvokable]
+        #[cxx_name = "resetToDefaults"]
+        fn reset_to_defaults(self: Pin<&mut EasimeSettings>);
+    }
+}
+
+pub struct EasimeSettingsRust {
+    languages: QString,
+    toggle_key: QString,
+    backspace: QString,
+    indicator_box: bool,
+    indicator_ms: i32,
+    problem_kind: QString,
+    problem_detail: QString,
+    result_kind: QString,
+    result_detail: QString,
+    config_path: QString,
+    log_path: QString,
+    model: Model,
+}
+
+impl Default for EasimeSettingsRust {
+    fn default() -> Self {
+        let model = Model::open(easime_config::config_path());
+        let view = View::of(&model);
+        let path_text = |path: Option<&std::path::Path>| {
+            path.map(|p| QString::from(p.to_string_lossy().as_ref()))
+                .unwrap_or_default()
+        };
+        Self {
+            languages: QString::from(view.languages.as_str()),
+            toggle_key: QString::from(view.toggle_key.as_str()),
+            backspace: QString::from(view.backspace.as_str()),
+            indicator_box: view.indicator_box,
+            indicator_ms: view.indicator_ms,
+            problem_kind: QString::from(view.problem_kind.as_str()),
+            problem_detail: QString::from(view.problem_detail.as_str()),
+            result_kind: QString::default(),
+            result_detail: QString::default(),
+            config_path: path_text(model.path()),
+            log_path: path_text(log_file(|name| std::env::var_os(name)).as_deref()),
+            model,
+        }
+    }
+}
+
+/// What an action reports back to the pages.
+enum Outcome {
+    /// Saved (a change) or done (reload, reset, with an optional detail).
+    Done(&'static str, String),
+    Failed(Failure),
+}
+
+impl qobject::EasimeSettings {
+    /// Run `action` on the model, show what it did, and refresh the pages.
+    fn run(mut self: Pin<&mut Self>, action: impl FnOnce(&mut Model) -> Result<Outcome, Failure>) {
+        let outcome = {
+            let rust = self.as_mut().rust_mut();
+            let rust = rust.get_mut();
+            action(&mut rust.model).unwrap_or_else(Outcome::Failed)
+        };
+        let (kind, detail) = match outcome {
+            Outcome::Done(kind, detail) => (kind.to_owned(), detail),
+            Outcome::Failed(failure) => (failure_code(failure.kind).to_owned(), failure.detail),
+        };
+        self.as_mut().set_result_kind(QString::from(kind.as_str()));
+        self.as_mut()
+            .set_result_detail(QString::from(detail.as_str()));
+        self.refresh();
+    }
+
+    /// Put the model's current state into the properties.
+    fn refresh(mut self: Pin<&mut Self>) {
+        let view = View::of(&self.as_ref().rust().model);
+        self.as_mut()
+            .set_languages(QString::from(view.languages.as_str()));
+        self.as_mut()
+            .set_toggle_key(QString::from(view.toggle_key.as_str()));
+        self.as_mut()
+            .set_backspace(QString::from(view.backspace.as_str()));
+        self.as_mut().set_indicator_box(view.indicator_box);
+        self.as_mut().set_indicator_ms(view.indicator_ms);
+        self.as_mut()
+            .set_problem_kind(QString::from(view.problem_kind.as_str()));
+        self.as_mut()
+            .set_problem_detail(QString::from(view.problem_detail.as_str()));
+    }
+
+    fn set_language_enabled(self: Pin<&mut Self>, code: &QString, enabled: bool) {
+        let language = language_from_code(&code.to_string());
+        self.run(|model| {
+            let language = language.ok_or_else(invalid)?;
+            model.set_language_enabled(language, enabled)?;
+            Ok(Outcome::Done("saved", String::new()))
+        });
+    }
+
+    fn move_language(self: Pin<&mut Self>, code: &QString, up: bool) {
+        let language = language_from_code(&code.to_string());
+        self.run(|model| {
+            let language = language.ok_or_else(invalid)?;
+            model.move_language(language, up)?;
+            Ok(Outcome::Done("saved", String::new()))
+        });
+    }
+
+    fn set_toggle_key_code(self: Pin<&mut Self>, code: &QString) {
+        let key = toggle_key_from_code(&code.to_string());
+        self.run(|model| {
+            model.set_toggle_key(key.ok_or_else(invalid)?)?;
+            Ok(Outcome::Done("saved", String::new()))
+        });
+    }
+
+    fn set_backspace_code(self: Pin<&mut Self>, code: &QString) {
+        let unit = backspace_from_code(&code.to_string());
+        self.run(|model| {
+            model.set_backspace(unit.ok_or_else(invalid)?)?;
+            Ok(Outcome::Done("saved", String::new()))
+        });
+    }
+
+    fn set_indicator_box_shown(self: Pin<&mut Self>, shown: bool) {
+        self.run(|model| {
+            model.set_indicator_box(shown)?;
+            Ok(Outcome::Done("saved", String::new()))
+        });
+    }
+
+    fn set_indicator_milliseconds(self: Pin<&mut Self>, milliseconds: i32) {
+        self.run(|model| {
+            let milliseconds = u32::try_from(milliseconds).map_err(|_| invalid())?;
+            model.set_indicator_ms(milliseconds)?;
+            Ok(Outcome::Done("saved", String::new()))
+        });
+    }
+
+    fn reload(self: Pin<&mut Self>) {
+        self.run(|model| {
+            model.reload();
+            Ok(Outcome::Done("reloaded", String::new()))
+        });
+    }
+
+    fn reset_to_defaults(self: Pin<&mut Self>) {
+        self.run(|model| {
+            let backup = model.reset_to_defaults()?;
+            let detail = backup
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(Outcome::Done("reset", detail))
+        });
+    }
+}
+
+fn invalid() -> Failure {
+    Failure {
+        kind: crate::model::FailureKind::Invalid,
+        detail: String::new(),
+    }
+}

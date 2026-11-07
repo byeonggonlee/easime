@@ -1,0 +1,25 @@
+[package]
+name = "easime-settings"
+description = "easime settings window for KDE Plasma (Qt 6 and Kirigami)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/byeonggonlee/easime"
+publish = false
+
+# Its own workspace: this needs Qt 6 and Kirigami, which the main workspace
+# (and the OS independent CI jobs) must not require.
+[workspace]
+
+[dependencies]
+easime-config = { path = "../../crates/easime-config" }
+ime-core = { path = "../../crates/ime-core" }
+cxx = "1"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_full"] }
+# Edits only the keys that change, so comments and unknown keys in a
+# hand-edited settings file survive.
+toml_edit = "0.25"
+
+[build-dependencies]
+cxx-qt-build = { version = "0.10", features = ["link_qt_object_files"] }

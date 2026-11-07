@@ -77,3 +77,59 @@ jobs:
             target/generate-rpm/*.rpm
           if-no-files-found: error
           retention-days: 30
+
+  # The settings window needs Qt 6 and Kirigami, so it is built in Fedora (the
+  # distribution the project targets) and is a separate cargo project that the
+  # jobs above never touch. It opens every page without a display and keeps a
+  # picture of each as an artifact.
+  settings:
+    name: Settings window (KDE, Fedora)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    # New job: it must be seen green before it is allowed to fail the CI.
+    continue-on-error: true
+    steps:
+      - name: Install Qt 6, Kirigami and the Rust toolchain
+        run: |
+          dnf -y install git cargo rust clippy rustfmt gcc-c++ \
+            qt6-qtbase-devel qt6-qtdeclarative-devel \
+            kf6-kirigami kf6-kirigami-devel kf6-qqc2-desktop-style \
+            google-noto-sans-cjk-fonts dejavu-sans-fonts
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: settings/kde
+      - name: Format and lint
+        working-directory: settings/kde
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+      - name: Test
+        working-directory: settings/kde
+        run: cargo test
+      - name: Build
+        working-directory: settings/kde
+        run: cargo build
+      - name: Open every page and take its picture
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+          XDG_RUNTIME_DIR: /tmp
+        run: |
+          mkdir -p shots home
+          export HOME="$PWD/home" XDG_CONFIG_HOME="$PWD/home/.config" XDG_STATE_HOME="$PWD/home/.state"
+          timeout 120 settings/kde/target/debug/easime-settings --screenshots="$PWD/shots" 2>&1 | tee settings.log
+          grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
+          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 5
+          if grep -Ei 'is not installed|is not a type|unable to assign|cannot assign|ReferenceError|TypeError|failed to load|is not defined' settings.log; then
+            echo "QML reported errors (above)"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: settings-window-pages
+          path: |
+            shots/*.png
+            settings.log
+          if-no-files-found: warn
+          retention-days: 30

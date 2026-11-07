@@ -16,3 +16,6 @@
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# The settings app is its own cargo project (it needs Qt 6 and Kirigami)
+/settings/kde/target/
