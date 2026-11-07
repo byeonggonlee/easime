@@ -89,7 +89,7 @@ jobs:
     steps:
       - name: Install Qt 6, Kirigami and the Rust toolchain
         run: |
-          dnf -y install git cargo rust clippy rustfmt gcc-c++ \
+          dnf -y install git python3 cargo rust clippy rustfmt gcc-c++ \
             qt6-qtbase-devel qt6-qtdeclarative-devel \
             kf6-kirigami kf6-kirigami-devel kf6-qqc2-desktop-style \
             google-noto-sans-cjk-fonts dejavu-sans-fonts breeze-icon-theme
@@ -105,10 +105,21 @@ jobs:
       - name: Test
         working-directory: settings/kde
         run: cargo test
+      - name: Check the translations
+        working-directory: settings/kde
+        run: |
+          python3 tests/check_translations.py
+          # The display language logic, without any window.
+          runner=/usr/lib64/qt6/bin/qmltestrunner
+          if [ -x "$runner" ]; then
+            QT_QPA_PLATFORM=offscreen QT_LOGGING_TO_CONSOLE=1 "$runner" -input tests/tst_tr.qml
+          else
+            echo "SKIPPED: $runner is not installed; only the static translation check ran"
+          fi
       - name: Build
         working-directory: settings/kde
         run: cargo build
-      - name: Open every page and take its picture
+      - name: Open every page in every display language
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
@@ -119,41 +130,86 @@ jobs:
           LANG: C.UTF-8
           QT_FORCE_STDERR_LOGGING: "1"
         run: |
-          mkdir -p shots home
-          export HOME="$PWD/home" XDG_CONFIG_HOME="$PWD/home/.config" XDG_STATE_HOME="$PWD/home/.state"
-          set +e
-          timeout 120 settings/kde/target/debug/easime-settings --screenshots="$PWD/shots" > settings.log 2>&1
-          code=$?
-          set -e
-          echo "exit code: $code"
-          echo "--- output of the settings window:"
-          cat settings.log
-          echo "--- settings file after the clicks:"
-          cat home/.config/easime/config.toml
-          test "$code" = 0
-          grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
-          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 8
-          # Clicking the real controls must change the settings and the file.
-          grep -q 'INTERACTION japanese-on languages=korean,japanese switch=true result=saved' settings.log
-          grep -q 'INTERACTION toggle-key=hangul hangul=true both=false' settings.log
-          grep -q 'INTERACTION indicator-box=false checkbox=false' settings.log
-          grep -q 'enabled = \["korean", "japanese"\]' home/.config/easime/config.toml
-          grep -q 'toggle_key = "hangul"' home/.config/easime/config.toml
-          grep -q 'indicator_box = false' home/.config/easime/config.toml
-          # QML warnings start with the file they come from (qrc:/...), or say
-          # <Unknown File>; the window's own checkpoints start with "qml:".
-          # Kirigami creates each page without a parent and puts it in the page
-          # row afterwards, which Qt reports once per page; the pages do render.
-          grep -v 'Created graphical object was not placed in the graphics scene' settings.log > settings.checked || true
-          if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.checked; then
-            echo "QML reported warnings or errors (above)"; exit 1
-          fi
+          fail=0
+          check() {
+            if ! "$@"; then echo "FAILED ($lang): $*"; fail=1; fi
+          }
+          mkdir -p shots
+
+          # Each display language gets its own home, so every run starts from
+          # the default settings and the clicks can be checked in the file.
+          for lang in ko en ja zh-Hant zh-Hans; do
+            echo "::group::display language $lang"
+            log="settings-$lang.log"
+            cfg="home-$lang/.config/easime/config.toml"
+            rm -rf "home-$lang"; mkdir -p "shots/$lang" "home-$lang"
+            set +e
+            HOME="$PWD/home-$lang" XDG_CONFIG_HOME="$PWD/home-$lang/.config" XDG_STATE_HOME="$PWD/home-$lang/.state" \
+              timeout 120 settings/kde/target/debug/easime-settings --ui-language="$lang" --screenshots="$PWD/shots/$lang" > "$log" 2>&1
+            code=$?
+            set -e
+            echo "exit code: $code"
+            # The page contents (indented lines) only for Korean; the rest of
+            # the languages print the checkpoints.
+            if [ "$lang" = ko ]; then cat "$log"; else grep -v '^ ' "$log"; fi
+            echo "--- settings file after the clicks:"; cat "$cfg" || true
+            echo "::endgroup::"
+
+            check test "$code" = 0
+            check grep -q "UI-LANGUAGE $lang\$" "$log"
+            check grep -q 'SETTINGS-WINDOW-LOADED pages=5' "$log"
+            check test "$(grep -c 'SCREENSHOT .* true' "$log" || true)" = 8
+            # Clicking the real controls must change the settings and the file.
+            check grep -q 'INTERACTION japanese-on languages=korean,japanese switch=true result=saved' "$log"
+            check grep -q 'INTERACTION toggle-key=hangul hangul=true both=false' "$log"
+            check grep -q 'INTERACTION indicator-box=false checkbox=false' "$log"
+            check grep -q 'enabled = \["korean", "japanese"\]' "$cfg"
+            check grep -q 'toggle_key = "hangul"' "$cfg"
+            check grep -q 'indicator_box = false' "$cfg"
+            # Every text has a translation.
+            if grep -E 'MISSING-TRANSLATION|TRANSLATIONS-INCOMPLETE' "$log"; then
+              echo "FAILED ($lang): untranslated text (above)"; fail=1
+            fi
+            # QML warnings start with the file they come from (qrc:/...), or say
+            # <Unknown File>; the window's own checkpoints start with "qml:".
+            # Kirigami creates each page without a parent and puts it in the
+            # page row afterwards, which Qt reports once per page; the pages do
+            # render.
+            grep -v 'Created graphical object was not placed in the graphics scene' "$log" > "$log.checked" || true
+            if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' "$log.checked"; then
+              echo "FAILED ($lang): QML reported warnings or errors (above)"; fail=1
+            fi
+          done
+
+          # Without --ui-language the system language decides.
+          echo "::group::display language from the system language"
+          mkdir -p home-detect
+          detect() {
+            got=$(env -u LANGUAGE -u LC_ALL HOME="$PWD/home-detect" XDG_CONFIG_HOME="$PWD/home-detect/.config" "$1" \
+              timeout 15 settings/kde/target/debug/easime-settings 2>&1 | grep -m1 'UI-LANGUAGE' | sed 's/.*UI-LANGUAGE //' || true)
+            echo "$1 -> $got (expected $2)"
+            if [ "$got" != "$2" ]; then echo "FAILED: $1 gave '$got', expected '$2'"; fail=1; fi
+          }
+          detect LANG=ko_KR.UTF-8 ko
+          detect LANG=ja_JP.UTF-8 ja
+          detect LANG=zh_TW.UTF-8 zh-Hant
+          detect LANG=zh_HK.UTF-8 zh-Hant
+          detect LANG=zh_CN.UTF-8 zh-Hans
+          detect LANG=fr_FR.UTF-8 en
+          detect LANG=C.UTF-8 en
+          got=$(env -u LC_ALL LANGUAGE=ja HOME="$PWD/home-detect" XDG_CONFIG_HOME="$PWD/home-detect/.config" \
+            timeout 15 settings/kde/target/debug/easime-settings 2>&1 | grep -m1 'UI-LANGUAGE' | sed 's/.*UI-LANGUAGE //' || true)
+          echo "LANGUAGE=ja -> $got (expected ja)"
+          if [ "$got" != "ja" ]; then echo "FAILED: LANGUAGE=ja gave '$got'"; fail=1; fi
+          echo "::endgroup::"
+
+          test "$fail" = 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: settings-window-pages
           path: |
-            shots/*.png
-            settings.log
+            shots/*/*.png
+            settings-*.log
           if-no-files-found: warn
           retention-days: 30

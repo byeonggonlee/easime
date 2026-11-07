@@ -7,6 +7,7 @@ import QtQuick
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.easime.settings
+import "tr.js" as Tr
 
 ColumnLayout {
     id: messages
@@ -16,13 +17,13 @@ ColumnLayout {
     function goodNews(kind, detail) {
         switch (kind) {
         case "saved":
-            return qsTr("저장했습니다. 실행 중인 easime에 곧 반영됩니다.")
+            return Tr.t("저장했습니다. 실행 중인 easime에 곧 반영됩니다.")
         case "reloaded":
-            return qsTr("설정 파일을 다시 읽었습니다.")
+            return Tr.t("설정 파일을 다시 읽었습니다.")
         case "reset":
             return detail !== ""
-                ? qsTr("기본값으로 되돌렸습니다. 이전 파일은 %1에 보관했습니다.").arg(detail)
-                : qsTr("기본값으로 되돌렸습니다.")
+                ? Tr.t("기본값으로 되돌렸습니다. 이전 파일은 %1에 보관했습니다.").arg(detail)
+                : Tr.t("기본값으로 되돌렸습니다.")
         }
         return ""
     }
@@ -54,16 +55,16 @@ ColumnLayout {
         text: {
             switch (EasimeSettings.problemKind) {
             case "unreadable":
-                return qsTr("설정 파일을 읽지 못해 기본값을 보여 드리고 있습니다. 파일을 직접 고친 뒤 '다시 읽기'를 누르거나, '일반'에서 '기본값으로 되돌리기'를 눌러 새로 시작하세요. 읽을 수 없는 동안에는 파일을 지우지 않도록 변경을 저장하지 않습니다.")
+                return Tr.t("설정 파일을 읽지 못해 기본값을 보여 드리고 있습니다. 파일을 직접 고친 뒤 '다시 읽기'를 누르거나, '일반'에서 '기본값으로 되돌리기'를 눌러 새로 시작하세요. 읽을 수 없는 동안에는 파일을 지우지 않도록 변경을 저장하지 않습니다.")
                     + "\n" + EasimeSettings.problemDetail
             case "no_home":
-                return qsTr("홈 폴더를 찾지 못해 설정을 저장할 수 없습니다.")
+                return Tr.t("홈 폴더를 찾지 못해 설정을 저장할 수 없습니다.")
             }
             return ""
         }
         actions: [
             Kirigami.Action {
-                text: qsTr("다시 읽기")
+                text: Tr.t("다시 읽기")
                 icon.name: "view-refresh"
                 onTriggered: EasimeSettings.reload()
             }
@@ -77,13 +78,13 @@ ColumnLayout {
         text: {
             switch (EasimeSettings.resultKind) {
             case "unreadable":
-                return qsTr("설정 파일을 읽을 수 없어 저장하지 않았습니다.")
+                return Tr.t("설정 파일을 읽을 수 없어 저장하지 않았습니다.")
             case "no_home":
-                return qsTr("홈 폴더를 찾지 못해 저장하지 못했습니다.")
+                return Tr.t("홈 폴더를 찾지 못해 저장하지 못했습니다.")
             case "write_failed":
-                return qsTr("저장하지 못했습니다. 변경하기 전 값을 그대로 보여 드립니다.") + "\n" + EasimeSettings.resultDetail
+                return Tr.t("저장하지 못했습니다. 변경하기 전 값을 그대로 보여 드립니다.") + "\n" + EasimeSettings.resultDetail
             case "invalid":
-                return qsTr("알 수 없는 값이라 적용하지 않았습니다.")
+                return Tr.t("알 수 없는 값이라 적용하지 않았습니다.")
             }
             return ""
         }

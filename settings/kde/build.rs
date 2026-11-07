@@ -5,6 +5,7 @@ fn main() {
         "qml/Main.qml",
         "qml/Messages.qml",
         "qml/Choice.qml",
+        "qml/tr.js",
         "qml/GeneralPage.qml",
         "qml/LanguagesPage.qml",
         "qml/ShortcutsPage.qml",

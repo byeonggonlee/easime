@@ -2,11 +2,12 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.easime.settings
+import "tr.js" as Tr
 
 Kirigami.ApplicationWindow {
     id: root
 
-    title: qsTr("easime 설정")
+    title: Tr.t("easime 설정")
     width: Kirigami.Units.gridUnit * 46
     height: Kirigami.Units.gridUnit * 30
     minimumWidth: Kirigami.Units.gridUnit * 30
@@ -26,11 +27,11 @@ Kirigami.ApplicationWindow {
 
     property int current: -1
     readonly property var entries: [
-        { name: "general", file: "GeneralPage.qml", title: qsTr("일반"), icon: "configure" },
-        { name: "languages", file: "LanguagesPage.qml", title: qsTr("언어"), icon: "preferences-desktop-locale" },
-        { name: "shortcuts", file: "ShortcutsPage.qml", title: qsTr("단축키"), icon: "preferences-desktop-keyboard-shortcut" },
-        { name: "korean", file: "KoreanPage.qml", title: qsTr("한국어"), icon: "input-keyboard" },
-        { name: "appearance", file: "AppearancePage.qml", title: qsTr("모양"), icon: "preferences-desktop-theme" }
+        { name: "general", file: "GeneralPage.qml", title: Tr.t("일반"), icon: "configure" },
+        { name: "languages", file: "LanguagesPage.qml", title: Tr.t("언어"), icon: "preferences-desktop-locale" },
+        { name: "shortcuts", file: "ShortcutsPage.qml", title: Tr.t("단축키"), icon: "preferences-desktop-keyboard-shortcut" },
+        { name: "korean", file: "KoreanPage.qml", title: Tr.t("한국어"), icon: "input-keyboard" },
+        { name: "appearance", file: "AppearancePage.qml", title: Tr.t("모양"), icon: "preferences-desktop-theme" }
     ]
 
     // One line per visible item that has text: what it says, where it is on
