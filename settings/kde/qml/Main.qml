@@ -154,6 +154,8 @@ Kirigami.ApplicationWindow {
     Component.onCompleted: {
         show(0)
         console.info("SETTINGS-WINDOW-LOADED pages=" + entries.length)
+        console.info("INPUT-LANGUAGES languages=" + EasimeSettings.languages
+            + " follow-system=" + EasimeSettings.languagesFollowSystem)
     }
 
     // What the screenshot tour does, one action per tick: show a page, take its

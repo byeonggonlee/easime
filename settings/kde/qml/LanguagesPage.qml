@@ -36,6 +36,15 @@ Kirigami.ScrollablePage {
             text: Tr.t("쓰는 언어만 켜 두세요. 어느 언어도 꼭 켜야 하는 것은 아닙니다. 전환 키를 누를 때마다 아래 순서대로 바뀌며, 열려 있는 모든 창에 똑같이 적용됩니다.")
         }
 
+        // What decides the languages that are on now: not yet the user.
+        QQC2.Label {
+            Layout.fillWidth: true
+            visible: EasimeSettings.languagesFollowSystem
+            wrapMode: Text.WordWrap
+            opacity: 0.7
+            text: Tr.t("아직 직접 고르지 않아 시스템 언어에 맞춰져 있습니다. 직접 바꾸면 그 선택이 저장됩니다.")
+        }
+
         Repeater {
             model: [
                 { code: "korean", name: "한국어" },
@@ -84,15 +93,24 @@ Kirigami.ScrollablePage {
             }
         }
 
-        RowLayout {
-            Layout.fillWidth: true
-            enabled: false
-            QQC2.Switch {
-                text: "中文"
-                checked: false
-            }
-            QQC2.Label {
-                text: Tr.t("준비 중")
+        // Simplified and Traditional Chinese are separate entries, as on
+        // Windows and macOS. Neither has an engine yet.
+        Repeater {
+            model: ["简体中文", "繁體中文"]
+
+            delegate: RowLayout {
+                required property string modelData
+
+                Layout.fillWidth: true
+                enabled: false
+
+                QQC2.Switch {
+                    text: modelData
+                    checked: false
+                }
+                QQC2.Label {
+                    text: Tr.t("준비 중")
+                }
             }
         }
 

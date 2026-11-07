@@ -6,7 +6,7 @@
 //! does not know stay as they are. A file that cannot be read is never
 //! overwritten by a change.
 
-use easime_config::{BackspaceUnit, Config, ToggleKey};
+use easime_config::{AVAILABLE_LANGUAGES, BackspaceUnit, Config, ToggleKey};
 use ime_core::Language;
 use std::fs;
 use std::io;
@@ -15,7 +15,7 @@ use toml_edit::{DocumentMut, Item, Value};
 
 /// The languages that can be switched on today. Chinese has no engine yet, so
 /// offering it would show a choice that does nothing.
-pub const SELECTABLE: [Language; 2] = [Language::Korean, Language::Japanese];
+pub const SELECTABLE: [Language; 2] = AVAILABLE_LANGUAGES;
 
 /// The name used in the settings file.
 pub fn language_code(language: Language) -> &'static str {
@@ -23,7 +23,8 @@ pub fn language_code(language: Language) -> &'static str {
         Language::English => "english",
         Language::Korean => "korean",
         Language::Japanese => "japanese",
-        Language::Chinese => "chinese",
+        Language::ChineseSimplified => "chinese_simplified",
+        Language::ChineseTraditional => "chinese_traditional",
     }
 }
 
@@ -32,7 +33,8 @@ pub fn language_from_code(code: &str) -> Option<Language> {
         Language::English,
         Language::Korean,
         Language::Japanese,
-        Language::Chinese,
+        Language::ChineseSimplified,
+        Language::ChineseTraditional,
     ]
     .into_iter()
     .find(|&language| language_code(language) == code)
@@ -99,6 +101,9 @@ impl Failure {
 pub struct Model {
     path: Option<PathBuf>,
     config: Config,
+    /// The languages that match the system language: what is switched on
+    /// until the user chooses.
+    system: Vec<Language>,
     /// Set when the file could not be read; changes are refused meanwhile.
     problem: Option<Failure>,
 }
@@ -107,6 +112,11 @@ impl Model {
     /// Read the settings at `path`. If that fails the defaults are shown and
     /// [`Model::problem`] says why.
     pub fn open(path: Option<PathBuf>) -> Self {
+        Self::open_with_system(path, easime_config::system_languages())
+    }
+
+    /// Like [`Model::open`], with the system's languages given (for tests).
+    pub fn open_with_system(path: Option<PathBuf>, system: Vec<Language>) -> Self {
         let (config, problem) = match &path {
             None => (
                 Config::default(),
@@ -123,6 +133,7 @@ impl Model {
         Self {
             path,
             config,
+            system,
             problem,
         }
     }
@@ -142,7 +153,8 @@ impl Model {
 
     /// Read the file again, for example after it was edited by hand.
     pub fn reload(&mut self) {
-        *self = Self::open(self.path.take());
+        let system = std::mem::take(&mut self.system);
+        *self = Self::open_with_system(self.path.take(), system);
     }
 
     /// The enabled languages that exist today, in switching order. What the
@@ -150,11 +162,16 @@ impl Model {
     pub fn languages(&self) -> Vec<Language> {
         self.config
             .languages
-            .enabled
-            .iter()
-            .copied()
+            .resolved(&self.system)
+            .into_iter()
             .filter(|language| SELECTABLE.contains(language))
             .collect()
+    }
+
+    /// True while the user has not chosen languages, so the system language
+    /// decides which are on. The first change makes the choice explicit.
+    pub fn follows_system_language(&self) -> bool {
+        self.config.languages.follows_system()
     }
 
     pub fn set_language_enabled(
@@ -165,8 +182,7 @@ impl Model {
         if !SELECTABLE.contains(&language) {
             return Err(Failure::new(FailureKind::Invalid, language_code(language)));
         }
-        self.change(|config| {
-            let list = &mut config.languages.enabled;
+        self.change_languages(|list| {
             let present = list.contains(&language);
             if enabled && !present {
                 list.push(language);
@@ -179,8 +195,7 @@ impl Model {
     /// Move `language` one place earlier (`up`) or later in the switching
     /// order. Moving past either end does nothing.
     pub fn move_language(&mut self, language: Language, up: bool) -> Result<(), Failure> {
-        self.change(|config| {
-            let list = &mut config.languages.enabled;
+        self.change_languages(|list| {
             let Some(from) = list.iter().position(|&l| l == language) else {
                 return;
             };
@@ -193,6 +208,19 @@ impl Model {
                 list.swap(from, to);
             }
         })
+    }
+
+    /// Edit the languages as they are now (the system's until the user has
+    /// chosen). Only an edit that changes something makes the list the
+    /// user's own choice and writes it to the file.
+    fn change_languages(&mut self, edit: impl FnOnce(&mut Vec<Language>)) -> Result<(), Failure> {
+        let current = self.config.languages.resolved(&self.system);
+        let mut list = current.clone();
+        edit(&mut list);
+        if list == current {
+            return Ok(());
+        }
+        self.change(|config| config.languages.enabled = Some(list))
     }
 
     pub fn set_toggle_key(&mut self, key: ToggleKey) -> Result<(), Failure> {
@@ -269,9 +297,13 @@ fn save_changes(path: &Path, next: &Config) -> Result<(), Failure> {
     let on_disk = Config::from_toml(&text).map_err(|e| unreadable(&e))?;
     let mut doc: DocumentMut = text.parse().map_err(|e| unreadable(&e))?;
 
-    if on_disk.languages != next.languages {
+    // A language list is only written once the user has chosen one; until then
+    // the key stays absent and the system language decides.
+    if on_disk.languages != next.languages
+        && let Some(chosen) = &next.languages.enabled
+    {
         let mut codes = toml_edit::Array::new();
-        for &language in &next.languages.enabled {
+        for &language in chosen {
             codes.push(language_code(language));
         }
         set(&mut doc, "languages", "enabled", Value::Array(codes));
@@ -371,8 +403,15 @@ mod tests {
         }
     }
 
+    /// The system language the tests pretend to run under: Korean.
+    const SYSTEM: [Language; 1] = [Language::Korean];
+
     fn open(dir: &TempDir) -> Model {
-        Model::open(Some(dir.file()))
+        Model::open_with_system(Some(dir.file()), SYSTEM.to_vec())
+    }
+
+    fn open_on_system(dir: &TempDir, system: &[Language]) -> Model {
+        Model::open_with_system(Some(dir.file()), system.to_vec())
     }
 
     #[test]
@@ -386,7 +425,7 @@ mod tests {
 
     #[test]
     fn no_home_directory_is_reported_and_nothing_can_be_saved() {
-        let mut model = Model::open(None);
+        let mut model = Model::open_with_system(None, SYSTEM.to_vec());
         assert_eq!(model.problem().unwrap().kind, FailureKind::NoHome);
         let err = model.set_indicator_box(false).unwrap_err();
         assert_eq!(err.kind, FailureKind::NoHome);
@@ -492,7 +531,10 @@ extra = \"keep me\"
             .unwrap();
         model.set_language_enabled(Language::Korean, false).unwrap();
         assert_eq!(dir.read(), "[languages]\nenabled = [\"japanese\"]\n");
-        assert_eq!(open(&dir).config().languages.enabled, [Language::Japanese]);
+        assert_eq!(
+            open(&dir).config().languages.enabled,
+            Some(vec![Language::Japanese])
+        );
     }
 
     #[test]
@@ -502,22 +544,75 @@ extra = \"keep me\"
         model.set_language_enabled(Language::Korean, false).unwrap();
         assert!(model.languages().is_empty());
         assert_eq!(dir.read(), "[languages]\nenabled = []\n");
-        assert!(open(&dir).languages().is_empty());
+        // Choosing nothing is a choice: the system language no longer decides.
+        let reread = open(&dir);
+        assert!(reread.languages().is_empty());
+        assert!(!reread.follows_system_language());
+    }
+
+    #[test]
+    fn languages_follow_the_system_until_the_user_chooses() {
+        let dir = TempDir::new();
+        let model = open_on_system(&dir, &[Language::Japanese]);
+        assert_eq!(model.languages(), [Language::Japanese]);
+        assert!(model.follows_system_language());
+
+        // A system with no East Asian language starts with every language off.
+        let model = open_on_system(&dir, &[]);
+        assert!(model.languages().is_empty());
+        assert!(model.follows_system_language());
+
+        // The first real change keeps what was shown and makes it a choice.
+        let mut model = open_on_system(&dir, &[Language::Japanese]);
+        model.set_language_enabled(Language::Korean, true).unwrap();
+        assert_eq!(model.languages(), [Language::Japanese, Language::Korean]);
+        assert!(!model.follows_system_language());
+        assert_eq!(
+            dir.read(),
+            "[languages]\nenabled = [\"japanese\", \"korean\"]\n"
+        );
+        // The file now wins over any system language.
+        let reread = open_on_system(&dir, &[Language::Korean]);
+        assert_eq!(reread.languages(), [Language::Japanese, Language::Korean]);
+    }
+
+    #[test]
+    fn a_change_that_changes_nothing_does_not_make_a_choice() {
+        let dir = TempDir::new();
+        let mut model = open_on_system(&dir, &[Language::Korean]);
+        // Korean is already on, and moving the only language goes nowhere.
+        model.set_language_enabled(Language::Korean, true).unwrap();
+        model.move_language(Language::Korean, true).unwrap();
+        model.move_language(Language::Korean, false).unwrap();
+        model
+            .set_language_enabled(Language::Japanese, false)
+            .unwrap();
+        assert!(model.follows_system_language());
+        assert!(!dir.file().exists());
+    }
+
+    #[test]
+    fn other_changes_leave_the_language_choice_to_the_system() {
+        let dir = TempDir::new();
+        let mut model = open(&dir);
+        model.set_backspace(BackspaceUnit::Syllable).unwrap();
+        assert_eq!(dir.read(), "[korean]\nbackspace = \"syllable\"\n");
+        assert!(open(&dir).follows_system_language());
     }
 
     #[test]
     fn languages_without_an_engine_are_not_listed_or_offered() {
         let dir = TempDir::new();
-        dir.write("[languages]\nenabled = [\"chinese\", \"japanese\", \"english\"]\n");
+        dir.write("[languages]\nenabled = [\"chinese_simplified\", \"japanese\", \"english\"]\n");
         let mut model = open(&dir);
         assert_eq!(model.languages(), [Language::Japanese]);
-        let err = model
-            .set_language_enabled(Language::Chinese, true)
-            .unwrap_err();
-        assert_eq!(err.kind, FailureKind::Invalid);
+        for language in [Language::ChineseSimplified, Language::ChineseTraditional] {
+            let err = model.set_language_enabled(language, true).unwrap_err();
+            assert_eq!(err.kind, FailureKind::Invalid);
+        }
         // Hand-written entries stay in the file when something else changes.
         model.set_language_enabled(Language::Korean, true).unwrap();
-        assert!(dir.read().contains("\"chinese\""));
+        assert!(dir.read().contains("\"chinese_simplified\""));
     }
 
     #[test]
@@ -528,6 +623,7 @@ extra = \"keep me\"
         let mut model = open(&dir);
         assert_eq!(model.problem().unwrap().kind, FailureKind::Unreadable);
         assert_eq!(model.config(), &Config::default());
+        assert_eq!(model.languages(), [Language::Korean], "the system's");
 
         let err = model.set_indicator_box(false).unwrap_err();
         assert_eq!(err.kind, FailureKind::Unreadable);

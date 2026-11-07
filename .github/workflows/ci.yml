@@ -144,7 +144,10 @@ jobs:
             cfg="home-$lang/.config/easime/config.toml"
             rm -rf "home-$lang"; mkdir -p "shots/$lang" "home-$lang"
             set +e
-            HOME="$PWD/home-$lang" XDG_CONFIG_HOME="$PWD/home-$lang/.config" XDG_STATE_HOME="$PWD/home-$lang/.state" \
+            # The system language is neutral (C.UTF-8) so every run starts with
+            # all input languages off; the display language is forced.
+            env -u LANGUAGE -u LC_ALL LANG=C.UTF-8 \
+              HOME="$PWD/home-$lang" XDG_CONFIG_HOME="$PWD/home-$lang/.config" XDG_STATE_HOME="$PWD/home-$lang/.state" \
               timeout 120 settings/kde/target/debug/easime-settings --ui-language="$lang" --screenshots="$PWD/shots/$lang" > "$log" 2>&1
             code=$?
             set -e
@@ -160,10 +163,11 @@ jobs:
             check grep -q 'SETTINGS-WINDOW-LOADED pages=5' "$log"
             check test "$(grep -c 'SCREENSHOT .* true' "$log" || true)" = 8
             # Clicking the real controls must change the settings and the file.
-            check grep -q 'INTERACTION japanese-on languages=korean,japanese switch=true result=saved' "$log"
+            check grep -q 'INPUT-LANGUAGES languages= follow-system=true' "$log"
+            check grep -q 'INTERACTION japanese-on languages=japanese switch=true result=saved' "$log"
             check grep -q 'INTERACTION toggle-key=hangul hangul=true both=false' "$log"
             check grep -q 'INTERACTION indicator-box=false checkbox=false' "$log"
-            check grep -q 'enabled = \["korean", "japanese"\]' "$cfg"
+            check grep -q 'enabled = \["japanese"\]' "$cfg"
             check grep -q 'toggle_key = "hangul"' "$cfg"
             check grep -q 'indicator_box = false' "$cfg"
             # Every text has a translation.
@@ -201,6 +205,29 @@ jobs:
             timeout 15 settings/kde/target/debug/easime-settings 2>&1 | grep -m1 'UI-LANGUAGE' | sed 's/.*UI-LANGUAGE //' || true)
           echo "LANGUAGE=ja -> $got (expected ja)"
           if [ "$got" != "ja" ]; then echo "FAILED: LANGUAGE=ja gave '$got'"; fail=1; fi
+          echo "::endgroup::"
+
+          # Until the user chooses, the input languages follow the system
+          # language; anything but Korean or Japanese leaves them all off.
+          echo "::group::input languages from the system language"
+          mkdir -p home-input
+          input() {
+            expected="$1"; shift
+            got=$(env -u LANGUAGE -u LC_ALL -u LC_MESSAGES "$@" HOME="$PWD/home-input" XDG_CONFIG_HOME="$PWD/home-input/.config" \
+              timeout 15 settings/kde/target/debug/easime-settings --ui-language=en 2>&1 \
+              | grep -m1 'INPUT-LANGUAGES' | sed 's/.*languages=\([^ ]*\) follow-system=\(.*\)/\1 \2/' || true)
+            echo "$* -> '$got' (expected '$expected true')"
+            if [ "$got" != "$expected true" ]; then echo "FAILED: $* gave '$got', expected '$expected true'"; fail=1; fi
+          }
+          input "korean" LANG=ko_KR.UTF-8
+          input "japanese" LANG=ja_JP.UTF-8
+          input "" LANG=en_US.UTF-8
+          input "" LANG=fr_FR.UTF-8
+          input "" LANG=C.UTF-8
+          input "" LANG=zh_CN.UTF-8   # Chinese has no engine yet
+          input "" LANG=zh_TW.UTF-8
+          input "japanese,korean" LANG=en_US.UTF-8 LANGUAGE=ja:ko:en
+          input "korean" LANG=en_US.UTF-8 LANGUAGE=en_US:ko
           echo "::endgroup::"
 
           test "$fail" = 0

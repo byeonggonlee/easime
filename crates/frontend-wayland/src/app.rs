@@ -226,7 +226,14 @@ fn build_engines(
         BackspaceUnit::Syllable => BackspaceMode::Syllable,
     };
     let mut engines: HashMap<Language, Box<dyn InputEngine>> = HashMap::new();
-    for &language in &config.languages.enabled {
+    let system = easime_config::system_languages();
+    let enabled = config.languages.resolved(&system);
+    if config.languages.follows_system() {
+        log!("languages not chosen in the settings; following the system language: {enabled:?}");
+    } else {
+        log!("languages chosen in the settings: {enabled:?}");
+    }
+    for &language in &enabled {
         match language {
             Language::Korean => {
                 engines.insert(
@@ -240,14 +247,12 @@ fn build_engines(
                     Box::new(JapaneseEngine::with_dictionary(Box::new(dictionary.get()))),
                 );
             }
-            Language::English | Language::Chinese => {
+            Language::English | Language::ChineseSimplified | Language::ChineseTraditional => {
                 log!("language {language:?} is not available yet, ignoring");
             }
         }
     }
-    let usable: Vec<Language> = config
-        .languages
-        .enabled
+    let usable: Vec<Language> = enabled
         .iter()
         .copied()
         .filter(|l| engines.contains_key(l))

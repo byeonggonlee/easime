@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{Fake, Req};
+use common::{Fake, Req, korean_only};
 
 // Linux evdev key codes (input-event-codes.h).
 const KEY_TAB: u32 = 15;
@@ -532,7 +532,10 @@ const KEY_N: u32 = 49;
 /// Korean and Japanese both enabled, in that order.
 fn korean_and_japanese() -> easime_config::Config {
     let mut config = easime_config::Config::default();
-    config.languages.enabled = vec![ime_core::Language::Korean, ime_core::Language::Japanese];
+    config.languages.enabled = Some(vec![
+        ime_core::Language::Korean,
+        ime_core::Language::Japanese,
+    ]);
     config
 }
 
@@ -675,7 +678,7 @@ fn settings_file(name: &str) -> std::path::PathBuf {
 #[test]
 fn saving_settings_changes_the_toggle_key_without_a_restart() {
     let path = settings_file("toggle");
-    let config = easime_config::Config::default(); // both toggle keys
+    let config = korean_only(); // both toggle keys
     config.save_to(&path).unwrap();
     let mut fake = Fake::start_watching(config.clone(), Some(path.clone()));
     fake.activate();
@@ -706,7 +709,7 @@ fn saving_settings_changes_the_toggle_key_without_a_restart() {
 #[test]
 fn saving_settings_can_enable_japanese_and_keeps_the_current_language() {
     let path = settings_file("languages");
-    let config = easime_config::Config::default(); // Korean only
+    let config = korean_only();
     config.save_to(&path).unwrap();
     let mut fake = Fake::start_watching(config.clone(), Some(path.clone()));
     fake.activate();
@@ -715,7 +718,10 @@ fn saving_settings_can_enable_japanese_and_keeps_the_current_language() {
     fake.barrier(); // the client has handled the keys before settings change
 
     let mut updated = config;
-    updated.languages.enabled = vec![ime_core::Language::Korean, ime_core::Language::Japanese];
+    updated.languages.enabled = Some(vec![
+        ime_core::Language::Korean,
+        ime_core::Language::Japanese,
+    ]);
     updated.save_to(&path).unwrap();
     fake.barrier();
     // Applying settings finishes the text in progress.
@@ -734,7 +740,7 @@ fn saving_settings_can_enable_japanese_and_keeps_the_current_language() {
 #[test]
 fn an_unreadable_settings_file_is_ignored() {
     let path = settings_file("broken");
-    let config = easime_config::Config::default();
+    let config = korean_only();
     config.save_to(&path).unwrap();
     let mut fake = Fake::start_watching(config, Some(path.clone()));
     fake.activate();

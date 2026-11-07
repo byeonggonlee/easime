@@ -20,6 +20,7 @@ pub mod qobject {
         #[qml_element]
         #[qml_singleton]
         #[qproperty(QString, languages)]
+        #[qproperty(bool, languages_follow_system, cxx_name = "languagesFollowSystem")]
         #[qproperty(QString, toggle_key, cxx_name = "toggleKey")]
         #[qproperty(QString, backspace)]
         #[qproperty(bool, indicator_box, cxx_name = "indicatorBox")]
@@ -71,6 +72,7 @@ pub mod qobject {
 
 pub struct EasimeSettingsRust {
     languages: QString,
+    languages_follow_system: bool,
     toggle_key: QString,
     backspace: QString,
     indicator_box: bool,
@@ -94,6 +96,7 @@ impl Default for EasimeSettingsRust {
         };
         Self {
             languages: QString::from(view.languages.as_str()),
+            languages_follow_system: view.languages_follow_system,
             toggle_key: QString::from(view.toggle_key.as_str()),
             backspace: QString::from(view.backspace.as_str()),
             indicator_box: view.indicator_box,
@@ -143,6 +146,8 @@ impl qobject::EasimeSettings {
         let view = View::of(&self.as_ref().rust().model);
         self.as_mut()
             .set_languages(QString::from(view.languages.as_str()));
+        self.as_mut()
+            .set_languages_follow_system(view.languages_follow_system);
         self.as_mut()
             .set_toggle_key(QString::from(view.toggle_key.as_str()));
         self.as_mut()

@@ -20,6 +20,8 @@
 ## 현재 상태 (2026-11-07)
 - 완료
   - `ime-core`(키 이벤트, `InputEngine`, `Language`/`LanguageSwitcher`), `easime-config`(TOML 설정, OS별 경로, 원자적 저장)
+  - 입력 언어 기본값(2026-11-07 사용자 결정): 설정 파일에 `languages.enabled`가 없으면 **영어 + 시스템 언어**. 한국어 시스템이면 한국어, 일본어 시스템이면 일본어만 켜고, 그 밖의 시스템(영어, 프랑스어, 중국어 등)은 모두 꺼 영어만 입력된다. 한 번 고르면(`enabled = [...]`, 빈 목록 포함) 그 선택이 우선한다. 시스템 언어는 `LANGUAGE`(C/POSIX 로케일이면 무시), `LC_ALL`, `LC_MESSAGES`, `LANG` 순으로 읽는다(`easime-config/src/locale.rs`, 단위 테스트). 데몬은 시작할 때와 설정을 다시 읽을 때 어느 쪽인지 로그에 남긴다. Windows·macOS는 환경 변수가 아니라 OS의 언어 설정을 읽어야 하므로 해당 프론트엔드를 만들 때 붙인다.
+  - 중국어는 간체(`chinese_simplified`)와 번체(`chinese_traditional`)가 별개의 입력 언어다(2026-11-07 사용자 결정). 시스템 로케일 대응: `zh_TW`/`zh_HK`/`zh_MO`/`Hant` → 번체, `zh_CN`/`zh_SG`/`Hans`/`zh` → 간체. 엔진은 아직 없어 기본으로 켜지지 않고 설정 창에서도 켤 수 없다("준비 중"). 예전 이름 `chinese`는 이제 알 수 없는 값이다(어떤 버전도 쓴 적이 없다).
   - `engine-hangul`: 두벌식, 겹모음/겹받침, 자모/글자 단위 백스페이스. 조합 중 한 글자 한자 변환 코드와 후보창 추가(실제 KDE 재검증 필요). 한자 키 → ↑↓/Space 이동, PgUp/PgDn 페이지, Enter/1–9 확정, Esc/Backspace로 한글 복귀.
   - `engine-japanese`: 로마자 → 히라가나/가타카나, Space로 변환 시작(후보 순환 Space/↑↓, Enter 확정, Esc/Backspace 가나로 복귀, 숫자 선택).
     사전: `Dictionary` trait, `MemoryDictionary`(TSV), `FileDictionary`(이진, 로드 약 0.1초), `LayeredDictionary`, `load_default()`.
@@ -39,10 +41,10 @@
   - CI: Linux는 전체, Windows/macOS는 OS 독립 crate만 (`fmt`, `clippy -D warnings`, `test`). 설정 창은 Fedora 컨테이너 잡이 따로 검증한다(아래).
   - 설정 창(전문가용, `settings/kde`): Rust + cxx-qt + QML + Kirigami, 메인 워크스페이스와 별개의 cargo 프로젝트.
     페이지: 일반(파일 위치, 다시 읽기, 기본값으로 되돌리기), 언어(켜기/끄기, 순서, 전환 순서 미리보기), 단축키(전환 키), 한국어(백스페이스 단위), 모양(상태 상자).
-    어떤 언어도 필수가 아니다(한국어만, 일본어만, 둘 다). 변경은 바로 저장되고 데몬이 다시 읽는다. 바뀐 키만 `toml_edit`으로 고치므로 직접 쓴 주석과 모르는 키가 남고,
-    읽을 수 없는 파일은 덮어쓰지 않으며(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다. 모델은 Qt 없이 단위 테스트한다(21개).
+    어떤 언어도 필수가 아니다(한국어만, 일본어만, 둘 다, 아무것도 없이 영어만). 처음에는 시스템 언어에 맞춰져 있고 그 사실을 언어 페이지가 알린다. 언어 페이지에는 简体中文과 繁體中文이 따로 "준비 중"으로 나온다. 변경은 바로 저장되고 데몬이 다시 읽는다. 바뀐 키만 `toml_edit`으로 고치므로 직접 쓴 주석과 모르는 키가 남고,
+    읽을 수 없는 파일은 덮어쓰지 않으며(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다. 모델은 Qt 없이 단위 테스트한다(24개).
     **검증 범위**: CI `settings` 잡(필수)이 Fedora 컨테이너에서 실제 Kirigami로 빌드하고, 오프스크린으로 5개 페이지를 모두 열어 QML 경고를 실패로 취급하며,
-    Switch·라디오·체크박스를 `click()`으로 눌러 설정 파일이 바뀌는 것까지 확인한다. 페이지별 화면 캡처는 Actions 아티팩트 `settings-window-pages`에 남는다.
+    Switch·라디오·체크박스를 `click()`으로 눌러 설정 파일이 바뀌는 것까지 확인한다(시스템 언어는 C.UTF-8이라 모든 언어가 꺼진 상태에서 시작). 시스템 언어별 기본 입력 언어(ko→한국어, ja→일본어, 그 밖과 중국어→없음, `LANGUAGE=ja:ko`→둘)도 실제 창을 띄워 확인한다. 페이지별 화면 캡처는 Actions 아티팩트 `settings-window-pages`에 남는다.
     **사람이 실제 Plasma에서 연 적은 없고**, 색·간격 같은 모양과 사이드바의 보이는 모습은 확인하지 못했다.
     표시 언어: 한국어, English, 日本語, 繁體中文, 简体中文. 시스템 언어(`LANGUAGE`/`LANG`)를 따르고 그 밖의 언어는 영어이며, `--ui-language=ko|en|ja|zh-Hant|zh-Hans`로 지정할 수 있다.
     문구는 한국어 원문을 키로 한 표 한 개(`settings/kde/qml/tr.js`)에 있다. **한국어 외의 번역은 원어민 검토 전 초안**이고 번역된 화면의 일반 페이지가 그렇게 알린다.

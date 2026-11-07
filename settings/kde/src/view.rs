@@ -20,6 +20,9 @@ pub fn failure_code(kind: FailureKind) -> &'static str {
 pub struct View {
     /// Enabled languages in switching order, comma separated (`korean,japanese`).
     pub languages: String,
+    /// True while the user has not chosen languages and the system language
+    /// decides which are on.
+    pub languages_follow_system: bool,
     pub toggle_key: String,
     pub backspace: String,
     pub indicator_box: bool,
@@ -39,6 +42,7 @@ impl View {
         };
         Self {
             languages: languages.join(","),
+            languages_follow_system: model.follows_system_language(),
             toggle_key: toggle_key_code(config.shortcuts.toggle_key).to_owned(),
             backspace: backspace_code(config.korean.backspace).to_owned(),
             indicator_box: config.appearance.indicator_box,
@@ -61,16 +65,21 @@ pub fn log_file(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<Path
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ime_core::Language;
     use std::ffi::OsString;
 
     #[test]
     fn the_default_view_matches_the_default_settings() {
-        let view = View::of(&Model::open(Some(
-            std::env::temp_dir()
-                .join("easime-view-test-missing")
-                .join("c.toml"),
-        )));
+        let view = View::of(&Model::open_with_system(
+            Some(
+                std::env::temp_dir()
+                    .join("easime-view-test-missing")
+                    .join("c.toml"),
+            ),
+            vec![Language::Korean],
+        ));
         assert_eq!(view.languages, "korean");
+        assert!(view.languages_follow_system);
         assert_eq!(view.toggle_key, "both");
         assert_eq!(view.backspace, "jamo");
         assert!(view.indicator_box);
@@ -80,8 +89,9 @@ mod tests {
 
     #[test]
     fn a_missing_home_shows_as_a_problem() {
-        let view = View::of(&Model::open(None));
+        let view = View::of(&Model::open_with_system(None, Vec::new()));
         assert_eq!(view.problem_kind, "no_home");
+        assert_eq!(view.languages, "");
     }
 
     #[test]

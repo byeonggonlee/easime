@@ -43,7 +43,7 @@ fn dictionary() -> String {
 /// Japanese is the only language, so typing starts in Japanese.
 fn japanese() -> Config {
     let mut config = Config::default();
-    config.languages.enabled = vec![Language::Japanese];
+    config.languages.enabled = Some(vec![Language::Japanese]);
     config
 }
 

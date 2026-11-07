@@ -27,7 +27,9 @@ pub fn glyph_for(language: Language) -> char {
         Language::English => 'A',
         Language::Korean => '한',
         Language::Japanese => 'あ',
-        Language::Chinese => '中',
+        // Both scripts show the same letter for now; telling them apart in the
+        // box is still open (docs/decisions.md).
+        Language::ChineseSimplified | Language::ChineseTraditional => '中',
     }
 }
 
@@ -198,7 +200,8 @@ mod tests {
         assert_eq!(glyph_for(Language::English), 'A');
         assert_eq!(glyph_for(Language::Korean), '한');
         assert_eq!(glyph_for(Language::Japanese), 'あ');
-        assert_eq!(glyph_for(Language::Chinese), '中');
+        assert_eq!(glyph_for(Language::ChineseSimplified), '中');
+        assert_eq!(glyph_for(Language::ChineseTraditional), '中');
     }
 
     #[test]

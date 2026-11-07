@@ -4,13 +4,18 @@ use serde::{Deserialize, Serialize};
 
 /// A language the input method can type in. English means "no composition":
 /// keys pass straight to the application.
+///
+/// Simplified and Traditional Chinese are separate entries, like the separate
+/// Chinese keyboards of Windows and macOS: the script is part of what the user
+/// picks and what the switch key cycles through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Language {
     English,
     Korean,
     Japanese,
-    Chinese,
+    ChineseSimplified,
+    ChineseTraditional,
 }
 
 /// The order languages are visited in: English first, then the enabled
@@ -77,9 +82,9 @@ mod tests {
 
     #[test]
     fn cycles_english_then_enabled_languages_in_order() {
-        let mut s = LanguageSwitcher::new(&[Korean, Japanese, Chinese]);
+        let mut s = LanguageSwitcher::new(&[Korean, Japanese, ChineseSimplified]);
         assert_eq!(s.advance(), Japanese);
-        assert_eq!(s.advance(), Chinese);
+        assert_eq!(s.advance(), ChineseSimplified);
         assert_eq!(s.advance(), English);
         assert_eq!(s.advance(), Korean);
     }
@@ -110,8 +115,33 @@ mod tests {
     #[test]
     fn select_ignores_languages_outside_the_cycle() {
         let mut s = LanguageSwitcher::new(&[Korean]);
-        assert!(!s.select(Chinese));
+        assert!(!s.select(ChineseTraditional));
         assert_eq!(s.current(), Korean);
+    }
+
+    #[test]
+    fn the_two_chinese_scripts_are_separate_entries() {
+        let mut s = LanguageSwitcher::new(&[ChineseSimplified, ChineseTraditional]);
+        assert_eq!(
+            s.languages(),
+            &[English, ChineseSimplified, ChineseTraditional]
+        );
+        assert_eq!(s.advance(), ChineseTraditional);
+        assert_eq!(s.advance(), English);
+    }
+
+    #[test]
+    fn languages_are_written_in_snake_case() {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            language: Language,
+        }
+        let read = |name: &str| -> Result<Language, toml::de::Error> {
+            toml::from_str::<Wrapper>(&format!("language = \"{name}\"")).map(|w| w.language)
+        };
+        assert_eq!(read("chinese_simplified").unwrap(), ChineseSimplified);
+        assert_eq!(read("chinese_traditional").unwrap(), ChineseTraditional);
+        assert!(read("chinese").is_err());
     }
 
     #[test]

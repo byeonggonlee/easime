@@ -38,17 +38,30 @@ pub enum BackspaceUnit {
 }
 
 /// Which languages the toggle key cycles through, after English.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Languages {
-    pub enabled: Vec<Language>,
+    /// The languages the user chose, in switching order. `None` while the user
+    /// has not chosen: the languages that match the system language are used
+    /// then (see [`Languages::resolved`]). `Some(vec![])` is a choice too:
+    /// English only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<Vec<Language>>,
 }
 
-impl Default for Languages {
-    fn default() -> Self {
-        Self {
-            enabled: vec![Language::Korean],
+impl Languages {
+    /// The languages to cycle through: the user's choice, or else the
+    /// `system` languages (what [`crate::system_languages`] returns).
+    pub fn resolved(&self, system: &[Language]) -> Vec<Language> {
+        match &self.enabled {
+            Some(chosen) => chosen.clone(),
+            None => system.to_vec(),
         }
+    }
+
+    /// True while the user has not chosen and the system language decides.
+    pub fn follows_system(&self) -> bool {
+        self.enabled.is_none()
     }
 }
 
@@ -134,8 +147,38 @@ mod tests {
     }
 
     #[test]
-    fn korean_is_the_only_default_language() {
-        assert_eq!(Config::default().languages.enabled, vec![Language::Korean]);
+    fn languages_follow_the_system_until_chosen() {
+        let c = Config::default();
+        assert!(c.languages.follows_system());
+        assert_eq!(c.languages.resolved(&[]), vec![]);
+        assert_eq!(
+            c.languages.resolved(&[Language::Korean]),
+            vec![Language::Korean]
+        );
+        // Neither an empty file nor a file without the key is a choice.
+        assert!(Config::from_toml("").unwrap().languages.follows_system());
+        let c = Config::from_toml("[languages]\n").unwrap();
+        assert!(c.languages.follows_system());
+        let c = Config::from_toml("[korean]\nbackspace = \"syllable\"\n").unwrap();
+        assert!(c.languages.follows_system());
+    }
+
+    #[test]
+    fn a_chosen_list_wins_over_the_system_even_when_empty() {
+        let c = Config::from_toml("[languages]\nenabled = [\"japanese\"]\n").unwrap();
+        assert!(!c.languages.follows_system());
+        assert_eq!(
+            c.languages.resolved(&[Language::Korean]),
+            vec![Language::Japanese]
+        );
+        let none = Config::from_toml("[languages]\nenabled = []\n").unwrap();
+        assert!(!none.languages.follows_system());
+        assert_eq!(none.languages.resolved(&[Language::Korean]), vec![]);
+    }
+
+    #[test]
+    fn the_default_file_does_not_make_a_choice() {
+        assert!(!Config::default().to_toml().contains("enabled"));
     }
 
     #[test]
@@ -143,8 +186,24 @@ mod tests {
         let c = Config::from_toml("[languages]\nenabled = [\"japanese\", \"korean\"]\n").unwrap();
         assert_eq!(
             c.languages.enabled,
-            vec![Language::Japanese, Language::Korean]
+            Some(vec![Language::Japanese, Language::Korean])
         );
+    }
+
+    #[test]
+    fn the_chinese_scripts_are_separate_languages() {
+        let c = Config::from_toml(
+            "[languages]\nenabled = [\"chinese_traditional\", \"chinese_simplified\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            c.languages.enabled,
+            Some(vec![
+                Language::ChineseTraditional,
+                Language::ChineseSimplified
+            ])
+        );
+        assert!(Config::from_toml("[languages]\nenabled = [\"chinese\"]\n").is_err());
     }
 
     #[test]
@@ -180,7 +239,7 @@ mod tests {
     fn round_trips() {
         let c = Config {
             languages: Languages {
-                enabled: vec![Language::Korean, Language::Japanese],
+                enabled: Some(vec![Language::Korean, Language::Japanese]),
             },
             shortcuts: Shortcuts {
                 toggle_key: ToggleKey::Hangul,

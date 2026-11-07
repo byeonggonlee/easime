@@ -271,11 +271,19 @@ pub struct Fake {
     barriers: u32,
 }
 
+/// The settings most tests want: Korean is the only language, whatever the
+/// system language of the machine running the tests is.
+pub fn korean_only() -> Config {
+    let mut config = Config::default();
+    config.languages.enabled = Some(vec![ime_core::Language::Korean]);
+    config
+}
+
 impl Fake {
     /// Start the client on a background thread and wait until it has bound
     /// `zwp_input_method_v1`.
     pub fn start() -> Self {
-        Self::start_with(Config::default())
+        Self::start_with(korean_only())
     }
 
     /// Like [`Fake::start`], with the given settings.

@@ -2,8 +2,7 @@
 
 mod common;
 
-use common::{Fake, Globals, Req};
-use easime_config::Config;
+use common::{Fake, Globals, Req, korean_only};
 use std::time::Duration;
 
 const HANJA: u32 = 0xff34;
@@ -69,7 +68,7 @@ fn escape_returns_to_editable_hangul() {
 #[test]
 fn an_unavailable_panel_never_enables_invisible_conversion() {
     let mut fake = Fake::start_with_globals(
-        Config::default(),
+        korean_only(),
         Globals {
             input_panel: false,
             ..Globals::default()
@@ -100,7 +99,7 @@ fn an_unavailable_panel_never_enables_invisible_conversion() {
 
 #[test]
 fn indicator_timeout_does_not_hide_candidates() {
-    let mut config = Config::default();
+    let mut config = korean_only();
     config.appearance.indicator_ms = 120;
     let mut fake = Fake::start_with(config);
     fake.activate();
@@ -123,7 +122,7 @@ fn indicator_timeout_does_not_hide_candidates() {
 
 #[test]
 fn candidates_work_with_the_indicator_disabled() {
-    let mut config = Config::default();
+    let mut config = korean_only();
     config.appearance.indicator_box = false;
     let mut fake = Fake::start_with(config);
     fake.activate();

@@ -52,11 +52,12 @@ use wayland_client::{Proxy, QueueHandle};
 use crate::protocol::client::zwp_input_panel_surface_v1::ZwpInputPanelSurfaceV1;
 use crate::protocol::client::zwp_input_panel_v1::ZwpInputPanelV1;
 
-const LANGUAGES: [Language; 4] = [
+const LANGUAGES: [Language; 5] = [
     Language::English,
     Language::Korean,
     Language::Japanese,
-    Language::Chinese,
+    Language::ChineseSimplified,
+    Language::ChineseTraditional,
 ];
 
 /// The rendered boxes, one per language glyph. Fonts are scanned once per
@@ -68,6 +69,9 @@ fn bitmaps() -> &'static HashMap<char, Bitmap> {
         let mut map = HashMap::new();
         for language in LANGUAGES {
             let glyph = glyph_for(language);
+            if map.contains_key(&glyph) {
+                continue; // the two Chinese scripts share a letter
+            }
             let font = fonts.font_for(glyph);
             if font.is_none() {
                 crate::log!("no font has {glyph:?}; its indicator box will be empty");
