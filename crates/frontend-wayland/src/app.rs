@@ -55,7 +55,9 @@ impl KeyAction {
         match state {
             WEnum::Value(KeyState::Pressed) => Some(Self::Pressed),
             WEnum::Value(KeyState::Released) => Some(Self::Released),
-            // The generated enum predates `repeated`, so it arrives as raw 2.
+            // wl_keyboard v10 `repeated`.
+            WEnum::Value(KeyState::Repeated) => Some(Self::Repeated),
+            // Defensive: the same value as raw wire data.
             WEnum::Unknown(2) => Some(Self::Repeated),
             _ => None,
         }
@@ -685,7 +687,11 @@ mod tests {
             KeyAction::from_wire(WEnum::Value(KeyState::Released)),
             Some(KeyAction::Released)
         );
-        // `repeated` is raw value 2 in the wire protocol.
+        // `repeated` is what the generated enum produces for wire value 2.
+        assert_eq!(
+            KeyAction::from_wire(WEnum::Value(KeyState::Repeated)),
+            Some(KeyAction::Repeated)
+        );
         assert_eq!(
             KeyAction::from_wire(WEnum::Unknown(2)),
             Some(KeyAction::Repeated)

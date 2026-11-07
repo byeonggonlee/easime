@@ -354,7 +354,6 @@ fn right_alt_held_with_another_key_is_forwarded_and_does_not_toggle() {
 // feeds it `Unknown(2)`, which the library never produces for state 2.
 
 #[test]
-#[ignore = "bug: key state 2 (repeated) arrives as KeyState::Repeated and is dropped by KeyAction::from_wire"]
 fn repeated_state_is_forwarded_as_repeated_never_as_release() {
     let mut fake = Fake::start();
     fake.activate();
@@ -372,7 +371,6 @@ fn repeated_state_is_forwarded_as_repeated_never_as_release() {
 }
 
 #[test]
-#[ignore = "bug: key state 2 (repeated) arrives as KeyState::Repeated and is dropped by KeyAction::from_wire"]
 fn repeated_state_is_forwarded_for_a_passed_key_in_korean_mode_too() {
     let mut fake = Fake::start();
     fake.activate();
