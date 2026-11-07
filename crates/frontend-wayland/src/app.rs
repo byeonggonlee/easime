@@ -20,7 +20,7 @@ use crate::translate::{case_from_shift, is_modifier_keysym, translate};
 use crate::watch::ConfigWatcher;
 use easime_config::{BackspaceUnit, Config};
 use engine_hangul::{BackspaceMode, HangulEngine};
-use engine_japanese::JapaneseEngine;
+use engine_japanese::{Dictionary, JapaneseEngine};
 use ime_core::{EngineOutput, InputEngine, Key, KeyEvent, Language, LanguageSwitcher, Modifiers};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
@@ -30,7 +30,8 @@ use std::fs::File;
 use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use wayland_client::backend::WaylandError;
 use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_buffer::WlBuffer;
@@ -120,6 +121,8 @@ pub(crate) struct App {
     /// Fires when the indicator box has been shown long enough.
     indicator_timer: Timer,
     candidates_visible: bool,
+    /// Kept for engines built when the settings change.
+    dictionary: JapaneseDictionary,
 }
 
 /// The `[appearance]` settings the indicator box needs.
@@ -144,10 +147,80 @@ struct Settings {
     watcher: ConfigWatcher,
 }
 
+/// The Japanese dictionary, shared by every Japanese engine we build.
+///
+/// Settings changes rebuild the engines, but the dictionary (tens of
+/// megabytes, about 0.1 s to open) is only loaded once, when the first
+/// Japanese engine is needed.
+pub(crate) struct JapaneseDictionary {
+    loaded: Option<Arc<dyn Dictionary>>,
+}
+
+impl JapaneseDictionary {
+    /// Load the installed dictionaries when first needed.
+    pub(crate) fn installed() -> Self {
+        Self { loaded: None }
+    }
+
+    /// Use `dictionary` and never look at the disk (tests).
+    pub(crate) fn fixed(dictionary: Arc<dyn Dictionary>) -> Self {
+        Self {
+            loaded: Some(dictionary),
+        }
+    }
+
+    fn get(&mut self) -> Arc<dyn Dictionary> {
+        self.loaded.get_or_insert_with(load_installed).clone()
+    }
+}
+
+/// Open the dictionaries in the user and system directories and say in the
+/// log what was found: with no dictionary conversion only offers kana, and
+/// the log is where that can be told apart from "the word is not in it".
+fn load_installed() -> Arc<dyn Dictionary> {
+    let started = Instant::now();
+    let dirs = engine_japanese::loader::default_dictionary_dirs();
+    let report = engine_japanese::load_dictionaries(&dirs);
+    for (path, why) in &report.failed {
+        log!(
+            "japanese dictionary: could not load {}: {why}",
+            path.display()
+        );
+    }
+    if report.skipped_lines > 0 {
+        log!(
+            "japanese dictionary: skipped {} malformed lines in text files",
+            report.skipped_lines
+        );
+    }
+    if report.loaded.is_empty() {
+        let searched: Vec<_> = dirs.iter().map(|d| d.display().to_string()).collect();
+        log!(
+            "japanese dictionary: none loaded (looked in {}); conversion offers only kana",
+            searched.join(", ")
+        );
+    } else {
+        let files: Vec<_> = report
+            .loaded
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        log!(
+            "japanese dictionary: loaded {} in {} ms",
+            files.join(", "),
+            started.elapsed().as_millis()
+        );
+    }
+    Arc::new(report.dictionary)
+}
+
 /// Engines for the enabled languages and the cycle over them.
 ///
 /// Only languages that have an engine take part in the cycle.
-fn build_engines(config: &Config) -> (HashMap<Language, Box<dyn InputEngine>>, LanguageSwitcher) {
+fn build_engines(
+    config: &Config,
+    dictionary: &mut JapaneseDictionary,
+) -> (HashMap<Language, Box<dyn InputEngine>>, LanguageSwitcher) {
     let backspace = match config.korean.backspace {
         BackspaceUnit::Jamo => BackspaceMode::Jamo,
         BackspaceUnit::Syllable => BackspaceMode::Syllable,
@@ -162,7 +235,10 @@ fn build_engines(config: &Config) -> (HashMap<Language, Box<dyn InputEngine>>, L
                 );
             }
             Language::Japanese => {
-                engines.insert(language, Box::new(JapaneseEngine::new()));
+                engines.insert(
+                    language,
+                    Box::new(JapaneseEngine::with_dictionary(Box::new(dictionary.get()))),
+                );
             }
             Language::English | Language::Chinese => {
                 log!("language {language:?} is not available yet, ignoring");
@@ -180,8 +256,8 @@ fn build_engines(config: &Config) -> (HashMap<Language, Box<dyn InputEngine>>, L
 }
 
 impl App {
-    fn new(config: &Config) -> std::io::Result<Self> {
-        let (engines, switcher) = build_engines(config);
+    fn new(config: &Config, mut dictionary: JapaneseDictionary) -> std::io::Result<Self> {
+        let (engines, switcher) = build_engines(config, &mut dictionary);
         Ok(Self {
             engines,
             switcher,
@@ -200,6 +276,7 @@ impl App {
             indicator: IndicatorSettings::from_config(config),
             indicator_timer: Timer::new()?,
             candidates_visible: false,
+            dictionary,
         })
     }
 
@@ -211,7 +288,7 @@ impl App {
         let previous = self.switcher.current();
         self.stop_repeat();
 
-        let (engines, mut switcher) = build_engines(config);
+        let (engines, mut switcher) = build_engines(config, &mut self.dictionary);
         switcher.select(previous);
         self.engines = engines;
         self.switcher = switcher;
@@ -591,18 +668,19 @@ impl App {
 
     /// Send the engine's result to the application.
     fn apply(&mut self, mut output: EngineOutput) {
-        // This interaction is currently wired only for Korean Hanja.
-        // Japanese conversion uses different key handling until its candidate
-        // integration is implemented and validated.
-        if let Some(list) = output
-            .candidates
-            .as_ref()
-            .filter(|_| self.switcher.current() == Language::Korean)
-        {
+        if let Some(list) = output.candidates.as_ref() {
+            let language = self.switcher.current();
+            // Korean keeps the Hangul on screen while converting, so the preedit
+            // is the reading; Japanese shows the chosen candidate there.
+            let reading = if list.reading.is_empty() {
+                output.preedit.text.as_str()
+            } else {
+                list.reading.as_str()
+            };
             let shown = self
                 .panel
                 .as_mut()
-                .is_some_and(|panel| panel.show_candidates(list, &output.preedit.text));
+                .is_some_and(|panel| panel.show_candidates(list, reading, language));
             if shown {
                 let _ = self.indicator_timer.disarm();
                 self.candidates_visible = true;
@@ -831,6 +909,37 @@ pub fn run_watching(
     config: &Config,
     settings_path: Option<&Path>,
 ) -> Result<std::convert::Infallible, RunError> {
+    serve(
+        connection,
+        config,
+        settings_path,
+        JapaneseDictionary::installed(),
+    )
+}
+
+/// Like [`run_watching`], but Japanese conversion uses `dictionary` instead of
+/// the files installed on this machine (used by tests, so that they do not
+/// depend on what happens to be installed).
+pub fn run_with_dictionary(
+    connection: &Connection,
+    config: &Config,
+    settings_path: Option<&Path>,
+    dictionary: Arc<dyn Dictionary>,
+) -> Result<std::convert::Infallible, RunError> {
+    serve(
+        connection,
+        config,
+        settings_path,
+        JapaneseDictionary::fixed(dictionary),
+    )
+}
+
+fn serve(
+    connection: &Connection,
+    config: &Config,
+    settings_path: Option<&Path>,
+    dictionary: JapaneseDictionary,
+) -> Result<std::convert::Infallible, RunError> {
     let startup = |e: &dyn std::fmt::Display| RunError::Startup(e.to_string());
     let (globals, mut queue) = registry_queue_init::<App>(connection).map_err(|e| startup(&e))?;
     let qh = queue.handle();
@@ -842,7 +951,7 @@ pub fn run_watching(
     })?;
     log!("bound zwp_input_method_v1");
 
-    let mut app = App::new(config).map_err(|e| startup(&e))?;
+    let mut app = App::new(config, dictionary).map_err(|e| startup(&e))?;
     app.panel = bind_panel(&globals, &qh);
     if app.indicator.enabled
         && let Some(panel) = &app.panel

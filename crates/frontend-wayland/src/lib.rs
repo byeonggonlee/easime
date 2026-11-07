@@ -13,4 +13,4 @@ pub mod toggle;
 pub mod translate;
 pub mod watch;
 
-pub use app::{RunError, run, run_on, run_watching, run_with};
+pub use app::{RunError, run, run_on, run_watching, run_with, run_with_dictionary};

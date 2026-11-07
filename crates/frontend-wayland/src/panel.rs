@@ -203,8 +203,16 @@ impl Panel {
         self.painter.available()
     }
 
-    pub fn show_candidates(&mut self, list: &CandidateList, reading: &str) -> bool {
-        let Some(bitmap) = self.painter.render(list, reading) else {
+    /// Show `list` with the text being converted in its header. `language`
+    /// chooses the fonts: the same Han character is drawn differently in
+    /// Japanese and Korean.
+    pub fn show_candidates(
+        &mut self,
+        list: &CandidateList,
+        reading: &str,
+        language: Language,
+    ) -> bool {
+        let Some(bitmap) = self.painter.render(list, reading, language) else {
             return false;
         };
         let buffer = match make_buffer(&self.shm, &bitmap, &self.qh) {

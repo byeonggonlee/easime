@@ -3,7 +3,7 @@
 use crate::font::Fonts;
 use crate::indicator::Bitmap;
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont, point};
-use ime_core::CandidateList;
+use ime_core::{CandidateList, Language};
 
 const WIDTH: u32 = 400;
 const ROW: u32 = 34;
@@ -15,7 +15,13 @@ const SELECTED: [u8; 3] = [0x35, 0x55, 0x75];
 
 pub struct Painter {
     korean: Option<FontVec>,
+    japanese: Option<FontVec>,
     latin: Option<FontVec>,
+}
+
+/// The first of `fonts` that has a glyph for `ch`.
+fn font_in<'a>(fonts: &[&'a FontVec], ch: char) -> Option<&'a FontVec> {
+    fonts.iter().copied().find(|font| font.glyph_id(ch).0 != 0)
 }
 
 impl Painter {
@@ -23,23 +29,41 @@ impl Painter {
         let fonts = Fonts::load_system();
         Self {
             korean: fonts.font_for('한'),
+            japanese: fonts.font_for('あ'),
             latin: fonts.font_for('A'),
         }
     }
 
     pub fn available(&self) -> bool {
-        self.font('A').is_some()
+        font_in(&self.chain(Language::Korean), 'A').is_some()
     }
 
-    fn font(&self, ch: char) -> Option<&FontVec> {
-        self.korean
+    /// The fonts to try for a character, best first. The same Han character
+    /// has a different shape in Japanese and in Korean, so the font of the
+    /// language being converted comes first.
+    fn chain(&self, language: Language) -> Vec<&FontVec> {
+        let (first, second) = match language {
+            Language::Japanese => (&self.japanese, &self.korean),
+            _ => (&self.korean, &self.japanese),
+        };
+        first
             .iter()
+            .chain(second.iter())
             .chain(self.latin.iter())
-            .find(|font| font.glyph_id(ch).0 != 0)
+            .collect()
     }
 
-    pub fn render(&self, list: &CandidateList, reading: &str) -> Option<Bitmap> {
-        if !self.available() || list.items.is_empty() || list.selected >= list.items.len() {
+    pub fn render(
+        &self,
+        list: &CandidateList,
+        reading: &str,
+        language: Language,
+    ) -> Option<Bitmap> {
+        let fonts = self.chain(language);
+        if font_in(&fonts, 'A').is_none()
+            || list.items.is_empty()
+            || list.selected >= list.items.len()
+        {
             return None;
         }
         let start = list.selected / CandidateList::PAGE_SIZE * CandidateList::PAGE_SIZE;
@@ -52,7 +76,7 @@ impl Painter {
             data: [BACKGROUND[2], BACKGROUND[1], BACKGROUND[0], 255]
                 .repeat((WIDTH * height) as usize),
         };
-        self.text(&mut bitmap, reading, 12.0, 24.0, 17.0, TEXT);
+        self.text(&fonts, &mut bitmap, reading, 12.0, 24.0, 17.0, TEXT);
         for (row, index) in (start..end).enumerate() {
             let top = HEADER + row as u32 * ROW;
             if index == list.selected {
@@ -72,9 +96,17 @@ impl Painter {
             } else {
                 format!("  {}", row + 1)
             };
-            self.text(&mut bitmap, &number, 10.0, (top + 24) as f32, 17.0, TEXT);
+            self.text(
+                &fonts,
+                &mut bitmap,
+                &number,
+                10.0,
+                (top + 24) as f32,
+                17.0,
+                TEXT,
+            );
             let item = &list.items[index];
-            let label = if item.chars().all(|ch| self.font(ch).is_some()) {
+            let label = if item.chars().all(|ch| font_in(&fonts, ch).is_some()) {
                 item.clone()
             } else {
                 item.chars()
@@ -82,9 +114,18 @@ impl Painter {
                     .collect::<Vec<_>>()
                     .join(" ")
             };
-            let candidate_end = self.text(&mut bitmap, &label, 52.0, (top + 25) as f32, 23.0, TEXT);
+            let candidate_end = self.text(
+                &fonts,
+                &mut bitmap,
+                &label,
+                52.0,
+                (top + 25) as f32,
+                23.0,
+                TEXT,
+            );
             if let Some(annotation) = list.annotations.get(index) {
                 self.text(
+                    &fonts,
                     &mut bitmap,
                     annotation,
                     (candidate_end + 12.0).max(100.0),
@@ -97,6 +138,7 @@ impl Painter {
         let page = start / CandidateList::PAGE_SIZE + 1;
         let pages = list.items.len().div_ceil(CandidateList::PAGE_SIZE);
         self.text(
+            &fonts,
             &mut bitmap,
             &format!("{page}/{pages}  PgUp/PgDn  1-9/Enter  Esc"),
             12.0,
@@ -107,8 +149,10 @@ impl Painter {
         Some(bitmap)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn text(
         &self,
+        fonts: &[&FontVec],
         bitmap: &mut Bitmap,
         text: &str,
         mut x: f32,
@@ -117,8 +161,14 @@ impl Painter {
         color: [u8; 3],
     ) -> f32 {
         for ch in text.chars() {
-            let ch = if self.font(ch).is_some() { ch } else { '?' };
-            let Some(font) = self.font(ch) else { continue };
+            let ch = if font_in(fonts, ch).is_some() {
+                ch
+            } else {
+                '?'
+            };
+            let Some(font) = font_in(fonts, ch) else {
+                continue;
+            };
             let scaled = font.as_scaled(PxScale::from(size));
             let id = font.glyph_id(ch);
             let advance = scaled.h_advance(id);
@@ -161,12 +211,12 @@ mod tests {
             items: (0..11).map(|n| format!("{n}")).collect(),
             ..CandidateList::default()
         };
-        let first = painter.render(&list, "").unwrap();
+        let first = painter.render(&list, "", Language::Korean).unwrap();
         list.selected = 1;
-        let second = painter.render(&list, "").unwrap();
+        let second = painter.render(&list, "", Language::Korean).unwrap();
         assert_ne!(first.data, second.data);
         list.selected = 9;
-        let last_page = painter.render(&list, "").unwrap();
+        let last_page = painter.render(&list, "", Language::Korean).unwrap();
         assert_eq!(first.height - last_page.height, 7 * ROW);
         assert_eq!(
             last_page.data.len(),
@@ -177,25 +227,106 @@ mod tests {
     #[test]
     fn empty_or_invalid_candidates_are_never_rendered() {
         let painter = Painter::new();
-        assert!(painter.render(&CandidateList::default(), "").is_none());
+        assert!(
+            painter
+                .render(&CandidateList::default(), "", Language::Korean)
+                .is_none()
+        );
         let list = CandidateList {
             items: vec!["韓".into()],
             selected: 2,
             ..CandidateList::default()
         };
-        assert!(painter.render(&list, "한").is_none());
+        assert!(painter.render(&list, "한", Language::Korean).is_none());
     }
 
     #[test]
     fn missing_fonts_refuse_invisible_candidates() {
         let painter = Painter {
             korean: None,
+            japanese: None,
             latin: None,
         };
         let list = CandidateList {
             items: vec!["韓".into()],
             ..CandidateList::default()
         };
-        assert!(painter.render(&list, "한").is_none());
+        assert!(painter.render(&list, "한", Language::Korean).is_none());
+    }
+
+    /// Whether the system has any font with kana, which Japanese candidates
+    /// need. Without one these tests have nothing to check.
+    fn has_kana(painter: &Painter) -> bool {
+        font_in(&painter.chain(Language::Japanese), 'に').is_some()
+    }
+
+    fn japanese_list() -> CandidateList {
+        CandidateList {
+            items: vec![
+                "日本".into(),
+                "二本".into(),
+                "にほん".into(),
+                "ニホン".into(),
+            ],
+            reading: "にほん".into(),
+            ..CandidateList::default()
+        }
+    }
+
+    #[test]
+    fn japanese_candidates_are_drawn_with_their_reading_in_the_header() {
+        let painter = Painter::new();
+        if !has_kana(&painter) {
+            eprintln!("SKIPPED: no installed font has kana; Japanese drawing not checked");
+            return;
+        }
+        let list = japanese_list();
+        let with = painter.render(&list, "にほん", Language::Japanese).unwrap();
+        let without = painter.render(&list, "", Language::Japanese).unwrap();
+        assert_eq!(with.height, HEADER + 4 * ROW + FOOTER);
+        assert_ne!(with.data, without.data, "the reading must be drawn");
+    }
+
+    #[test]
+    fn japanese_candidates_are_drawn_when_a_font_has_only_what_japanese_needs() {
+        // No Korean font at all: the Japanese font alone must be enough.
+        let full = Painter::new();
+        if !has_kana(&full) {
+            eprintln!("SKIPPED: no installed font has kana; Japanese drawing not checked");
+            return;
+        }
+        let painter = Painter {
+            korean: None,
+            japanese: full.japanese,
+            latin: full.latin,
+        };
+        let list = japanese_list();
+        assert!(
+            painter
+                .render(&list, "にほん", Language::Japanese)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn the_language_picks_which_font_comes_first() {
+        let painter = Painter::new();
+        let first = |language| {
+            painter
+                .chain(language)
+                .first()
+                .map(|font| std::ptr::from_ref::<FontVec>(font))
+        };
+        // With both a Korean and a Japanese font installed the order flips;
+        // with only one of them (or none) the chains are the same.
+        if let (Some(korean), Some(japanese)) = (&painter.korean, &painter.japanese) {
+            assert_eq!(
+                first(Language::Japanese),
+                Some(std::ptr::from_ref(japanese))
+            );
+            assert_eq!(first(Language::Korean), Some(std::ptr::from_ref(korean)));
+        } else {
+            eprintln!("SKIPPED: needs a Korean and a Japanese font to compare the order");
+        }
     }
 }

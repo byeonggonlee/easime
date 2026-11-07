@@ -132,15 +132,3 @@ fn candidates_work_with_the_indicator_disabled() {
     fake.tap_all(&[hanja]);
     assert!(fake.wait_for_indicator_shown().width > 48);
 }
-
-#[test]
-fn japanese_does_not_show_unimplemented_hanja_page_controls() {
-    let mut config = Config::default();
-    config.appearance.indicator_box = false;
-    config.languages.enabled = vec![ime_core::Language::Japanese];
-    let mut fake = Fake::start_with(config);
-    fake.activate();
-    fake.tap_all(&[37, 30, 57]); // ka + Space
-    let _ = fake.settle_panel();
-    assert!(!fake.indicator_mapped());
-}

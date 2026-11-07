@@ -17,6 +17,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use easime_config::Config;
+use engine_japanese::Dictionary;
+use engine_japanese::dictionary::{EmptyDictionary, MemoryDictionary};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fs::{MemfdFlags, memfd_create};
 use rustix::time::Timespec;
@@ -293,11 +295,35 @@ impl Fake {
     }
 
     /// The general form: settings, a watched settings file and the optional
-    /// globals the compositor offers.
+    /// globals the compositor offers. Japanese conversion has no dictionary
+    /// (it offers only kana): tests never read what is installed on the machine.
     pub fn start_full(
         config: Config,
         settings_path: Option<std::path::PathBuf>,
         globals: Globals,
+    ) -> Self {
+        Self::start_with_dictionary(config, settings_path, globals, Arc::new(EmptyDictionary))
+    }
+
+    /// Start with Japanese conversion using the tab separated dictionary
+    /// `text` (`reading<TAB>candidate,candidate`, as `MemoryDictionary` reads it).
+    pub fn start_japanese(config: Config, text: &str) -> Self {
+        Self::start_japanese_with_globals(config, text, Globals::default())
+    }
+
+    /// Like [`Fake::start_japanese`], offering only the given optional globals.
+    pub fn start_japanese_with_globals(config: Config, text: &str, globals: Globals) -> Self {
+        let (dictionary, skipped) = MemoryDictionary::parse(text);
+        assert_eq!(skipped, 0, "malformed test dictionary");
+        Self::start_with_dictionary(config, None, globals, Arc::new(dictionary))
+    }
+
+    /// The most general form, with the dictionary Japanese conversion uses.
+    pub fn start_with_dictionary(
+        config: Config,
+        settings_path: Option<std::path::PathBuf>,
+        globals: Globals,
+        dictionary: Arc<dyn Dictionary>,
     ) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socketpair");
         let display = Display::<State>::new().expect("display");
@@ -325,9 +351,12 @@ impl Fake {
         let (tx, client_done) = channel();
         let client = std::thread::spawn(move || {
             let result = match Connection::from_socket(client_end) {
-                Ok(connection) => {
-                    frontend_wayland::run_watching(&connection, &config, settings_path.as_deref())
-                }
+                Ok(connection) => frontend_wayland::run_with_dictionary(
+                    &connection,
+                    &config,
+                    settings_path.as_deref(),
+                    dictionary,
+                ),
                 Err(e) => Err(frontend_wayland::RunError::Startup(e.to_string())),
             };
             let _ = tx.send(result);
