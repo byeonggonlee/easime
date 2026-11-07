@@ -26,11 +26,11 @@ Kirigami.ApplicationWindow {
 
     property int current: -1
     readonly property var entries: [
-        { name: "general", title: qsTr("일반"), icon: "configure", page: generalPage },
-        { name: "languages", title: qsTr("언어"), icon: "preferences-desktop-locale", page: languagesPage },
-        { name: "shortcuts", title: qsTr("단축키"), icon: "preferences-desktop-keyboard-shortcut", page: shortcutsPage },
-        { name: "korean", title: qsTr("한국어"), icon: "input-keyboard", page: koreanPage },
-        { name: "appearance", title: qsTr("모양"), icon: "preferences-desktop-theme", page: appearancePage }
+        { name: "general", file: "GeneralPage.qml", title: qsTr("일반"), icon: "configure" },
+        { name: "languages", file: "LanguagesPage.qml", title: qsTr("언어"), icon: "preferences-desktop-locale" },
+        { name: "shortcuts", file: "ShortcutsPage.qml", title: qsTr("단축키"), icon: "preferences-desktop-keyboard-shortcut" },
+        { name: "korean", file: "KoreanPage.qml", title: qsTr("한국어"), icon: "input-keyboard" },
+        { name: "appearance", file: "AppearancePage.qml", title: qsTr("모양"), icon: "preferences-desktop-theme" }
     ]
 
     function show(index) {
@@ -39,7 +39,7 @@ Kirigami.ApplicationWindow {
         }
         current = index
         pageStack.clear()
-        pageStack.push(entries[index].page)
+        pageStack.push(Qt.resolvedUrl(entries[index].file))
     }
 
     globalDrawer: Kirigami.GlobalDrawer {
@@ -84,12 +84,6 @@ Kirigami.ApplicationWindow {
         ]
     }
 
-    Component { id: generalPage; GeneralPage {} }
-    Component { id: languagesPage; LanguagesPage {} }
-    Component { id: shortcutsPage; ShortcutsPage {} }
-    Component { id: koreanPage; KoreanPage {} }
-    Component { id: appearancePage; AppearancePage {} }
-
     Component.onCompleted: {
         show(0)
         console.info("SETTINGS-WINDOW-LOADED pages=" + entries.length)
@@ -107,12 +101,12 @@ Kirigami.ApplicationWindow {
             if (step > 0) {
                 var name = root.entries[step - 1].name
                 var path = root.screenshotDir + "/" + name + ".png"
-                var requested = root.contentItem.grabToImage(function (result) {
+                var requested = root.pageStack.grabToImage(function (result) {
                     console.info("SCREENSHOT " + name + " " + result.saveToFile(path))
                 })
                 console.info("GRAB-REQUESTED " + name + " " + requested
-                    + " size=" + root.contentItem.width + "x" + root.contentItem.height
-                    + " visible=" + root.visible)
+                    + " size=" + root.pageStack.width + "x" + root.pageStack.height
+                    + " drawer=" + root.globalDrawer.visible + "/" + root.globalDrawer.width)
             }
             if (step < root.entries.length) {
                 root.show(step)
