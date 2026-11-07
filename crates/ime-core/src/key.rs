@@ -19,6 +19,10 @@ pub enum Key {
     Right,
     Up,
     Down,
+    /// Convert the composing Korean syllable to Hanja.
+    Hanja,
+    PageUp,
+    PageDown,
     /// Any key the engines do not care about.
     Other,
 }

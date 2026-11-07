@@ -100,6 +100,7 @@ impl JapaneseEngine {
                 candidates: Some(CandidateList {
                     items: conv.candidates.clone(),
                     selected: conv.selected,
+                    annotations: Vec::new(),
                 }),
                 handled,
             };

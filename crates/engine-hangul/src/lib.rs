@@ -2,6 +2,7 @@
 
 pub mod composer;
 pub mod engine;
+pub mod hanja;
 pub mod jamo;
 pub mod keymap;
 

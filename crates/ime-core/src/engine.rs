@@ -35,6 +35,12 @@ impl Preedit {
 pub struct CandidateList {
     pub items: Vec<String>,
     pub selected: usize,
+    /// Optional labels, aligned with items (e.g. Korean Hanja meanings).
+    pub annotations: Vec<String>,
+}
+
+impl CandidateList {
+    pub const PAGE_SIZE: usize = 9;
 }
 
 /// What an engine produced in response to one key event.

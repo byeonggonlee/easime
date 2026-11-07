@@ -23,6 +23,7 @@ pub enum BackspaceMode {
 pub struct HangulEngine {
     composer: Composer,
     backspace_mode: BackspaceMode,
+    conversion: Option<ime_core::CandidateList>,
 }
 
 impl HangulEngine {
@@ -42,12 +43,55 @@ impl HangulEngine {
     }
 
     fn output(&self, commit: String, handled: bool) -> EngineOutput {
+        let mut preedit = Preedit::new(self.composer.preedit());
+        if self.conversion.is_some() {
+            preedit.highlight = Some(0..preedit.cursor);
+        }
         EngineOutput {
             commit,
-            preedit: Preedit::new(self.composer.preedit()),
-            candidates: None,
+            preedit,
+            candidates: self.conversion.clone(),
             handled,
         }
+    }
+
+    fn commit_candidate(&mut self) -> EngineOutput {
+        let list = self.conversion.take().expect("active conversion");
+        self.composer.reset();
+        self.output(list.items[list.selected].clone(), true)
+    }
+
+    fn convert_key(&mut self, key: Key) -> Option<EngineOutput> {
+        let list = self.conversion.as_mut()?;
+        let count = list.items.len();
+        let page_size = ime_core::CandidateList::PAGE_SIZE;
+        match key {
+            Key::Down | Key::Space => list.selected = (list.selected + 1) % count,
+            Key::Up => list.selected = (list.selected + count - 1) % count,
+            Key::PageDown => {
+                list.selected = ((list.selected / page_size + 1) * page_size).min(count - 1);
+            }
+            Key::PageUp => {
+                list.selected = (list.selected / page_size).saturating_sub(1) * page_size;
+            }
+            Key::Enter => return Some(self.commit_candidate()),
+            Key::Char(c @ '1'..='9') => {
+                let index = list.selected / page_size * page_size + (c as usize - '1' as usize);
+                if index < count {
+                    list.selected = index;
+                    return Some(self.commit_candidate());
+                }
+            }
+            Key::Escape | Key::Backspace => self.conversion = None,
+            Key::Hanja => {}
+            _ => {
+                // Only explicit selection commits Hanja. Continue ordinary
+                // typing with the original Hangul composition intact.
+                self.conversion = None;
+                return None;
+            }
+        }
+        Some(self.output(String::new(), true))
     }
 }
 
@@ -55,11 +99,21 @@ impl InputEngine for HangulEngine {
     fn process_key(&mut self, event: KeyEvent) -> EngineOutput {
         // Shortcuts (Ctrl+C, Alt+F, ...) are not text: finish and pass through.
         if event.modifiers.any() {
+            self.conversion = None;
             let commit = self.composer.flush();
             return self.output(commit, false);
         }
 
+        if let Some(output) = self.convert_key(event.key) {
+            return output;
+        }
+
         match event.key {
+            Key::Hanja => {
+                let reading = self.composer.preedit();
+                self.conversion = crate::hanja::lookup(&reading);
+                self.output(String::new(), !reading.is_empty())
+            }
             Key::Char(c) => match dubeolsik(c) {
                 Some(jamo) => {
                     let commit = self.composer.input(jamo);
@@ -85,10 +139,12 @@ impl InputEngine for HangulEngine {
     }
 
     fn reset(&mut self) {
+        self.conversion = None;
         self.composer.reset();
     }
 
     fn flush(&mut self) -> String {
+        self.conversion = None;
         self.composer.flush()
     }
 }
