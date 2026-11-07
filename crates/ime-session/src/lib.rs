@@ -14,6 +14,8 @@
 //!   switch language.
 //! * [`dictionary`]: the Japanese dictionary, opened once and shared.
 //! * [`indicator`]: the letter that stands for a language.
+//! * [`reload`]: noticing a changed settings file without an OS watcher API (for
+//!   frontends that cannot or should not watch files).
 //!
 //! What stays in the frontend, and which parts differ between operating
 //! systems, is listed in `docs/platforms.md`. This crate must stay free of OS
@@ -21,9 +23,11 @@
 
 pub mod dictionary;
 pub mod indicator;
+pub mod reload;
 pub mod session;
 pub mod toggle;
 
 pub use dictionary::JapaneseDictionary;
+pub use reload::ConfigReloader;
 pub use session::{LogFn, Session};
 pub use toggle::{Decision, Held, KeyRole, ToggleTracker};

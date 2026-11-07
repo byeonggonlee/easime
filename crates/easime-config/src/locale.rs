@@ -11,12 +11,12 @@
 //! | OS | where the tags come from | state |
 //! |---|---|---|
 //! | Linux | `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` | done ([`system_languages`]) |
-//! | Windows | the user's preferred UI languages (`GetUserPreferredUILanguages`) | **not done**: the environment variables are normally not set, so the result is empty, which means English only |
-//! | macOS | the preferred languages (`AppleLanguages`, `CFLocaleCopyPreferredLanguages`) | **not done**, same fallback |
+//! | Windows | the user's preferred UI languages (`GetUserPreferredUILanguages`) | done (the call is checked on the Windows CI runner; no Korean or Japanese Windows has run it) |
+//! | macOS | the preferred languages (`AppleLanguages`, `CFLocaleCopyPreferredLanguages`) | **not done**: the environment variables are normally not set, so the result is empty, which means English only |
 //!
 //! An empty result is the safe fallback: nothing is switched on that the user
-//! did not ask for. When a Windows or macOS frontend is written it feeds the
-//! tags of its OS to [`languages_for_tags`]. See `docs/platforms.md`.
+//! did not ask for. A macOS frontend feeds the tags of its OS to
+//! [`languages_for_tags`]. See `docs/platforms.md`.
 
 use ime_core::Language;
 use std::ffi::OsString;
@@ -75,13 +75,74 @@ pub fn languages_for_tags<'a>(tags: impl IntoIterator<Item = &'a str>) -> Vec<La
     found
 }
 
-/// The languages the user has told the system they use, read from the
-/// environment like gettext does (**Linux**; on Windows and macOS the
-/// environment does not say, see the module documentation): `LANGUAGE` is a preference list (Plasma sets
+/// The languages the user has told the system they use.
+///
+/// Windows asks the system for the preferred UI languages. Everywhere else (and
+/// on Windows if that gives nothing) the environment is read like gettext does;
+/// on macOS it normally says nothing, see the module documentation: `LANGUAGE` is a preference list (Plasma sets
 /// it from its language settings) unless the locale is `C` or `POSIX`;
 /// otherwise the first of `LC_ALL`, `LC_MESSAGES` and `LANG` that is set.
 pub fn system_languages() -> Vec<Language> {
+    #[cfg(windows)]
+    {
+        let tags = windows_api::preferred_ui_languages();
+        let found = languages_for_tags(tags.iter().map(String::as_str));
+        if !tags.is_empty() {
+            return found;
+        }
+    }
     system_languages_in(&|name| std::env::var_os(name))
+}
+
+// Only Windows reads such a list; it is plain data handling, so every OS tests it.
+#[cfg(any(windows, test))]
+/// The names in a Windows multi-string: UTF-16 names each ended by a NUL, the
+/// whole list ended by one more NUL (`"ko-KR\0en-US\0\0"`). Reading stops at
+/// the end of the list, at the end of the buffer, or at an empty name.
+pub fn parse_multistring(buffer: &[u16]) -> Vec<String> {
+    buffer
+        .split(|&unit| unit == 0)
+        .take_while(|name| !name.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect()
+}
+
+#[cfg(windows)]
+mod windows_api {
+    use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
+
+    /// The user's preferred UI languages as BCP 47 names (`ko-KR`, `zh-Hant-TW`),
+    /// best first. Empty if the system does not say.
+    pub fn preferred_ui_languages() -> Vec<String> {
+        let mut count = 0u32;
+        let mut length = 0u32;
+        // SAFETY: with a null buffer the call only reports the size needed.
+        let sized = unsafe {
+            GetUserPreferredUILanguages(
+                MUI_LANGUAGE_NAME,
+                &mut count,
+                std::ptr::null_mut(),
+                &mut length,
+            )
+        };
+        if sized == 0 || length == 0 {
+            return Vec::new();
+        }
+        let mut buffer = vec![0u16; length as usize];
+        // SAFETY: `buffer` holds `length` UTF-16 units, as the first call asked.
+        let read = unsafe {
+            GetUserPreferredUILanguages(
+                MUI_LANGUAGE_NAME,
+                &mut count,
+                buffer.as_mut_ptr(),
+                &mut length,
+            )
+        };
+        if read == 0 {
+            return Vec::new();
+        }
+        super::parse_multistring(&buffer[..(length as usize).min(buffer.len())])
+    }
 }
 
 /// [`system_languages`] with the environment passed in, for tests.
@@ -128,6 +189,46 @@ mod tests {
 
     fn system(pairs: &[(&str, &str)]) -> Vec<Language> {
         system_languages_in(&env_of(pairs))
+    }
+
+    fn utf16(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    #[test]
+    fn a_windows_multistring_is_split_at_its_nuls() {
+        let buffer = utf16("ko-KR\0en-US\0\0");
+        assert_eq!(parse_multistring(&buffer), ["ko-KR", "en-US"]);
+        // A buffer longer than the list, as the second call may leave it.
+        let padded = utf16("ja-JP\0\0\0\0");
+        assert_eq!(parse_multistring(&padded), ["ja-JP"]);
+        // No final NUL, an empty list and an empty buffer.
+        assert_eq!(parse_multistring(&utf16("zh-Hant-TW")), ["zh-Hant-TW"]);
+        assert!(parse_multistring(&utf16("\0\0")).is_empty());
+        assert!(parse_multistring(&[]).is_empty());
+    }
+
+    #[test]
+    fn windows_language_names_map_like_any_other_tag() {
+        let buffer = utf16("zh-Hant-TW\0ja-JP\0ko-KR\0en-US\0\0");
+        let tags = parse_multistring(&buffer);
+        assert_eq!(
+            languages_for_tags(tags.iter().map(String::as_str)),
+            [Japanese, Korean]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_reports_its_preferred_languages() {
+        let tags = windows_api::preferred_ui_languages();
+        assert!(!tags.is_empty(), "the system has at least one UI language");
+        assert!(
+            tags.iter().all(|tag| tag.contains('-')),
+            "BCP 47 names such as en-US: {tags:?}"
+        );
+        // Whatever the machine is set to, reading it must work.
+        let _ = system_languages();
     }
 
     #[test]
