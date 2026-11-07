@@ -118,7 +118,17 @@ jobs:
         run: |
           mkdir -p shots home
           export HOME="$PWD/home" XDG_CONFIG_HOME="$PWD/home/.config" XDG_STATE_HOME="$PWD/home/.state"
-          timeout 120 settings/kde/target/debug/easime-settings --screenshots="$PWD/shots" 2>&1 | tee settings.log
+          set +e
+          timeout 120 settings/kde/target/debug/easime-settings --screenshots="$PWD/shots" > settings.log 2>&1
+          code=$?
+          set -e
+          echo "exit code: $code"
+          echo "--- output of the settings window:"
+          cat settings.log
+          echo "--- installed KDE QML modules:"
+          ls /usr/lib64/qt6/qml/org/kde/ || true
+          ls /usr/lib64/qt6/qml/org/kde/desktop /usr/lib64/qt6/qml/org/kde/breeze 2>&1 | head -20 || true
+          test "$code" = 0
           grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
           test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 5
           if grep -Ei 'is not installed|is not a type|unable to assign|cannot assign|ReferenceError|TypeError|failed to load|is not defined' settings.log; then
