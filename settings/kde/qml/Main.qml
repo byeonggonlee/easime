@@ -92,7 +92,7 @@ Kirigami.ApplicationWindow {
 
     Component.onCompleted: {
         show(0)
-        console.log("SETTINGS-WINDOW-LOADED pages=" + entries.length)
+        console.info("SETTINGS-WINDOW-LOADED pages=" + entries.length)
     }
 
     Timer {
@@ -106,10 +106,13 @@ Kirigami.ApplicationWindow {
         onTriggered: {
             if (step > 0) {
                 var name = root.entries[step - 1].name
-                root.contentItem.grabToImage(function (result) {
-                    var saved = result.saveToFile(root.screenshotDir + "/" + name + ".png")
-                    console.log("SCREENSHOT " + name + " " + saved)
+                var path = root.screenshotDir + "/" + name + ".png"
+                var requested = root.contentItem.grabToImage(function (result) {
+                    console.info("SCREENSHOT " + name + " " + result.saveToFile(path))
                 })
+                console.info("GRAB-REQUESTED " + name + " " + requested
+                    + " size=" + root.contentItem.width + "x" + root.contentItem.height
+                    + " visible=" + root.visible)
             }
             if (step < root.entries.length) {
                 root.show(step)
