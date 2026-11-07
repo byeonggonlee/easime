@@ -150,11 +150,24 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 13. **macOS** — InputMethodKit, SwiftUI 설정 앱, pkg.
 
 ## 현재 상태 (2026-11-07)
-- 완료: `ime-core`, `engine-hangul`(두벌식, 겹모음/겹받침, 자모/글자 단위 백스페이스), `easime-cli`(데모),
-  `frontend-wayland`(KWin `zwp_input_method_v1` 클라이언트), `easime`(데몬), CI(GitHub Actions)
-- **아직 KWin에서 실제로 시험하지 않았다.** 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
+- 완료
+  - `ime-core`(키 이벤트, `InputEngine`, `Language`/`LanguageSwitcher`), `easime-config`(TOML 설정, OS별 경로, 원자적 저장)
+  - `engine-hangul`: 두벌식, 겹모음/겹받침, 자모/글자 단위 백스페이스
+  - `engine-japanese`: 로마자 → 히라가나/가타카나 (Enter 확정, Space 확정+공백, Esc 취소). 한자 변환은 아직 없음
+  - `frontend-wayland` + `easime` 데몬: KWin `zwp_input_method_v1` 클라이언트, 키 반복(자체 타이머와 컴포지터 `repeated`),
+    한/영 키와 오른쪽 Alt 탭 전환, Caps Lock 무시, 언어 순환, 설정 읽기
+  - CI: Linux는 전체, Windows/macOS는 OS 독립 crate만 (`fmt`, `clippy -D warnings`, `test`)
+- **가짜 KWin 테스트 하네스**: `crates/frontend-wayland/tests/` (순수 Rust Wayland 서버로 activate → 키 입력 → commit/preedit를
+  검증). 실제 KWin이 없어도 프로토콜 흐름을 시험할 수 있고, 이미 실제 버그(`KeyState::Repeated` 처리)를 잡았다.
+- **아직 실제 KWin에서 시험하지 않았다.** 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
   (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
-- 알려진 미구현: 키 자동 반복(key repeat), 설정 파일, 트레이/상태 박스, 후보창, XIM
+- 알려진 미구현: 설정 변경 즉시 반영(파일 감시), 트레이/상태 박스, 후보창, 설정 GUI, XIM, 일본어 한자 변환, 중국어, 패키징
+- 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
+
+## 작업 습관 (이 저장소에서 있었던 실수에서)
+- 커밋은 작게, 커밋 직후 푸시. 검사(`fmt`/`clippy -D warnings`/`test`)는 `&&`로 이어서 실패하면 커밋되지 않게 한다.
+- `git add -A` 대신 경로를 지정한다 (에이전트 워크트리가 딸려 들어간 적이 있음).
+- OS 독립 crate의 테스트는 절대경로·구분자를 하드코딩하지 않는다 (Windows CI가 잡아낸 적이 있음).
 
 ## 개발 모드로 KWin에서 시험하기 (사용자 환경을 바꾸므로 사용자가 직접 실행)
 ```sh
