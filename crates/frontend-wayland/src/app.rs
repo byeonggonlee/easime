@@ -10,18 +10,23 @@
 use crate::log;
 use crate::protocol::client::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
 use crate::protocol::client::zwp_input_method_v1::{self, ZwpInputMethodV1};
+use crate::timer::Timer;
 use crate::toggle::{Decision, ToggleTracker};
 use crate::translate::{case_from_shift, is_modifier_keysym, translate};
 use engine_hangul::HangulEngine;
 use ime_core::{EngineOutput, InputEngine, Modifiers};
+use rustix::event::{PollFd, PollFlags, poll};
+use rustix::io::Errno;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fs::File;
+use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
+use wayland_client::backend::WaylandError;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_keyboard::{self, KeyState, KeymapFormat, WlKeyboard};
 use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, event_created_child};
+use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum, event_created_child};
 use xkbcommon::xkb;
 
 /// Preedit style value for "underline" (see text-input-v1 `preedit_style`).
@@ -68,11 +73,13 @@ struct App {
     /// Keys whose press we consumed; their release must be dropped too.
     swallowed: HashSet<u32>,
     toggle: ToggleTracker,
+    /// Fires when a consumed key should repeat.
+    timer: Timer,
 }
 
 impl App {
-    fn new() -> Self {
-        Self {
+    fn new() -> std::io::Result<Self> {
+        Ok(Self {
             engine: HangulEngine::new(),
             korean: true,
             context: None,
@@ -82,7 +89,14 @@ impl App {
             xkb: None,
             swallowed: HashSet::new(),
             toggle: ToggleTracker::new(),
-        }
+            timer: Timer::new()?,
+        })
+    }
+
+    /// The repeat timer fired.
+    fn on_timer(&mut self) {
+        // Draining the fd is all there is to do until repeat is wired in.
+        let _ = self.timer.take_expirations();
     }
 
     fn activate(&mut self, context: ZwpInputMethodContextV1, qh: &QueueHandle<App>) {
@@ -413,9 +427,15 @@ impl Error for RunError {}
 pub fn run() -> Result<std::convert::Infallible, RunError> {
     log::init();
     log!("easime starting");
+    let connection = Connection::connect_to_env().map_err(|e| RunError::Startup(e.to_string()))?;
+    run_on(&connection)
+}
+
+/// Like [`run`], but on an already established connection (used by tests with
+/// a fake compositor).
+pub fn run_on(connection: &Connection) -> Result<std::convert::Infallible, RunError> {
     let startup = |e: &dyn std::fmt::Display| RunError::Startup(e.to_string());
-    let connection = Connection::connect_to_env().map_err(|e| startup(&e))?;
-    let (globals, mut queue) = registry_queue_init::<App>(&connection).map_err(|e| startup(&e))?;
+    let (globals, mut queue) = registry_queue_init::<App>(connection).map_err(|e| startup(&e))?;
     let qh = queue.handle();
     let _input_method: ZwpInputMethodV1 = globals.bind(&qh, 1..=1, ()).map_err(|e| {
         RunError::Startup(format!(
@@ -425,11 +445,66 @@ pub fn run() -> Result<std::convert::Infallible, RunError> {
     })?;
     log!("bound zwp_input_method_v1");
 
-    let mut app = App::new();
+    let mut app = App::new().map_err(|e| startup(&e))?;
+    event_loop(&mut queue, &mut app)
+}
+
+/// Dispatch Wayland events and timer expirations until something fails.
+fn event_loop(
+    queue: &mut EventQueue<App>,
+    app: &mut App,
+) -> Result<std::convert::Infallible, RunError> {
+    let runtime = |e: &dyn std::fmt::Display| RunError::Runtime(e.to_string());
     loop {
-        queue
-            .blocking_dispatch(&mut app)
-            .map_err(|e| RunError::Runtime(e.to_string()))?;
+        queue.dispatch_pending(app).map_err(|e| runtime(&e))?;
+
+        // Push our requests out; if the socket is full, also wait for POLLOUT.
+        let want_write = match queue.flush() {
+            Ok(()) => false,
+            Err(WaylandError::Io(e)) if e.kind() == ErrorKind::WouldBlock => true,
+            Err(e) => return Err(runtime(&e)),
+        };
+
+        // `None` means events are already queued; dispatch them first.
+        let Some(guard) = queue.prepare_read() else {
+            continue;
+        };
+
+        let mut wayland_flags = PollFlags::IN;
+        if want_write {
+            wayland_flags |= PollFlags::OUT;
+        }
+        let (wayland_ready, timer_ready) = {
+            let wayland_fd = guard.connection_fd();
+            let timer_fd = app.timer.as_fd();
+            let mut fds = [
+                PollFd::new(&wayland_fd, wayland_flags),
+                PollFd::new(&timer_fd, PollFlags::IN),
+            ];
+            match poll(&mut fds, None) {
+                Ok(_) => {}
+                Err(Errno::INTR) => continue,
+                Err(e) => return Err(runtime(&e)),
+            }
+            let ready = PollFlags::IN | PollFlags::ERR | PollFlags::HUP;
+            (
+                fds[0].revents().intersects(ready),
+                fds[1].revents().intersects(PollFlags::IN),
+            )
+        };
+
+        if wayland_ready {
+            match guard.read() {
+                Ok(_) => {}
+                Err(WaylandError::Io(e)) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => return Err(runtime(&e)),
+            }
+        } else {
+            drop(guard);
+        }
+        if timer_ready {
+            app.on_timer();
+        }
     }
 }
 

@@ -8,4 +8,4 @@ pub mod timer;
 pub mod toggle;
 pub mod translate;
 
-pub use app::{RunError, run};
+pub use app::{RunError, run, run_on};
