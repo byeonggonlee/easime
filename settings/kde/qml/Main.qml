@@ -33,6 +33,28 @@ Kirigami.ApplicationWindow {
         { name: "appearance", file: "AppearancePage.qml", title: qsTr("모양"), icon: "preferences-desktop-theme" }
     ]
 
+    // One line per visible item that has text: what it says, where it is on
+    // the page and how big, and whether it is checked or disabled. The CI
+    // prints this so a page can be read without seeing it.
+    function describe(item, page, depth, lines) {
+        if (!item || !item.visible || depth > 16) {
+            return
+        }
+        if (typeof item.text === "string" && item.text !== "") {
+            var at = item.mapToItem(page, 0, 0)
+            var kind = item.toString().split("_QML")[0].split("(")[0]
+            lines.push("  ".repeat(Math.min(depth, 8)) + kind + " " + JSON.stringify(item.text.substring(0, 70))
+                + " @" + Math.round(at.x) + "," + Math.round(at.y)
+                + " " + Math.round(item.width) + "x" + Math.round(item.height)
+                + (item.checked === true ? " checked" : "")
+                + (item.enabled === false ? " disabled" : ""))
+        }
+        var kids = item.children
+        for (var i = 0; i < kids.length; ++i) {
+            describe(kids[i], page, depth + 1, lines)
+        }
+    }
+
     function show(index) {
         if (index === current) {
             return
@@ -100,6 +122,10 @@ Kirigami.ApplicationWindow {
         onTriggered: {
             if (step > 0) {
                 var name = root.entries[step - 1].name
+                var lines = []
+                describe(root.pageStack.currentItem, root.pageStack.currentItem, 0, lines)
+                console.info("STRUCTURE " + name + " (" + root.pageStack.currentItem.width + "x"
+                    + root.pageStack.currentItem.height + ")\n" + lines.join("\n"))
                 var path = root.screenshotDir + "/" + name + ".png"
                 var requested = root.pageStack.grabToImage(function (result) {
                     console.info("SCREENSHOT " + name + " " + result.saveToFile(path))

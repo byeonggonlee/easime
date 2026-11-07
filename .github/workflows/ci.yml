@@ -138,83 +138,12 @@ jobs:
           test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 5
           # QML warnings start with the file they come from (qrc:/...), or say
           # <Unknown File>; the window's own checkpoints start with "qml:".
-          if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.log; then
+          # Kirigami creates each page without a parent and puts it in the page
+          # row afterwards, which Qt reports once per page; the pages do render.
+          grep -v 'Created graphical object was not placed in the graphics scene' settings.log > settings.checked || true
+          if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.checked; then
             echo "QML reported warnings or errors (above)"; exit 1
           fi
-      # TEMPORARY: describe every page picture as text (how much of it is
-      # background, where the content is, a coarse density map) so the pages
-      # can be judged from the log. Remove once the pages were checked.
-      - name: Describe the pictures as text
-        if: always()
-        run: |
-          cat > /tmp/sketch.py <<'PY'
-          import struct, sys, zlib
-          from collections import Counter
-
-          def read_png(path):
-              data = open(path, "rb").read()
-              assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
-              pos, idat = 8, b""
-              while pos < len(data):
-                  n, kind = struct.unpack(">I4s", data[pos:pos + 8])
-                  body = data[pos + 8:pos + 8 + n]
-                  pos += 12 + n
-                  if kind == b"IHDR":
-                      w, h, depth, ctype = struct.unpack(">IIBB", body[:10])
-                  elif kind == b"IDAT":
-                      idat += body
-              assert depth == 8 and ctype in (2, 6), (depth, ctype)
-              bpp = 3 if ctype == 2 else 4
-              raw, stride, rows, prev, i = zlib.decompress(idat), w * bpp, [], bytearray(w * bpp), 0
-              for _ in range(h):
-                  f, line = raw[i], bytearray(raw[i + 1:i + 1 + stride])
-                  i += 1 + stride
-                  for x in range(stride):
-                      a = line[x - bpp] if x >= bpp else 0
-                      b = prev[x]
-                      c = prev[x - bpp] if x >= bpp else 0
-                      if f == 1: line[x] = (line[x] + a) & 255
-                      elif f == 2: line[x] = (line[x] + b) & 255
-                      elif f == 3: line[x] = (line[x] + ((a + b) >> 1)) & 255
-                      elif f == 4:
-                          p = a + b - c
-                          pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-                          pr = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
-                          line[x] = (line[x] + pr) & 255
-                  rows.append(line)
-                  prev = line
-              return w, h, bpp, rows
-
-          for name in sys.argv[1:]:
-              w, h, bpp, rows = read_png("shots/%s.png" % name)
-              pixel = lambda x, y: bytes(rows[y][x * bpp:x * bpp + 3])
-              counts = Counter(pixel(x, y) for y in range(0, h, 2) for x in range(0, w, 2))
-              background, background_n = counts.most_common(1)[0]
-              total = sum(counts.values())
-              cols, lines = 80, 30
-              grid = []
-              ink_x, ink_y = [], []
-              for gy in range(lines):
-                  row = ""
-                  for gx in range(cols):
-                      x0, x1 = gx * w // cols, (gx + 1) * w // cols
-                      y0, y1 = gy * h // lines, (gy + 1) * h // lines
-                      cells = [pixel(x, y) for y in range(y0, y1, 2) for x in range(x0, x1, 2)]
-                      ink = sum(1 for p in cells if p != background) / max(1, len(cells))
-                      if ink > 0.02:
-                          ink_x.append(gx); ink_y.append(gy)
-                      row += " " if ink < 0.02 else "." if ink < 0.10 else ":" if ink < 0.25 else "*" if ink < 0.5 else "#"
-                  grid.append(row)
-              print("=== %s: %dx%d, background #%s is %.0f%% of the picture, %d distinct colours" % (
-                  name, w, h, background.hex(), 100 * background_n / total, len(counts)))
-              if ink_x:
-                  print("content spans columns %d-%d of %d, rows %d-%d of %d" % (
-                      min(ink_x), max(ink_x), cols, min(ink_y), max(ink_y), lines))
-              else:
-                  print("NO CONTENT: the picture is one flat colour")
-              print("\n".join(r.rstrip() for r in grid))
-          PY
-          python3 /tmp/sketch.py general languages shortcuts korean appearance
       - uses: actions/upload-artifact@v4
         if: always()
         with:
