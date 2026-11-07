@@ -16,6 +16,9 @@ const KEY_LEFT: u32 = 0xff51;
 const KEY_UP: u32 = 0xff52;
 const KEY_RIGHT: u32 = 0xff53;
 const KEY_DOWN: u32 = 0xff54;
+const KEY_PAGE_UP: u32 = 0xff55;
+const KEY_PAGE_DOWN: u32 = 0xff56;
+const KEY_HANJA: u32 = 0xff34;
 const KEY_MODE_SWITCH: u32 = 0xff7e;
 const KEY_NUM_LOCK: u32 = 0xff7f;
 const KEY_KP_ENTER: u32 = 0xff8d;
@@ -60,6 +63,9 @@ pub fn translate(keysym: u32, modifiers: Modifiers) -> KeyEvent {
         KEY_UP => Key::Up,
         KEY_RIGHT => Key::Right,
         KEY_DOWN => Key::Down,
+        KEY_PAGE_UP => Key::PageUp,
+        KEY_PAGE_DOWN => Key::PageDown,
+        KEY_HANJA => Key::Hanja,
         // Printable ASCII: the keysym already has Shift applied ('R' vs 'r').
         0x21..=0x7e => Key::Char(char::from(keysym as u8)),
         _ => Key::Other,
@@ -90,6 +96,9 @@ mod tests {
         assert_eq!(translate(0xff1b, NONE).key, Key::Escape);
         assert_eq!(translate(0xff51, NONE).key, Key::Left);
         assert_eq!(translate(0xff54, NONE).key, Key::Down);
+        assert_eq!(translate(0xff34, NONE).key, Key::Hanja);
+        assert_eq!(translate(0xff55, NONE).key, Key::PageUp);
+        assert_eq!(translate(0xff56, NONE).key, Key::PageDown);
     }
 
     #[test]

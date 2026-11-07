@@ -21,7 +21,7 @@ use crate::watch::ConfigWatcher;
 use easime_config::{BackspaceUnit, Config};
 use engine_hangul::{BackspaceMode, HangulEngine};
 use engine_japanese::JapaneseEngine;
-use ime_core::{EngineOutput, InputEngine, KeyEvent, Language, LanguageSwitcher, Modifiers};
+use ime_core::{EngineOutput, InputEngine, Key, KeyEvent, Language, LanguageSwitcher, Modifiers};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 use std::collections::HashMap;
@@ -119,6 +119,7 @@ pub(crate) struct App {
     indicator: IndicatorSettings,
     /// Fires when the indicator box has been shown long enough.
     indicator_timer: Timer,
+    candidates_visible: bool,
 }
 
 /// The `[appearance]` settings the indicator box needs.
@@ -198,6 +199,7 @@ impl App {
             panel: None,
             indicator: IndicatorSettings::from_config(config),
             indicator_timer: Timer::new()?,
+            candidates_visible: false,
         })
     }
 
@@ -235,7 +237,7 @@ impl App {
     /// Flash the box for the current language next to the text cursor, if
     /// that is enabled, possible, and a text field has focus.
     fn show_indicator(&mut self) {
-        if !self.indicator.enabled || self.context.is_none() {
+        if !self.indicator.enabled || self.context.is_none() || self.candidates_visible {
             return;
         }
         let Some(panel) = &mut self.panel else {
@@ -252,7 +254,9 @@ impl App {
 
     fn hide_indicator(&mut self) {
         let _ = self.indicator_timer.disarm();
-        if let Some(panel) = &mut self.panel {
+        if !self.candidates_visible
+            && let Some(panel) = &mut self.panel
+        {
             panel.hide();
         }
     }
@@ -370,6 +374,8 @@ impl App {
 
     /// Finish any composition and drop the current context and keyboard grab.
     fn release_focus(&mut self) {
+        self.candidates_visible = false;
+        self.hide_indicator();
         self.stop_repeat();
         let leftover = self.engine().map(|e| e.flush()).unwrap_or_default();
         // Release the grab first. The proxy reports version 1 (it inherits the
@@ -525,6 +531,12 @@ impl App {
 
         let keysym = case_from_shift(keysym, self.shift_held());
         let event = translate(keysym, self.current_modifiers());
+        if event.key == Key::Hanja && !self.panel.as_ref().is_some_and(Panel::can_show_candidates) {
+            // Keep the composition intact when conversion cannot be shown.
+            self.forward_key(serial, time, key, KeyAction::Pressed);
+            return;
+        }
+        let was_converting = self.candidates_visible;
         let Some(engine) = self.engine() else {
             // English: the application gets the key untouched.
             self.forward_key(serial, time, key, KeyAction::Pressed);
@@ -537,7 +549,14 @@ impl App {
             self.swallowed.insert(
                 key,
                 Swallowed {
-                    event: Some(event),
+                    event: if event.key == Key::Hanja
+                        || (was_converting
+                            && matches!(event.key, Key::Enter | Key::Escape | Key::Char('1'..='9')))
+                    {
+                        None
+                    } else {
+                        Some(event)
+                    },
                     serial,
                     time,
                 },
@@ -572,7 +591,38 @@ impl App {
     }
 
     /// Send the engine's result to the application.
-    fn apply(&self, output: EngineOutput) {
+    fn apply(&mut self, mut output: EngineOutput) {
+        // This interaction is currently wired only for Korean Hanja.
+        // Japanese conversion uses different key handling until its candidate
+        // integration is implemented and validated.
+        if let Some(list) = output
+            .candidates
+            .as_ref()
+            .filter(|_| self.switcher.current() == Language::Korean)
+        {
+            let shown = self
+                .panel
+                .as_mut()
+                .is_some_and(|panel| panel.show_candidates(list, &output.preedit.text));
+            if shown {
+                let _ = self.indicator_timer.disarm();
+                self.candidates_visible = true;
+            } else {
+                // Never allow a selection that the user could not see.
+                if let Some(engine) = self.engine() {
+                    output = engine.process_key(KeyEvent::new(Key::Escape));
+                }
+                self.candidates_visible = false;
+                if let Some(panel) = &mut self.panel {
+                    panel.hide();
+                }
+            }
+        } else if self.candidates_visible {
+            self.candidates_visible = false;
+            if let Some(panel) = &mut self.panel {
+                panel.hide();
+            }
+        }
         let Some(context) = &self.context else {
             return;
         };
@@ -668,6 +718,8 @@ impl Dispatch<ZwpInputMethodContextV1, ()> for App {
                 if let Some(engine) = app.engine() {
                     engine.reset();
                 }
+                app.candidates_visible = false;
+                app.hide_indicator();
             }
             _ => {}
         }

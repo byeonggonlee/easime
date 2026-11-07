@@ -1,6 +1,7 @@
 //! Wayland frontend: connects the easime engines to KWin.
 
 pub mod app;
+mod candidate;
 pub mod font;
 pub mod indicator;
 pub mod log;

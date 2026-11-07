@@ -36,7 +36,7 @@
 
 use crate::app::App;
 use crate::indicator::{BOX_SIZE, Bitmap, glyph_for, render};
-use ime_core::Language;
+use ime_core::{CandidateList, Language};
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
 use std::collections::HashMap;
 use std::fs::File;
@@ -120,6 +120,8 @@ pub struct Panel {
     surface: Option<PanelSurface>,
     buffers: HashMap<char, WlBuffer>,
     mapped: bool,
+    painter: crate::candidate::Painter,
+    candidate_buffer: Option<WlBuffer>,
 }
 
 impl Panel {
@@ -137,6 +139,8 @@ impl Panel {
             surface: None,
             buffers: HashMap::new(),
             mapped: false,
+            painter: crate::candidate::Painter::new(),
+            candidate_buffer: None,
         }
     }
 
@@ -194,7 +198,34 @@ impl Panel {
         self.mapped = true;
     }
 
-    /// Unmap the box. The surface stays, to be reused by the next `show`.
+    /// Whether a candidate list can be displayed with readable text.
+    pub fn can_show_candidates(&self) -> bool {
+        self.painter.available()
+    }
+
+    pub fn show_candidates(&mut self, list: &CandidateList, reading: &str) -> bool {
+        let Some(bitmap) = self.painter.render(list, reading) else {
+            return false;
+        };
+        let buffer = match make_buffer(&self.shm, &bitmap, &self.qh) {
+            Ok(buffer) => buffer,
+            Err(error) => {
+                crate::log!("candidate buffer failed: {error}");
+                return false;
+            }
+        };
+        let surface = &self.ensure_surface().surface;
+        surface.attach(Some(&buffer), 0, 0);
+        surface.damage(0, 0, bitmap.width as i32, bitmap.height as i32);
+        surface.commit();
+        if let Some(previous) = self.candidate_buffer.replace(buffer) {
+            previous.destroy();
+        }
+        self.mapped = true;
+        true
+    }
+
+    /// Unmap the shared overlay without destroying its role.
     pub fn hide(&mut self) {
         if !self.mapped {
             return;
