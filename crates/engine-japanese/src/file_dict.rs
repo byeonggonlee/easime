@@ -309,7 +309,7 @@ impl FileDictionary {
             let block = data[self.cand_blob..self.cand_blob + cand_blob_len]
                 .get(cand_start..cand_end)
                 .ok_or_else(|| corrupt("candidate offsets out of order or out of range"))?;
-            if Self::parse_block(block).is_none() {
+            if Self::walk_block(block, |_| {}).is_none() {
                 return Err(corrupt("malformed candidate block"));
             }
             key_start = key_end;
@@ -329,14 +329,19 @@ impl FileDictionary {
     /// Split a candidate block into its strings. `None` if the block is
     /// malformed (it must be consumed exactly, with non-empty UTF-8 items).
     fn parse_block(block: &[u8]) -> Option<Vec<&str>> {
+        let mut out = Vec::new();
+        Self::walk_block(block, |candidate| out.push(candidate))?;
+        Some(out)
+    }
+
+    /// Call `f` with each candidate of a block. `None` if the block is
+    /// malformed; nothing is allocated here.
+    fn walk_block<'a>(block: &'a [u8], mut f: impl FnMut(&'a str)) -> Option<()> {
         let mut pos = 0;
         let count = read_varint(block, &mut pos)?;
         if count == 0 {
             return None;
         }
-        // Each candidate takes at least two bytes, which bounds the
-        // allocation by the (already size-checked) block.
-        let mut out = Vec::with_capacity((count as usize).min(block.len() / 2));
         for _ in 0..count {
             let len = read_varint(block, &mut pos)? as usize;
             if len == 0 {
@@ -344,9 +349,9 @@ impl FileDictionary {
             }
             let bytes = block.get(pos..pos.checked_add(len)?)?;
             pos += len;
-            out.push(std::str::from_utf8(bytes).ok()?);
+            f(std::str::from_utf8(bytes).ok()?);
         }
-        (pos == block.len()).then_some(out)
+        (pos == block.len()).then_some(())
     }
 
     fn key(&self, index: usize) -> Option<&[u8]> {
@@ -376,6 +381,11 @@ impl FileDictionary {
             }
         }
         None
+    }
+
+    /// The `index`-th reading in sorted order, for iterating a dictionary.
+    pub fn reading_at(&self, index: usize) -> Option<&str> {
+        std::str::from_utf8(self.key(index)?).ok()
     }
 
     /// Number of readings.
@@ -443,9 +453,11 @@ mod tests {
         let d = FileDictionary::from_bytes(encode_entries(&e)).unwrap();
         assert_eq!(d.len(), e.len());
         assert_eq!(d.meta(), "meta ✓");
-        for (reading, candidates) in &e {
+        for (i, (reading, candidates)) in e.iter().enumerate() {
             assert_eq!(&d.lookup(reading), candidates, "{reading}");
+            assert_eq!(d.reading_at(i), Some(reading.as_str()));
         }
+        assert_eq!(d.reading_at(e.len()), None);
     }
 
     #[test]
