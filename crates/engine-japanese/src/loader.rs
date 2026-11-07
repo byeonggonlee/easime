@@ -257,25 +257,31 @@ mod tests {
 
     #[test]
     fn user_dir_follows_the_xdg_rules() {
-        let dir = |x: Option<&str>, h: Option<&str>| {
-            user_dictionary_dir_from(x.map(OsStr::new), h.map(OsStr::new))
-        };
+        let dir = |x: Option<&OsStr>, h: Option<&OsStr>| user_dictionary_dir_from(x, h);
+        // Absolute paths are platform specific ("/data" has no drive letter,
+        // so Windows does not call it absolute): build them from the
+        // temporary directory, which is absolute everywhere.
+        let data = std::env::temp_dir().join("data");
+        let home = std::env::temp_dir().join("home");
+        let easime = |base: &Path| base.join("easime").join("dictionary");
+        let from_home = easime(&home.join(".local").join("share"));
+
         assert_eq!(
-            dir(Some("/data"), Some("/home/u")),
-            Some(PathBuf::from("/data/easime/dictionary"))
+            dir(Some(data.as_os_str()), Some(home.as_os_str())),
+            Some(easime(&data))
         );
-        assert_eq!(
-            dir(None, Some("/home/u")),
-            Some(PathBuf::from("/home/u/.local/share/easime/dictionary"))
-        );
+        assert_eq!(dir(None, Some(home.as_os_str())), Some(from_home.clone()));
         // A relative XDG_DATA_HOME is ignored.
         assert_eq!(
-            dir(Some("relative"), Some("/home/u")),
-            Some(PathBuf::from("/home/u/.local/share/easime/dictionary"))
+            dir(Some(OsStr::new("relative")), Some(home.as_os_str())),
+            Some(from_home.clone())
         );
-        assert_eq!(dir(Some(""), Some("/home/u")), dir(None, Some("/home/u")));
+        assert_eq!(
+            dir(Some(OsStr::new("")), Some(home.as_os_str())),
+            Some(from_home)
+        );
         assert_eq!(dir(None, None), None);
-        assert_eq!(dir(None, Some("")), None);
+        assert_eq!(dir(None, Some(OsStr::new(""))), None);
     }
 
     #[test]
