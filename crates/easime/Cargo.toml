@@ -30,6 +30,9 @@ assets = [
     ["../../README.md", "usr/share/doc/easime/", "644"],
     ["../../LICENSE-MIT", "usr/share/doc/easime/", "644"],
     ["../../LICENSE-APACHE", "usr/share/doc/easime/", "644"],
+    ["../../THIRD_PARTY_LICENSES.md", "usr/share/doc/easime/", "644"],
+    # Built by `scripts/build-dictionary.sh sample|mozc` before packaging.
+    ["../../target/dictionary/mozc.bin", "usr/share/easime/dictionary/", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -41,6 +44,9 @@ assets = [
     { source = "README.md", dest = "/usr/share/doc/easime/README.md", mode = "0644", doc = true },
     { source = "LICENSE-MIT", dest = "/usr/share/licenses/easime/LICENSE-MIT", mode = "0644", license = true },
     { source = "LICENSE-APACHE", dest = "/usr/share/licenses/easime/LICENSE-APACHE", mode = "0644", license = true },
+    { source = "THIRD_PARTY_LICENSES.md", dest = "/usr/share/licenses/easime/THIRD_PARTY_LICENSES.md", mode = "0644", license = true },
+    # Built by `scripts/build-dictionary.sh sample|mozc` before packaging.
+    { source = "target/dictionary/mozc.bin", dest = "/usr/share/easime/dictionary/mozc.bin", mode = "0644" },
 ]
 
 [package.metadata.generate-rpm.requires]
