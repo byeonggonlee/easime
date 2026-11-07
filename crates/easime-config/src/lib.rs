@@ -6,5 +6,5 @@
 mod model;
 mod store;
 
-pub use model::{BackspaceUnit, Config, Korean, Shortcuts, ToggleKey};
+pub use model::{BackspaceUnit, Config, Korean, Languages, Shortcuts, ToggleKey};
 pub use store::{StoreError, config_path};

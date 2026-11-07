@@ -1,5 +1,6 @@
 //! The settings data model.
 
+use ime_core::Language;
 use serde::{Deserialize, Serialize};
 
 /// Which key switches between English and the current language.
@@ -36,6 +37,21 @@ pub enum BackspaceUnit {
     Syllable,
 }
 
+/// Which languages the toggle key cycles through, after English.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Languages {
+    pub enabled: Vec<Language>,
+}
+
+impl Default for Languages {
+    fn default() -> Self {
+        Self {
+            enabled: vec![Language::Korean],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Shortcuts {
@@ -52,6 +68,7 @@ pub struct Korean {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub languages: Languages,
     pub shortcuts: Shortcuts,
     pub korean: Korean,
 }
@@ -76,6 +93,25 @@ mod tests {
         let c = Config::default();
         assert_eq!(c.shortcuts.toggle_key, ToggleKey::Both);
         assert_eq!(c.korean.backspace, BackspaceUnit::Jamo);
+    }
+
+    #[test]
+    fn korean_is_the_only_default_language() {
+        assert_eq!(Config::default().languages.enabled, vec![Language::Korean]);
+    }
+
+    #[test]
+    fn languages_are_read_in_order() {
+        let c = Config::from_toml("[languages]\nenabled = [\"japanese\", \"korean\"]\n").unwrap();
+        assert_eq!(
+            c.languages.enabled,
+            vec![Language::Japanese, Language::Korean]
+        );
+    }
+
+    #[test]
+    fn unknown_language_is_an_error() {
+        assert!(Config::from_toml("[languages]\nenabled = [\"klingon\"]\n").is_err());
     }
 
     #[test]
@@ -105,6 +141,9 @@ mod tests {
     #[test]
     fn round_trips() {
         let c = Config {
+            languages: Languages {
+                enabled: vec![Language::Korean, Language::Japanese],
+            },
             shortcuts: Shortcuts {
                 toggle_key: ToggleKey::Hangul,
             },
