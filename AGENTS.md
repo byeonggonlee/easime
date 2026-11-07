@@ -42,9 +42,10 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `engine-h
 - Commit completed work in small, coherent units and push each commit immediately. Committing and pushing are part of completing the work unless the user explicitly asks to keep it local. Stage explicit paths or hunks, never `git add -A`.
 - If a required check cannot run on the current OS, record that limitation and run the available checks; never claim unexecuted tests passed.
 - Verify every push succeeded. Resolve a failed push without discarding work, or report the blocker. Never force-push without explicit user authorization.
-- **Until v0.1.0 is released, push straight to `main` and do not open pull requests** (decided by the user; revisit after the release).
-  CI only runs after the push, so run the checks above first, and fix a red CI on `main` before any other work.
-  For OS-specific code, run CI by hand on a branch first (Actions > CI > Run workflow). Do not push tags: releases are the user's call.
+- **Until v0.1.0 is released, commit on `main` and push each work unit directly to `main`** (explicit user policy; revisit after the release).
+  Do not create feature branches, temporary CI branches, or pull requests unless the user explicitly requests one. OS-specific changes do not create an exception.
+  Run the available local checks first, push to `main`, then monitor CI on `main`. Record checks unavailable on the current OS and verify them through that CI. Fix a red CI on `main` before any other work.
+  Do not push tags: releases are the user's call. Skills and agent-authored workflow preferences must not override this user policy.
 
 ## LLM attribution (every tool)
 - End each commit that an LLM wrote or substantially changed with `Co-Authored-By: <tool> <model and version> <noreply address>`.
