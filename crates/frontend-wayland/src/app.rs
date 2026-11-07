@@ -14,7 +14,8 @@ use crate::repeat::RepeatInfo;
 use crate::timer::Timer;
 use crate::toggle::{Decision, ToggleTracker};
 use crate::translate::{case_from_shift, is_modifier_keysym, translate};
-use engine_hangul::HangulEngine;
+use easime_config::{BackspaceUnit, Config};
+use engine_hangul::{BackspaceMode, HangulEngine};
 use ime_core::{EngineOutput, InputEngine, KeyEvent, Modifiers};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
@@ -98,9 +99,13 @@ struct App {
 }
 
 impl App {
-    fn new() -> std::io::Result<Self> {
+    fn new(config: &Config) -> std::io::Result<Self> {
+        let backspace = match config.korean.backspace {
+            BackspaceUnit::Jamo => BackspaceMode::Jamo,
+            BackspaceUnit::Syllable => BackspaceMode::Syllable,
+        };
         Ok(Self {
-            engine: HangulEngine::new(),
+            engine: HangulEngine::with_backspace_mode(backspace),
             korean: true,
             context: None,
             keyboard: None,
@@ -110,7 +115,7 @@ impl App {
             swallowed: HashMap::new(),
             repeat_info: RepeatInfo::default(),
             repeating: None,
-            toggle: ToggleTracker::new(),
+            toggle: ToggleTracker::with_setting(config.shortcuts.toggle_key),
             timer: Timer::new()?,
         })
     }
@@ -528,13 +533,28 @@ impl Error for RunError {}
 pub fn run() -> Result<std::convert::Infallible, RunError> {
     log::init();
     log!("easime starting");
+    let config = match Config::load() {
+        Ok(config) => config,
+        Err(e) => {
+            log!("settings not loaded, using defaults: {e}");
+            Config::default()
+        }
+    };
     let connection = Connection::connect_to_env().map_err(|e| RunError::Startup(e.to_string()))?;
-    run_on(&connection)
+    run_with(&connection, &config)
 }
 
-/// Like [`run`], but on an already established connection (used by tests with
-/// a fake compositor).
+/// Like [`run`], but on an already established connection with default
+/// settings (used by tests with a fake compositor).
 pub fn run_on(connection: &Connection) -> Result<std::convert::Infallible, RunError> {
+    run_with(connection, &Config::default())
+}
+
+/// Serve input on `connection` using the given settings.
+pub fn run_with(
+    connection: &Connection,
+    config: &Config,
+) -> Result<std::convert::Infallible, RunError> {
     let startup = |e: &dyn std::fmt::Display| RunError::Startup(e.to_string());
     let (globals, mut queue) = registry_queue_init::<App>(connection).map_err(|e| startup(&e))?;
     let qh = queue.handle();
@@ -546,7 +566,7 @@ pub fn run_on(connection: &Connection) -> Result<std::convert::Infallible, RunEr
     })?;
     log!("bound zwp_input_method_v1");
 
-    let mut app = App::new().map_err(|e| startup(&e))?;
+    let mut app = App::new(config).map_err(|e| startup(&e))?;
     event_loop(&mut queue, &mut app)
 }
 
