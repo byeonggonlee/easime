@@ -268,6 +268,12 @@ impl Fake {
 
     /// Like [`Fake::start`], with the given settings.
     pub fn start_with(config: Config) -> Self {
+        Self::start_watching(config, None)
+    }
+
+    /// Like [`Fake::start_with`], and the client reloads settings whenever the
+    /// file at `settings_path` changes.
+    pub fn start_watching(config: Config, settings_path: Option<std::path::PathBuf>) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socketpair");
         let display = Display::<State>::new().expect("display");
         display
@@ -281,7 +287,9 @@ impl Fake {
         let (tx, client_done) = channel();
         let client = std::thread::spawn(move || {
             let result = match Connection::from_socket(client_end) {
-                Ok(connection) => frontend_wayland::run_with(&connection, &config),
+                Ok(connection) => {
+                    frontend_wayland::run_watching(&connection, &config, settings_path.as_deref())
+                }
                 Err(e) => Err(frontend_wayland::RunError::Startup(e.to_string())),
             };
             let _ = tx.send(result);

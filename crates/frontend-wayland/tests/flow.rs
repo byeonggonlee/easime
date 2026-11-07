@@ -660,3 +660,92 @@ fn held_backspace_deletes_jamo_then_hands_over_to_the_app() {
     let requests = fake.settle();
     assert_eq!(forwarded(&requests), [(KEY_BACKSPACE, 0)], "{requests:#?}");
 }
+
+// ---------------------------------------------------------------------------
+// Live settings reload
+// ---------------------------------------------------------------------------
+
+/// A fresh settings file path in a private temp directory.
+fn settings_file(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("easime-flow-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir.join("config.toml")
+}
+
+#[test]
+fn saving_settings_changes_the_toggle_key_without_a_restart() {
+    let path = settings_file("toggle");
+    let config = easime_config::Config::default(); // both toggle keys
+    config.save_to(&path).unwrap();
+    let mut fake = Fake::start_watching(config.clone(), Some(path.clone()));
+    fake.activate();
+
+    // Before: the Hangul key toggles to English (and is consumed).
+    fake.tap_all(&[KEY_HANGEUL]);
+    assert_eq!(forwarded(&fake.settle()), []);
+    fake.tap_all(&[KEY_HANGEUL]); // back to Korean
+
+    // The settings app saves "Right Alt only".
+    let mut updated = config;
+    updated.shortcuts.toggle_key = easime_config::ToggleKey::RightAlt;
+    updated.save_to(&path).unwrap();
+    fake.barrier();
+    fake.take_requests();
+
+    // After: the Hangul key is an ordinary key and reaches the application.
+    fake.tap_all(&[KEY_HANGEUL]);
+    let requests = fake.settle();
+    assert_eq!(
+        forwarded(&requests),
+        [(KEY_HANGEUL, 1), (KEY_HANGEUL, 0)],
+        "{requests:#?}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn saving_settings_can_enable_japanese_and_keeps_the_current_language() {
+    let path = settings_file("languages");
+    let config = easime_config::Config::default(); // Korean only
+    config.save_to(&path).unwrap();
+    let mut fake = Fake::start_watching(config.clone(), Some(path.clone()));
+    fake.activate();
+
+    fake.tap_all(&[KEY_G, KEY_K]); // 하, still being composed
+    fake.barrier(); // the client has handled the keys before settings change
+
+    let mut updated = config;
+    updated.languages.enabled = vec![ime_core::Language::Korean, ime_core::Language::Japanese];
+    updated.save_to(&path).unwrap();
+    fake.barrier();
+    // Applying settings finishes the text in progress.
+    let requests = fake.take_requests();
+    assert_eq!(commits(&requests), ["하"], "{requests:#?}");
+
+    // Still Korean, and the cycle now continues to Japanese.
+    fake.press(KEY_G);
+    assert_eq!(last_preedit(&fake.settle()), Some("ㅎ"));
+    fake.tap_all(&[KEY_HANGEUL]);
+    fake.tap_all(&[KEY_K, KEY_A]);
+    assert_eq!(last_preedit(&fake.settle()), Some("か"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn an_unreadable_settings_file_is_ignored() {
+    let path = settings_file("broken");
+    let config = easime_config::Config::default();
+    config.save_to(&path).unwrap();
+    let mut fake = Fake::start_watching(config, Some(path.clone()));
+    fake.activate();
+
+    fake.barrier();
+    std::fs::write(&path, "this is = = not toml").unwrap();
+    fake.barrier();
+    fake.take_requests();
+
+    // Typing keeps working with the previous settings.
+    fake.tap_all(&[KEY_G, KEY_K]);
+    assert_eq!(last_preedit(&fake.settle()), Some("하"));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
