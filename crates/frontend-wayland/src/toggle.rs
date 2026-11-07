@@ -7,6 +7,7 @@
 //!   forwarded to the application and the toggle is cancelled.
 
 use crate::translate::{KEY_ALT_R, KEY_HANGUL};
+use easime_config::ToggleKey;
 
 /// A key press that was held back and may have to be forwarded later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +30,21 @@ pub enum Decision {
 
 #[derive(Debug, Default)]
 pub struct ToggleTracker {
+    setting: ToggleKey,
     pending: Option<PendingPress>,
 }
 
 impl ToggleTracker {
+    /// Both toggle keys enabled (the default setting).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_setting(setting: ToggleKey) -> Self {
+        Self {
+            setting,
+            pending: None,
+        }
     }
 
     /// Report a key press. If a held-back press is returned, forward it to the
@@ -47,12 +57,13 @@ impl ToggleTracker {
         keysym: u32,
     ) -> (Option<PendingPress>, Decision) {
         match keysym {
-            KEY_HANGUL => (self.pending.take(), Decision::Toggle),
-            KEY_ALT_R if self.pending.is_none() => {
-                self.pending = Some(PendingPress { serial, time, key });
+            KEY_HANGUL if self.setting.uses_hangul_key() => (self.pending.take(), Decision::Toggle),
+            KEY_ALT_R if self.setting.uses_right_alt() => {
+                if self.pending.is_none() {
+                    self.pending = Some(PendingPress { serial, time, key });
+                }
                 (None, Decision::Swallow)
             }
-            KEY_ALT_R => (None, Decision::Swallow),
             _ => (self.pending.take(), Decision::Pass),
         }
     }
@@ -138,6 +149,28 @@ mod tests {
         let mut t = ToggleTracker::new();
         // ISO_Level3_Shift
         assert_eq!(t.on_press(1, 10, 100, 0xfe03), (None, Decision::Pass));
+    }
+
+    #[test]
+    fn hangul_only_setting_leaves_right_alt_alone() {
+        let mut t = ToggleTracker::with_setting(ToggleKey::Hangul);
+        assert_eq!(
+            t.on_press(1, 10, ALT_R_CODE, KEY_ALT_R),
+            (None, Decision::Pass)
+        );
+        assert_eq!(t.on_release(ALT_R_CODE), Decision::Pass);
+        assert_eq!(t.on_press(2, 20, 122, KEY_HANGUL), (None, Decision::Toggle));
+    }
+
+    #[test]
+    fn right_alt_only_setting_leaves_hangul_key_alone() {
+        let mut t = ToggleTracker::with_setting(ToggleKey::RightAlt);
+        assert_eq!(t.on_press(1, 10, 122, KEY_HANGUL), (None, Decision::Pass));
+        assert_eq!(
+            t.on_press(2, 20, ALT_R_CODE, KEY_ALT_R),
+            (None, Decision::Swallow)
+        );
+        assert_eq!(t.on_release(ALT_R_CODE), Decision::Toggle);
     }
 
     #[test]
