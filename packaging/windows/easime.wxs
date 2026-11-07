@@ -28,9 +28,15 @@
         <Component Id="Demo">
           <File Id="EasimeCliExe" Source="$(Binaries)/easime-cli.exe" />
         </Component>
-        <Component Id="Licenses">
+        <!-- One file per component: a component with an automatic GUID may only
+             hold several files if one of them is versioned. -->
+        <Component Id="LicenseMit">
           <File Id="LicenseMit" Source="$(Root)/LICENSE-MIT" />
+        </Component>
+        <Component Id="LicenseApache">
           <File Id="LicenseApache" Source="$(Root)/LICENSE-APACHE" />
+        </Component>
+        <Component Id="ThirdParty">
           <File Id="ThirdParty" Source="$(Root)/THIRD_PARTY_LICENSES.md" />
         </Component>
         <!-- Only with ADDLOCAL=ALL (or ADDLOCAL=Main,AddToPath): the folder is
@@ -46,7 +52,9 @@
 
     <Feature Id="Main" Title="easime" Level="1" AllowAdvertise="no" ConfigurableDirectory="INSTALLFOLDER">
       <ComponentRef Id="Demo" />
-      <ComponentRef Id="Licenses" />
+      <ComponentRef Id="LicenseMit" />
+      <ComponentRef Id="LicenseApache" />
+      <ComponentRef Id="ThirdParty" />
       <Feature Id="AddToPath" Title="Add easime to the PATH" Level="2" AllowAdvertise="no">
         <ComponentRef Id="PathEntry" />
       </Feature>
