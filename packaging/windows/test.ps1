@@ -31,7 +31,8 @@ function Entries {
         Where-Object { $_.DisplayName -eq "easime" })
 }
 
-function Machine-Path { [Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" }
+# The folders on the system PATH, without the trailing backslash the installer writes.
+function Machine-Path { [Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" | ForEach-Object { $_.TrimEnd("\") } }
 
 Assert (-not (Test-Path $dir)) "nothing is installed before the test"
 
