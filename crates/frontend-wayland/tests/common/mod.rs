@@ -31,6 +31,12 @@ use xkbcommon::xkb;
 
 use self::protocol::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
 use self::protocol::zwp_input_method_v1::{self, ZwpInputMethodV1};
+use self::protocol::zwp_input_panel_v1::ZwpInputPanelV1;
+
+mod panel;
+pub use self::panel::{Globals, PanelEv, Shot};
+use wayland_server::protocol::wl_compositor::WlCompositor;
+use wayland_server::protocol::wl_shm::WlShm;
 
 /// Server-side bindings for the shipped protocol XML (generated here so the
 /// crate itself does not need server code).
@@ -101,6 +107,10 @@ pub enum Req {
 /// Compositor-side state, mutated by the request handlers.
 #[derive(Default)]
 pub struct State {
+    /// Surface, shm and input panel activity (see [`PanelEv`]).
+    pub panel_log: Vec<PanelEv>,
+    /// True while the latest commit left a buffer attached.
+    pub panel_mapped: bool,
     input_method: Option<ZwpInputMethodV1>,
     context: Option<ZwpInputMethodContextV1>,
     keyboard: Option<WlKeyboard>,
@@ -274,11 +284,39 @@ impl Fake {
     /// Like [`Fake::start_with`], and the client reloads settings whenever the
     /// file at `settings_path` changes.
     pub fn start_watching(config: Config, settings_path: Option<std::path::PathBuf>) -> Self {
+        Self::start_full(config, settings_path, Globals::default())
+    }
+
+    /// Like [`Fake::start_with`], offering only the given optional globals.
+    pub fn start_with_globals(config: Config, globals: Globals) -> Self {
+        Self::start_full(config, None, globals)
+    }
+
+    /// The general form: settings, a watched settings file and the optional
+    /// globals the compositor offers.
+    pub fn start_full(
+        config: Config,
+        settings_path: Option<std::path::PathBuf>,
+        globals: Globals,
+    ) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socketpair");
         let display = Display::<State>::new().expect("display");
         display
             .handle()
             .create_global::<State, ZwpInputMethodV1, ()>(1, ());
+        if globals.compositor {
+            display
+                .handle()
+                .create_global::<State, WlCompositor, ()>(4, ());
+        }
+        if globals.shm {
+            display.handle().create_global::<State, WlShm, ()>(1, ());
+        }
+        if globals.input_panel {
+            display
+                .handle()
+                .create_global::<State, ZwpInputPanelV1, ()>(1, ());
+        }
         display
             .handle()
             .insert_client(server_end, Arc::new(NoClientData))
@@ -553,6 +591,79 @@ impl Fake {
         let context = self.state.context.as_ref().expect("active context");
         context.commit_state(self.commit_serial);
         self.commit_serial
+    }
+
+    /// Take the surface, shm and input panel events recorded so far.
+    pub fn take_panel_events(&mut self) -> Vec<PanelEv> {
+        std::mem::take(&mut self.state.panel_log)
+    }
+
+    /// Serve the client until a committed buffer is attached, and return its
+    /// content. Events up to and including that commit are consumed.
+    pub fn wait_for_indicator_shown(&mut self) -> Shot {
+        self.wait_until("the indicator to be shown", |s| {
+            s.panel_log.iter().any(|e| {
+                matches!(
+                    e,
+                    PanelEv::Commit {
+                        buffer: Some(_),
+                        ..
+                    }
+                )
+            })
+        });
+        let at = self
+            .state
+            .panel_log
+            .iter()
+            .position(|e| {
+                matches!(
+                    e,
+                    PanelEv::Commit {
+                        buffer: Some(_),
+                        ..
+                    }
+                )
+            })
+            .expect("commit present");
+        let mut rest = self.state.panel_log.split_off(at + 1);
+        let Some(PanelEv::Commit {
+            buffer: Some(shot), ..
+        }) = self.state.panel_log.pop()
+        else {
+            unreachable!()
+        };
+        self.state.panel_log.clear();
+        self.state.panel_log.append(&mut rest);
+        shot
+    }
+
+    /// Serve the client until it has unmapped the panel surface (a commit with
+    /// a null buffer), or destroyed it.
+    pub fn wait_for_indicator_hidden(&mut self) {
+        self.wait_until("the indicator to be hidden", |s| {
+            !s.panel_mapped
+                && s.panel_log.iter().any(|e| {
+                    matches!(
+                        e,
+                        PanelEv::Commit {
+                            attached_null: true,
+                            ..
+                        }
+                    )
+                })
+        });
+    }
+
+    /// True if the panel surface currently has a buffer attached.
+    pub fn indicator_mapped(&self) -> bool {
+        self.state.panel_mapped
+    }
+
+    /// Wait for the client to catch up, then take the panel events.
+    pub fn settle_panel(&mut self) -> Vec<PanelEv> {
+        self.barrier();
+        self.take_panel_events()
     }
 
     /// Send `deactivate` and wait until the client has destroyed the context.
