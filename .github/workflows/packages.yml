@@ -200,7 +200,7 @@ jobs:
           ls -l pkgs
           apt-get update
           apt-get install -y --no-install-recommends desktop-file-utils fonts-dejavu-core ./pkgs/*.deb \
-            || { echo "--- what Debian calls the QML modules:"; apt-cache search qml6-module | grep -iE 'kirigami|kde|qqc2|desktop'; apt-cache search qqc2; exit 1; }
+            || { echo "--- what Debian calls the QML modules:"; apt-cache search qml6-module | grep -iE 'kirigami|qml6-module-org-kde-desktop'; exit 1; }
       - name: The files are where the menu and KWin look for them
         run: |
           test -x /usr/bin/easime
