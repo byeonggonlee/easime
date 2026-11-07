@@ -73,11 +73,13 @@ Kirigami.ApplicationWindow {
     }
 
     // Use a page like a person would, so the CI sees the whole path from a
-    // control to the settings file. The pictures that follow show the result.
+    // control to the settings file. click() is what a user does; toggle()
+    // only flips `checked` and never emits toggled(), which the pages listen to.
+    // The pictures that follow show the result.
     function interact(name, page) {
         if (name === "languages") {
             var japanese = find(page, "switch-japanese")
-            japanese.toggle()
+            japanese.click()
             console.info("INTERACTION japanese-on languages=" + EasimeSettings.languages
                 + " switch=" + japanese.checked + " result=" + EasimeSettings.resultKind)
             var after = []
@@ -85,12 +87,12 @@ Kirigami.ApplicationWindow {
             console.info("STRUCTURE-AFTER languages\n" + after.join("\n"))
         } else if (name === "shortcuts") {
             var hangul = find(page, "choice-hangul")
-            hangul.toggle()
+            hangul.click()
             console.info("INTERACTION toggle-key=" + EasimeSettings.toggleKey
                 + " hangul=" + hangul.checked + " both=" + find(page, "choice-both").checked)
         } else if (name === "appearance") {
             var box = find(page, "box")
-            box.toggle()
+            box.click()
             console.info("INTERACTION indicator-box=" + EasimeSettings.indicatorBox
                 + " checkbox=" + box.checked)
         }
