@@ -8,8 +8,11 @@
 //!    `commit_string` / `preedit_string`) or forward it back with `key`.
 
 use crate::log;
+use crate::panel::Panel;
 use crate::protocol::client::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
 use crate::protocol::client::zwp_input_method_v1::{self, ZwpInputMethodV1};
+use crate::protocol::client::zwp_input_panel_surface_v1::ZwpInputPanelSurfaceV1;
+use crate::protocol::client::zwp_input_panel_v1::ZwpInputPanelV1;
 use crate::repeat::RepeatInfo;
 use crate::timer::Timer;
 use crate::toggle::{Decision, ToggleTracker};
@@ -27,10 +30,17 @@ use std::fs::File;
 use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use wayland_client::backend::WaylandError;
-use wayland_client::globals::{GlobalListContents, registry_queue_init};
+use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
+use wayland_client::protocol::wl_buffer::WlBuffer;
+use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_keyboard::{self, KeyState, KeymapFormat, WlKeyboard};
+use wayland_client::protocol::wl_region::WlRegion;
 use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::protocol::wl_shm::WlShm;
+use wayland_client::protocol::wl_shm_pool::WlShmPool;
+use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, WEnum, event_created_child};
 use xkbcommon::xkb;
 
@@ -83,7 +93,7 @@ struct Swallowed {
     time: u32,
 }
 
-struct App {
+pub(crate) struct App {
     /// One engine per enabled language. English has none: keys pass through.
     engines: HashMap<Language, Box<dyn InputEngine>>,
     /// Which language is active and what the toggle key switches to next.
@@ -104,6 +114,27 @@ struct App {
     timer: Timer,
     /// Where settings are re-read from when the file changes, if watched.
     settings: Option<Settings>,
+    /// The language indicator box; `None` if the compositor cannot show it.
+    panel: Option<Panel>,
+    indicator: IndicatorSettings,
+    /// Fires when the indicator box has been shown long enough.
+    indicator_timer: Timer,
+}
+
+/// The `[appearance]` settings the indicator box needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IndicatorSettings {
+    enabled: bool,
+    duration: Duration,
+}
+
+impl IndicatorSettings {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            enabled: config.appearance.indicator_box,
+            duration: Duration::from_millis(u64::from(config.appearance.indicator_ms)),
+        }
+    }
 }
 
 /// A settings file we reload when it changes.
@@ -164,6 +195,9 @@ impl App {
             toggle: ToggleTracker::with_setting(config.shortcuts.toggle_key),
             timer: Timer::new()?,
             settings: None,
+            panel: None,
+            indicator: IndicatorSettings::from_config(config),
+            indicator_timer: Timer::new()?,
         })
     }
 
@@ -180,11 +214,54 @@ impl App {
         self.engines = engines;
         self.switcher = switcher;
         self.toggle = ToggleTracker::with_setting(config.shortcuts.toggle_key);
+        self.set_indicator(IndicatorSettings::from_config(config));
 
         self.apply(EngineOutput {
             commit: leftover,
             ..EngineOutput::default()
         });
+    }
+
+    /// Take new indicator settings: turning it off hides a visible box.
+    fn set_indicator(&mut self, settings: IndicatorSettings) {
+        self.indicator = settings;
+        if !settings.enabled {
+            self.hide_indicator();
+        } else if let Some(panel) = &self.panel {
+            panel.prepare();
+        }
+    }
+
+    /// Flash the box for the current language next to the text cursor, if
+    /// that is enabled, possible, and a text field has focus.
+    fn show_indicator(&mut self) {
+        if !self.indicator.enabled || self.context.is_none() {
+            return;
+        }
+        let Some(panel) = &mut self.panel else {
+            return;
+        };
+        panel.show(self.switcher.current());
+        // A zero duration would disarm the timer; show it for a moment anyway.
+        let duration = self.indicator.duration.max(Duration::from_millis(1));
+        if self.indicator_timer.arm(duration, Duration::ZERO).is_err() {
+            // Without a timer the box could never go away.
+            panel.hide();
+        }
+    }
+
+    fn hide_indicator(&mut self) {
+        let _ = self.indicator_timer.disarm();
+        if let Some(panel) = &mut self.panel {
+            panel.hide();
+        }
+    }
+
+    /// The indicator timer fired.
+    fn on_indicator_timer(&mut self) {
+        if self.indicator_timer.take_expirations().unwrap_or(0) > 0 {
+            self.hide_indicator();
+        }
     }
 
     /// The settings file changed: reload it and apply the result.
@@ -281,11 +358,14 @@ impl App {
         self.swallowed.clear();
         self.toggle.clear();
         self.stop_repeat();
+        self.show_indicator();
     }
 
     fn deactivate(&mut self) {
         log!("deactivate");
         self.release_focus();
+        // Without a focused field KWin has no cursor to put the box next to.
+        self.hide_indicator();
     }
 
     /// Finish any composition and drop the current context and keyboard grab.
@@ -477,6 +557,7 @@ impl App {
             commit: leftover,
             ..EngineOutput::default()
         });
+        self.show_indicator();
     }
 
     fn forward_key(&self, serial: u32, time: u32, key: u32, action: KeyAction) {
@@ -520,6 +601,34 @@ impl Dispatch<WlRegistry, GlobalListContents> for App {
     ) {
     }
 }
+
+/// Objects of the indicator box that never send events we care about.
+macro_rules! ignore_events {
+    ($($interface:ty),* $(,)?) => {$(
+        impl Dispatch<$interface, ()> for App {
+            fn event(
+                _: &mut Self,
+                _: &$interface,
+                _: <$interface as wayland_client::Proxy>::Event,
+                _: &(),
+                _: &Connection,
+                _: &QueueHandle<Self>,
+            ) {
+            }
+        }
+    )*};
+}
+
+ignore_events!(
+    WlCompositor,
+    WlShm,
+    WlShmPool,
+    WlBuffer,
+    WlSurface,
+    WlRegion,
+    ZwpInputPanelV1,
+    ZwpInputPanelSurfaceV1,
+);
 
 impl Dispatch<ZwpInputMethodV1, ()> for App {
     fn event(
@@ -683,6 +792,12 @@ pub fn run_watching(
     log!("bound zwp_input_method_v1");
 
     let mut app = App::new(config).map_err(|e| startup(&e))?;
+    app.panel = bind_panel(&globals, &qh);
+    if app.indicator.enabled
+        && let Some(panel) = &app.panel
+    {
+        panel.prepare();
+    }
     if let Some(path) = settings_path {
         match ConfigWatcher::new(path) {
             Ok(watcher) => {
@@ -695,6 +810,29 @@ pub fn run_watching(
         }
     }
     event_loop(&mut queue, &mut app)
+}
+
+/// The indicator box, if the compositor offers everything it needs. The
+/// daemon works without it.
+fn bind_panel(globals: &GlobalList, qh: &QueueHandle<App>) -> Option<Panel> {
+    let compositor: Result<WlCompositor, _> = globals.bind(qh, 1..=4, ());
+    let shm: Result<WlShm, _> = globals.bind(qh, 1..=1, ());
+    let input_panel: Result<ZwpInputPanelV1, _> = globals.bind(qh, 1..=1, ());
+    match (compositor, shm, input_panel) {
+        (Ok(compositor), Ok(shm), Ok(input_panel)) => {
+            log!("bound zwp_input_panel_v1, wl_compositor and wl_shm");
+            Some(Panel::new(compositor, shm, input_panel, qh.clone()))
+        }
+        (c, s, i) => {
+            log!(
+                "no indicator box: wl_compositor {}, wl_shm {}, zwp_input_panel_v1 {}",
+                if c.is_ok() { "ok" } else { "missing" },
+                if s.is_ok() { "ok" } else { "missing" },
+                if i.is_ok() { "ok" } else { "missing" },
+            );
+            None
+        }
+    }
 }
 
 /// Dispatch Wayland events and timer expirations until something fails.
@@ -722,12 +860,14 @@ fn event_loop(
         if want_write {
             wayland_flags |= PollFlags::OUT;
         }
-        let (wayland_ready, timer_ready, settings_ready) = {
+        let (wayland_ready, timer_ready, indicator_ready, settings_ready) = {
             let wayland_fd = guard.connection_fd();
             let timer_fd = app.timer.as_fd();
+            let indicator_fd = app.indicator_timer.as_fd();
             let mut fds = vec![
                 PollFd::new(&wayland_fd, wayland_flags),
                 PollFd::new(&timer_fd, PollFlags::IN),
+                PollFd::new(&indicator_fd, PollFlags::IN),
             ];
             let settings_fd = app.settings.as_ref().map(|s| s.watcher.as_fd());
             if let Some(fd) = &settings_fd {
@@ -742,7 +882,8 @@ fn event_loop(
             (
                 fds[0].revents().intersects(ready),
                 fds[1].revents().intersects(PollFlags::IN),
-                fds.get(2)
+                fds[2].revents().intersects(PollFlags::IN),
+                fds.get(3)
                     .is_some_and(|f| f.revents().intersects(PollFlags::IN)),
             )
         };
@@ -758,6 +899,9 @@ fn event_loop(
         }
         if timer_ready {
             app.on_timer();
+        }
+        if indicator_ready {
+            app.on_indicator_timer();
         }
         if settings_ready {
             app.on_settings_event();

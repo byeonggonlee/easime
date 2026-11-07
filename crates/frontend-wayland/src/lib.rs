@@ -4,6 +4,7 @@ pub mod app;
 pub mod font;
 pub mod indicator;
 pub mod log;
+mod panel;
 pub mod protocol;
 pub mod repeat;
 pub mod timer;
