@@ -16,7 +16,8 @@ use crate::toggle::{Decision, ToggleTracker};
 use crate::translate::{case_from_shift, is_modifier_keysym, translate};
 use easime_config::{BackspaceUnit, Config};
 use engine_hangul::{BackspaceMode, HangulEngine};
-use ime_core::{EngineOutput, InputEngine, KeyEvent, Modifiers};
+use engine_japanese::JapaneseEngine;
+use ime_core::{EngineOutput, InputEngine, KeyEvent, Language, LanguageSwitcher, Modifiers};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 use std::collections::HashMap;
@@ -79,9 +80,10 @@ struct Swallowed {
 }
 
 struct App {
-    engine: HangulEngine,
-    /// True: compose Hangul. False: pass every key through (English).
-    korean: bool,
+    /// One engine per enabled language. English has none: keys pass through.
+    engines: HashMap<Language, Box<dyn InputEngine>>,
+    /// Which language is active and what the toggle key switches to next.
+    switcher: LanguageSwitcher,
     context: Option<ZwpInputMethodContextV1>,
     keyboard: Option<WlKeyboard>,
     /// Serial of the latest `commit_state`, used for text requests.
@@ -104,9 +106,34 @@ impl App {
             BackspaceUnit::Jamo => BackspaceMode::Jamo,
             BackspaceUnit::Syllable => BackspaceMode::Syllable,
         };
+        let mut engines: HashMap<Language, Box<dyn InputEngine>> = HashMap::new();
+        for &language in &config.languages.enabled {
+            match language {
+                Language::Korean => {
+                    engines.insert(
+                        language,
+                        Box::new(HangulEngine::with_backspace_mode(backspace)),
+                    );
+                }
+                Language::Japanese => {
+                    engines.insert(language, Box::new(JapaneseEngine::new()));
+                }
+                Language::English | Language::Chinese => {
+                    log!("language {language:?} is not available yet, ignoring");
+                }
+            }
+        }
+        // Only languages that have an engine take part in the cycle.
+        let usable: Vec<Language> = config
+            .languages
+            .enabled
+            .iter()
+            .copied()
+            .filter(|l| engines.contains_key(l))
+            .collect();
         Ok(Self {
-            engine: HangulEngine::with_backspace_mode(backspace),
-            korean: true,
+            engines,
+            switcher: LanguageSwitcher::new(&usable),
             context: None,
             keyboard: None,
             commit_serial: 0,
@@ -118,6 +145,12 @@ impl App {
             toggle: ToggleTracker::with_setting(config.shortcuts.toggle_key),
             timer: Timer::new()?,
         })
+    }
+
+    /// The engine of the active language, or `None` for English.
+    fn engine(&mut self) -> Option<&mut (dyn InputEngine + 'static)> {
+        let language = self.switcher.current();
+        self.engines.get_mut(&language).map(|e| e.as_mut())
     }
 
     /// The repeat timer fired: replay the repeating key once per expiration.
@@ -164,7 +197,10 @@ impl App {
         let Some(event) = sw.event else {
             return;
         };
-        let output = self.engine.process_key(event);
+        let Some(engine) = self.engine() else {
+            return;
+        };
+        let output = engine.process_key(event);
         let handled = output.handled;
         self.apply(output);
         if !handled {
@@ -179,7 +215,9 @@ impl App {
         self.release_focus();
         self.keyboard = Some(context.grab_keyboard(qh, ()));
         self.context = Some(context);
-        self.engine.reset();
+        for engine in self.engines.values_mut() {
+            engine.reset();
+        }
         self.swallowed.clear();
         self.toggle.clear();
         self.stop_repeat();
@@ -193,7 +231,7 @@ impl App {
     /// Finish any composition and drop the current context and keyboard grab.
     fn release_focus(&mut self) {
         self.stop_repeat();
-        let leftover = self.engine.flush();
+        let leftover = self.engine().map(|e| e.flush()).unwrap_or_default();
         // Release the grab first. The proxy reports version 1 (it inherits the
         // context's), but the compositor's wl_keyboard is newer and the client
         // library does not enforce `since` on requests.
@@ -340,14 +378,19 @@ impl App {
             Decision::Swallow => return,
             Decision::Pass => {}
         }
-        if !self.korean || is_modifier_keysym(keysym) {
+        if is_modifier_keysym(keysym) {
             self.forward_key(serial, time, key, KeyAction::Pressed);
             return;
         }
 
         let keysym = case_from_shift(keysym, self.shift_held());
         let event = translate(keysym, self.current_modifiers());
-        let output = self.engine.process_key(event);
+        let Some(engine) = self.engine() else {
+            // English: the application gets the key untouched.
+            self.forward_key(serial, time, key, KeyAction::Pressed);
+            return;
+        };
+        let output = engine.process_key(event);
         let handled = output.handled;
         self.apply(output);
         if handled {
@@ -366,13 +409,10 @@ impl App {
     }
 
     fn toggle_language(&mut self) {
-        // Finish the syllable in progress before switching.
-        let leftover = self.engine.flush();
-        self.korean = !self.korean;
-        log!(
-            "language -> {}",
-            if self.korean { "korean" } else { "english" }
-        );
+        // Finish the text in progress before switching.
+        let leftover = self.engine().map(|e| e.flush()).unwrap_or_default();
+        let language = self.switcher.advance();
+        log!("language -> {language:?}");
         self.apply(EngineOutput {
             commit: leftover,
             ..EngineOutput::default()
@@ -456,7 +496,9 @@ impl Dispatch<ZwpInputMethodContextV1, ()> for App {
             }
             zwp_input_method_context_v1::Event::Reset => {
                 // The application discarded its text state.
-                app.engine.reset();
+                if let Some(engine) = app.engine() {
+                    engine.reset();
+                }
             }
             _ => {}
         }

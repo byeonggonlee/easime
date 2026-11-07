@@ -90,6 +90,7 @@ version = "0.1.0"
 dependencies = [
  "easime-config",
  "engine-hangul",
+ "engine-japanese",
  "ime-core",
  "rustix",
  "wayland-client",
