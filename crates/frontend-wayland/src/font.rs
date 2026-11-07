@@ -8,8 +8,11 @@
 //! If nothing has it, the caller draws an empty box. This module never panics
 //! on missing or broken fonts.
 
-use ab_glyph::{Font, FontVec};
+use ab_glyph::{Font, FontVec, VariableFont};
 use fontdb::{Database, Family, Query, Weight};
+
+/// Weight requested from variable fonts.
+const INDICATOR_WEIGHT: f32 = 600.0;
 
 const KOREAN: &[&str] = &[
     "Noto Sans CJK KR",
@@ -99,12 +102,17 @@ impl Fonts {
     }
 
     fn load(&self, id: fontdb::ID, ch: char) -> Option<FontVec> {
-        let font = self
+        let mut font = self
             .db
             .with_face_data(id, |data, index| {
                 FontVec::try_from_vec_and_index(data.to_vec(), index).ok()
             })
             .flatten()?;
+        // Variable fonts (Noto Sans CJK is one on Fedora) start at their
+        // default instance, which can be hair-thin at this size. Light text on
+        // a dark box wants a heavier weight; static fonts have no such axis
+        // and ignore the request.
+        let _ = font.set_variation(b"wght", INDICATOR_WEIGHT);
         (font.glyph_id(ch).0 != 0).then_some(font)
     }
 }

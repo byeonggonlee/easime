@@ -19,7 +19,7 @@ const FOREGROUND: [u8; 3] = [0xF2, 0xF2, 0xF2];
 /// Corner radius as a fraction of the box size.
 const RADIUS: f32 = 0.22;
 /// Glyph height (font size) as a fraction of the box size.
-const GLYPH_SIZE: f32 = 0.58;
+const GLYPH_SIZE: f32 = 0.64;
 
 /// The glyph shown for a language.
 pub fn glyph_for(language: Language) -> char {
