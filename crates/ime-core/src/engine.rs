@@ -37,6 +37,10 @@ pub struct CandidateList {
     pub selected: usize,
     /// Optional labels, aligned with items (e.g. Korean Hanja meanings).
     pub annotations: Vec<String>,
+    /// The text being converted, for engines whose preedit shows something
+    /// else (the Japanese preedit is the chosen candidate, not the reading).
+    /// Empty means the preedit itself is the reading, as in Korean Hanja.
+    pub reading: String,
 }
 
 impl CandidateList {

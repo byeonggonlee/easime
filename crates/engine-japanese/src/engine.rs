@@ -105,6 +105,7 @@ impl JapaneseEngine {
                     items: conv.candidates.clone(),
                     selected: conv.selected,
                     annotations: Vec::new(),
+                    reading: conv.reading.clone(),
                 }),
                 handled,
             };
@@ -429,6 +430,22 @@ mod tests {
         let list = out.candidates.unwrap();
         assert_eq!(list.items, ["日本", "二本", "にほん", "ニホン"]);
         assert_eq!(list.selected, 0);
+    }
+
+    #[test]
+    fn the_candidate_list_keeps_the_reading_while_the_preedit_shows_the_choice() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        let out = key(&mut e, Key::Space);
+        assert_eq!(out.preedit.text, "日本");
+        assert_eq!(out.candidates.unwrap().reading, "にほん");
+        let out = key(&mut e, Key::Space);
+        assert_eq!(out.preedit.text, "二本");
+        assert_eq!(out.candidates.unwrap().reading, "にほん");
+        // Back at the kana the reading is the preedit and no list remains.
+        let out = key(&mut e, Key::Escape);
+        assert_eq!(out.preedit.text, "にほん");
+        assert!(out.candidates.is_none());
     }
 
     #[test]

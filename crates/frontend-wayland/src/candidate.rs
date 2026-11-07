@@ -181,7 +181,7 @@ mod tests {
         let list = CandidateList {
             items: vec!["韓".into()],
             selected: 2,
-            annotations: Vec::new(),
+            ..CandidateList::default()
         };
         assert!(painter.render(&list, "한").is_none());
     }

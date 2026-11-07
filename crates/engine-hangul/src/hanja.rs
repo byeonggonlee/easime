@@ -28,5 +28,7 @@ pub(crate) fn lookup(reading: &str) -> Option<CandidateList> {
         items: entries.iter().map(|(value, _)| (*value).into()).collect(),
         annotations: entries.iter().map(|(_, note)| (*note).into()).collect(),
         selected: 0,
+        // The Hangul preedit stays visible while converting and is the reading.
+        reading: String::new(),
     })
 }
