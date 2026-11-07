@@ -14,6 +14,7 @@ use crate::repeat::RepeatInfo;
 use crate::timer::Timer;
 use crate::toggle::{Decision, ToggleTracker};
 use crate::translate::{case_from_shift, is_modifier_keysym, translate};
+use crate::watch::ConfigWatcher;
 use easime_config::{BackspaceUnit, Config};
 use engine_hangul::{BackspaceMode, HangulEngine};
 use engine_japanese::JapaneseEngine;
@@ -25,6 +26,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
+use std::path::{Path, PathBuf};
 use wayland_client::backend::WaylandError;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_keyboard::{self, KeyState, KeymapFormat, WlKeyboard};
@@ -100,42 +102,57 @@ struct App {
     toggle: ToggleTracker,
     /// Fires when a consumed key should repeat.
     timer: Timer,
+    /// Where settings are re-read from when the file changes, if watched.
+    settings: Option<Settings>,
+}
+
+/// A settings file we reload when it changes.
+struct Settings {
+    path: PathBuf,
+    watcher: ConfigWatcher,
+}
+
+/// Engines for the enabled languages and the cycle over them.
+///
+/// Only languages that have an engine take part in the cycle.
+fn build_engines(config: &Config) -> (HashMap<Language, Box<dyn InputEngine>>, LanguageSwitcher) {
+    let backspace = match config.korean.backspace {
+        BackspaceUnit::Jamo => BackspaceMode::Jamo,
+        BackspaceUnit::Syllable => BackspaceMode::Syllable,
+    };
+    let mut engines: HashMap<Language, Box<dyn InputEngine>> = HashMap::new();
+    for &language in &config.languages.enabled {
+        match language {
+            Language::Korean => {
+                engines.insert(
+                    language,
+                    Box::new(HangulEngine::with_backspace_mode(backspace)),
+                );
+            }
+            Language::Japanese => {
+                engines.insert(language, Box::new(JapaneseEngine::new()));
+            }
+            Language::English | Language::Chinese => {
+                log!("language {language:?} is not available yet, ignoring");
+            }
+        }
+    }
+    let usable: Vec<Language> = config
+        .languages
+        .enabled
+        .iter()
+        .copied()
+        .filter(|l| engines.contains_key(l))
+        .collect();
+    (engines, LanguageSwitcher::new(&usable))
 }
 
 impl App {
     fn new(config: &Config) -> std::io::Result<Self> {
-        let backspace = match config.korean.backspace {
-            BackspaceUnit::Jamo => BackspaceMode::Jamo,
-            BackspaceUnit::Syllable => BackspaceMode::Syllable,
-        };
-        let mut engines: HashMap<Language, Box<dyn InputEngine>> = HashMap::new();
-        for &language in &config.languages.enabled {
-            match language {
-                Language::Korean => {
-                    engines.insert(
-                        language,
-                        Box::new(HangulEngine::with_backspace_mode(backspace)),
-                    );
-                }
-                Language::Japanese => {
-                    engines.insert(language, Box::new(JapaneseEngine::new()));
-                }
-                Language::English | Language::Chinese => {
-                    log!("language {language:?} is not available yet, ignoring");
-                }
-            }
-        }
-        // Only languages that have an engine take part in the cycle.
-        let usable: Vec<Language> = config
-            .languages
-            .enabled
-            .iter()
-            .copied()
-            .filter(|l| engines.contains_key(l))
-            .collect();
+        let (engines, switcher) = build_engines(config);
         Ok(Self {
             engines,
-            switcher: LanguageSwitcher::new(&usable),
+            switcher,
             context: None,
             keyboard: None,
             commit_serial: 0,
@@ -146,7 +163,48 @@ impl App {
             repeating: None,
             toggle: ToggleTracker::with_setting(config.shortcuts.toggle_key),
             timer: Timer::new()?,
+            settings: None,
         })
+    }
+
+    /// Switch to new settings while running. Text in progress is committed
+    /// first, and the current language is kept if it is still enabled.
+    fn apply_config(&mut self, config: &Config) {
+        log!("applying new settings");
+        let leftover = self.engine().map(|e| e.flush()).unwrap_or_default();
+        let previous = self.switcher.current();
+        self.stop_repeat();
+
+        let (engines, mut switcher) = build_engines(config);
+        switcher.select(previous);
+        self.engines = engines;
+        self.switcher = switcher;
+        self.toggle = ToggleTracker::with_setting(config.shortcuts.toggle_key);
+
+        self.apply(EngineOutput {
+            commit: leftover,
+            ..EngineOutput::default()
+        });
+    }
+
+    /// The settings file changed: reload it and apply the result.
+    fn on_settings_event(&mut self) {
+        let Some(settings) = &self.settings else {
+            return;
+        };
+        match settings.watcher.take_changed() {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(e) => {
+                log!("settings watcher failed: {e}");
+                return;
+            }
+        }
+        match Config::load_from(&settings.path) {
+            Ok(config) => self.apply_config(&config),
+            // Keep what we have: a half-edited file must not break typing.
+            Err(e) => log!("ignoring unreadable settings: {e}"),
+        }
     }
 
     /// The engine of the active language, or `None` for English.
@@ -585,7 +643,11 @@ pub fn run() -> Result<std::convert::Infallible, RunError> {
         }
     };
     let connection = Connection::connect_to_env().map_err(|e| RunError::Startup(e.to_string()))?;
-    run_with(&connection, &config)
+    run_watching(
+        &connection,
+        &config,
+        easime_config::config_path().as_deref(),
+    )
 }
 
 /// Like [`run`], but on an already established connection with default
@@ -599,6 +661,16 @@ pub fn run_with(
     connection: &Connection,
     config: &Config,
 ) -> Result<std::convert::Infallible, RunError> {
+    run_watching(connection, config, None)
+}
+
+/// Like [`run_with`], and also reload settings from `settings_path` whenever
+/// that file changes.
+pub fn run_watching(
+    connection: &Connection,
+    config: &Config,
+    settings_path: Option<&Path>,
+) -> Result<std::convert::Infallible, RunError> {
     let startup = |e: &dyn std::fmt::Display| RunError::Startup(e.to_string());
     let (globals, mut queue) = registry_queue_init::<App>(connection).map_err(|e| startup(&e))?;
     let qh = queue.handle();
@@ -611,6 +683,17 @@ pub fn run_with(
     log!("bound zwp_input_method_v1");
 
     let mut app = App::new(config).map_err(|e| startup(&e))?;
+    if let Some(path) = settings_path {
+        match ConfigWatcher::new(path) {
+            Ok(watcher) => {
+                app.settings = Some(Settings {
+                    path: path.to_path_buf(),
+                    watcher,
+                });
+            }
+            Err(e) => log!("not watching settings ({e}); changes need a restart"),
+        }
+    }
     event_loop(&mut queue, &mut app)
 }
 
@@ -639,13 +722,17 @@ fn event_loop(
         if want_write {
             wayland_flags |= PollFlags::OUT;
         }
-        let (wayland_ready, timer_ready) = {
+        let (wayland_ready, timer_ready, settings_ready) = {
             let wayland_fd = guard.connection_fd();
             let timer_fd = app.timer.as_fd();
-            let mut fds = [
+            let mut fds = vec![
                 PollFd::new(&wayland_fd, wayland_flags),
                 PollFd::new(&timer_fd, PollFlags::IN),
             ];
+            let settings_fd = app.settings.as_ref().map(|s| s.watcher.as_fd());
+            if let Some(fd) = &settings_fd {
+                fds.push(PollFd::new(fd, PollFlags::IN));
+            }
             match poll(&mut fds, None) {
                 Ok(_) => {}
                 Err(Errno::INTR) => continue,
@@ -655,6 +742,8 @@ fn event_loop(
             (
                 fds[0].revents().intersects(ready),
                 fds[1].revents().intersects(PollFlags::IN),
+                fds.get(2)
+                    .is_some_and(|f| f.revents().intersects(PollFlags::IN)),
             )
         };
 
@@ -669,6 +758,9 @@ fn event_loop(
         }
         if timer_ready {
             app.on_timer();
+        }
+        if settings_ready {
+            app.on_settings_event();
         }
     }
 }
