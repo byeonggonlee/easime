@@ -141,6 +141,17 @@ jobs:
           if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.log; then
             echo "QML reported warnings or errors (above)"; exit 1
           fi
+      # TEMPORARY: print two pages as text so they can be read from the log
+      # without downloading the artifact. Remove once the pages were checked.
+      - name: Print two pages as text
+        if: always()
+        run: |
+          for page in general languages; do
+            echo "PNG-BEGIN $page"
+            base64 -w0 "shots/$page.png" || true
+            echo
+            echo "PNG-END $page"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
