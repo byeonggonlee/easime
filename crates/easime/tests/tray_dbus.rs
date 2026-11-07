@@ -197,7 +197,14 @@ fn the_icon_registers_shows_the_language_and_follows_it() {
             .unwrap_or(false)
     });
     let japanese: Vec<(i32, i32, Vec<u8>)> = property(&item, "IconPixmap");
-    assert_ne!(japanese[3].2, korean[3].2, "the letter changed");
+    // The letters differ only if this machine has fonts for both (a CI runner
+    // may have no CJK font; the box is then drawn empty for every language).
+    let fonts = frontend_wayland::font::Fonts::load_system();
+    if fonts.font_for('한').is_some() && fonts.font_for('あ').is_some() {
+        assert_ne!(japanese[3].2, korean[3].2, "the letter changed");
+    } else {
+        eprintln!("note: no installed font has both 한 and あ; the letter change is not compared");
+    }
     news.send((Language::English, vec![Language::English]))
         .unwrap();
     wait_until("the tooltip to name English", || {
