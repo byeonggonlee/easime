@@ -24,6 +24,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace          # one crate: cargo test -p engine-hangul
 cargo run -p easime             # debugging only; KWin normally launches the daemon
+cargo test --manifest-path settings/kde/Cargo.toml   # settings window, its own project (needs Qt 6 + Kirigami)
 ```
 Linux builds need `libxkbcommon` and Wayland dev packages (list in `docs/development.md`).
 

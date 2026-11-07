@@ -86,6 +86,11 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - **중국어**: 간체/번체 선택
   - **모양**: 후보창 글꼴/크기, 가로/세로 배치, 상태 박스 표시 시간
   - **앱 호환성** (Linux): Electron/Chromium 플래그 안내, XIM 상태 확인
+- **단계 (2026-11-07 결정)**: 목표는 초보자용과 전문가용을 나누는 것이고, 단기에는 **전문가용만** 만든다. 전문가용은 아래 페이지에서 모든 옵션을 바로 바꾸고, 변경은 즉시 저장한다. 일본어·중국어 페이지는 실제 옵션이 생길 때 추가한다(빈 페이지를 만들지 않는다).
+- **Linux 구현** (`settings/kde`, 메인 워크스페이스와 별개의 cargo 프로젝트: Qt 6와 Kirigami가 필요하므로):
+  - `src/model.rs`: Qt 없는 상태·저장 로직(단위 테스트). `src/view.rs`: QML이 묶는 값. `src/backend.rs`: cxx-qt QObject(`EasimeSettings`, QML 싱글톤). `qml/`: Kirigami 화면(페이지마다 파일 하나).
+  - 저장은 **바뀐 키만** `toml_edit`으로 고친다. 직접 고친 파일의 주석, 키 순서, 모르는 키가 남는다. 읽을 수 없는 파일은 절대 덮어쓰지 않고(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다.
+  - 화면의 문구는 모두 `qsTr()`이다. 번역(일본어 등)은 해당 언어 사용자의 검토가 필요하다.
 - 설정 파일 위치: Linux `~/.config/easime/config.toml`, Windows `%APPDATA%\easime\config.toml`,
   macOS `~/Library/Application Support/easime/config.toml`. 변경되면 재시작 없이 다시 읽는다.
 

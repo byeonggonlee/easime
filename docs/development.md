@@ -17,3 +17,14 @@
   설정 GUI용 `qt6-qtbase-devel`, `qt6-qtdeclarative-devel`, `kf6-kirigami-devel`
 - 유니코드: 한글 음절 U+AC00–U+D7A3, 호환 자모 U+3131–U+318E, 히라가나 U+3040–U+309F, 가타카나 U+30A0–U+30FF
 - Mozc: https://github.com/google/mozc (BSD-3-Clause, OSS 사전은 `src/data/dictionary_oss`)
+
+## 설정 창 (settings/kde)
+메인 워크스페이스와 별개의 cargo 프로젝트다. Fedora 의존성: `qt6-qtbase-devel`, `qt6-qtdeclarative-devel`, `kf6-kirigami`, `kf6-kirigami-devel`, `kf6-qqc2-desktop-style`.
+```sh
+cargo run   --manifest-path settings/kde/Cargo.toml                      # 설정 창 열기
+cargo test  --manifest-path settings/kde/Cargo.toml                      # 모델·표시값 단위 테스트 (화면 없음)
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+  settings/kde/target/debug/easime-settings --screenshots=/tmp/shots     # 모든 페이지를 열어 PNG로 저장하고 종료
+```
+설정 창은 실제 설정 파일(`~/.config/easime/config.toml`)을 바로 고친다. 시험할 때는 `XDG_CONFIG_HOME`을 임시 폴더로 바꿔 두는 편이 안전하다.
+Kirigami가 없는 환경(예: Ubuntu)에서는 빌드와 단위 테스트까지만 되고 화면은 열리지 않는다. 그 경우 화면 검증은 CI의 `settings` 잡(Fedora 컨테이너)이 맡는다.
