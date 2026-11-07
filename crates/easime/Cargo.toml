@@ -20,6 +20,7 @@ maintainer = "Byeonggon Lee <byeonggonlee@gmail.com>"
 section = "utils"
 priority = "optional"
 depends = "$auto"
+recommends = "easime-settings"
 extended-description = """\
 Easy Eastern Asian IME: a Korean (and soon Japanese and Chinese) input \
 method for KDE Plasma 6 on Wayland, written in Rust. After installing, \
@@ -51,3 +52,6 @@ assets = [
 
 [package.metadata.generate-rpm.requires]
 libxkbcommon = "*"
+
+[package.metadata.generate-rpm.recommends]
+easime-settings = "*"

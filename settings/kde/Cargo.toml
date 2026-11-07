@@ -23,3 +23,54 @@ toml_edit = "0.25"
 
 [build-dependencies]
 cxx-qt-build = { version = "0.10", features = ["link_qt_object_files"] }
+
+# --- Linux packages --------------------------------------------------------
+# Its own package, built where Qt 6 and Kirigami are: the .rpm in Fedora and
+# the .deb in Debian (.github/workflows/packages.yml), after
+# `cargo build --release --locked` in this directory:
+#   .deb: `cargo deb --no-build`    .rpm: `cargo generate-rpm`
+# The daemon package (`easime`) recommends this one.
+
+[package.metadata.deb]
+name = "easime-settings"
+maintainer = "Byeonggon Lee <byeonggonlee@gmail.com>"
+section = "utils"
+priority = "optional"
+depends = """\
+$auto, easime, qt6-wayland, \
+qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, \
+qml6-module-qtquick-templates, qml6-module-qtquick-window, \
+qml6-module-org-kde-kirigami, qml6-module-org-kde-qqc2-desktop-style"""
+recommends = "breeze-icon-theme, fonts-noto-cjk"
+extended-description = """\
+The settings window of easime: choose the input languages, the key that \
+switches them and how the language indicator looks. Changes are saved to \
+~/.config/easime/config.toml and picked up by the running easime without a \
+restart."""
+assets = [
+    ["target/release/easime-settings", "usr/bin/", "755"],
+    ["../../data/easime-settings.desktop", "usr/share/applications/", "644"],
+    ["../../LICENSE-MIT", "usr/share/doc/easime-settings/", "644"],
+    ["../../LICENSE-APACHE", "usr/share/doc/easime-settings/", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "easime-settings"
+summary = "Settings window for easime (KDE Plasma, Qt 6 and Kirigami)"
+assets = [
+    { source = "target/release/easime-settings", dest = "/usr/bin/easime-settings", mode = "0755" },
+    { source = "../../data/easime-settings.desktop", dest = "/usr/share/applications/easime-settings.desktop", mode = "0644" },
+    { source = "../../LICENSE-MIT", dest = "/usr/share/licenses/easime-settings/LICENSE-MIT", mode = "0644", license = true },
+    { source = "../../LICENSE-APACHE", dest = "/usr/share/licenses/easime-settings/LICENSE-APACHE", mode = "0644", license = true },
+]
+
+[package.metadata.generate-rpm.requires]
+easime = "*"
+kf6-kirigami = "*"
+kf6-qqc2-desktop-style = "*"
+qt6-qtdeclarative = "*"
+qt6-qtwayland = "*"
+
+[package.metadata.generate-rpm.recommends]
+breeze-icon-theme = "*"
+google-noto-sans-cjk-fonts = "*"

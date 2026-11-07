@@ -95,9 +95,11 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   macOS `~/Library/Application Support/easime/config.toml`. 변경되면 재시작 없이 다시 읽는다.
 
 ## 패키징과 배포
-- **Linux**: GitHub Actions에서 빌드해 **GitHub Releases에 .deb / .rpm** 업로드
-  (`cargo-deb`, `cargo-generate-rpm`). 패키지에는 데몬, 설정 앱, `.desktop`, 아이콘, 사전 데이터를 포함한다.
-  의존성: Qt 6, Kirigami(KF6), libxkbcommon, wayland.
+- **Linux**: GitHub Actions에서 빌드해 **GitHub Releases에 .deb / .rpm** 업로드(`cargo-deb`, `cargo-generate-rpm`).
+  패키지는 둘로 나뉜다. 설정 창이 Qt 6와 Kirigami를 요구하므로, 데몬을 그 의존성 없이 설치할 수 있게 하기 위해서다(엔지니어링 결정).
+  - `easime`: 데몬, `easime.desktop`(가상 키보드 등록용, 메뉴에는 안 보임), 사전. 의존성: libxkbcommon 등. `easime-settings`를 Recommends한다.
+  - `easime-settings`(`settings/kde`의 메타데이터): 설정 창과 `easime-settings.desktop`(앱 메뉴의 "easime 설정", 이름은 한·일·번체·간체로 현지화). `easime`와 Qt 6·Kirigami·qt6-wayland를 요구한다. `.rpm`은 Fedora 컨테이너에서, `.deb`는 Debian 13(trixie) 컨테이너에서 빌드한다(그 배포판의 Qt·Kirigami로 만들어야 하므로). 그러므로 `.deb`는 Debian 13 이상, Ubuntu는 Plasma 6와 Qt가 충분히 새로운 25.04 이상을 대상으로 한다. 시험한 것은 clean `debian:trixie`와 `fedora:latest` 컨테이너뿐이다.
+  - 빌드와 검증은 `.github/workflows/packages.yml`(재사용 워크플로) 하나다. CI는 샘플 사전으로, 릴리스(`release.yml`)는 실제 Mozc 사전으로 같은 흐름을 부른다. 패키지마다 clean 컨테이너(Fedora, Debian)에 배포판의 의존성만으로 설치하고, 설치된 설정 창을 오프스크린으로 띄워 모든 페이지가 열리는지 확인한 뒤에야 네 파일이 한 아티팩트(`easime-linux-packages-<commit>`)로 묶인다.
 - **Windows**: MSI(WiX), TSF DLL 등록 포함
 - **macOS**: `.pkg` (서명/공증)
 - 버전은 workspace 전체가 하나의 버전을 공유한다. 태그 `vX.Y.Z`를 푸시하면 릴리스 워크플로가 동작한다.

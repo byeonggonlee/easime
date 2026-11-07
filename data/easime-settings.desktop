@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=easime Settings
+Name[ko]=easime 설정
+Name[ja]=easime 設定
+Name[zh_CN]=easime 设置
+Name[zh_TW]=easime 設定
+GenericName=Input method settings
+GenericName[ko]=입력기 설정
+GenericName[ja]=入力メソッドの設定
+GenericName[zh_CN]=输入法设置
+GenericName[zh_TW]=輸入法設定
+Comment=Choose input languages, the switch key and how easime looks
+Comment[ko]=입력 언어, 전환 키, 모양을 설정합니다
+Comment[ja]=入力言語、切り替えキー、見た目を設定します
+Comment[zh_CN]=设置输入语言、切换键和外观
+Comment[zh_TW]=設定輸入語言、切換鍵與外觀
+Exec=easime-settings
+Icon=input-keyboard
+Terminal=false
+StartupNotify=true
+Categories=Settings;
+Keywords=input;IME;keyboard;Korean;Japanese;Chinese;Hangul;한국어;日本語;中文;

@@ -31,7 +31,7 @@
   - `easime-dict-tool`: Mozc OSS 사전 → easime 이진 사전 변환기. `scripts/fetch-mozc-dictionary.sh`(고정 SHA, 체크섬 검증),
     `scripts/build-dictionary.sh sample|mozc`. 라이선스(BSD-3, IPAdic, 오키나와 사전)는 `THIRD_PARTY_LICENSES.md`와 `data/mozc/`.
   - 설정 즉시 반영: 설정 파일을 inotify로 감시해 한/영 키, 백스페이스 단위, 언어 목록을 재시작 없이 적용(깨진 파일은 무시)
-  - 패키징: `.deb`/`.rpm`(`crates/easime/Cargo.toml` 메타데이터), CI `packages` 잡(샘플 사전), 태그 `v*` 푸시 시 릴리스 워크플로(실제 Mozc 사전 포함)
+  - 패키징: 패키지 둘(`easime` 데몬, `easime-settings` 설정 창)을 `.deb`/`.rpm`으로 만든다. 빌드·설치 검증은 `.github/workflows/packages.yml` 하나이고, CI는 샘플 사전으로, 태그 `v*` 푸시 시 릴리스 워크플로는 실제 Mozc 사전으로 같은 흐름을 쓴다. 태그와 두 크레이트(`easime`, `easime-settings`)의 버전이 같아야 릴리스가 진행된다.
   - `frontend-wayland` + `easime` 데몬: KWin `zwp_input_method_v1` 클라이언트, 키 반복(자체 타이머와 컴포지터 `repeated`),
     한/영 키와 오른쪽 Alt 탭 전환, Caps Lock 무시, 언어 순환, 설정 읽기
   - 커서 옆 상태 박스(`frontend-wayland/src/{indicator,font,panel}.rs`): 사용자가 언어를 전환할 때만 `A`/`한`/`あ`/`中`
@@ -50,12 +50,14 @@
     문구는 한국어 원문을 키로 한 표 한 개(`settings/kde/qml/tr.js`)에 있다. **한국어 외의 번역은 원어민 검토 전 초안**이고 번역된 화면의 일반 페이지가 그렇게 알린다.
     자동 검사: 번역표와 QML 문구의 대조(누락·미사용·빈 번역·`%1` 불일치, `tests/check_translations.py`), 언어 선택 로직(`tests/tst_tr.qml`), CI가 다섯 언어로 각각 창을 열어 클릭→파일 저장과 번역 누락·QML 경고 없음을 확인하고 시스템 언어 감지를 시험한다.
     **번역의 정확성·자연스러움과 언어별 한자 자형은 확인하지 않았다.**
-    아직 없음: 패키지(.deb/.rpm) 포함, 앱 메뉴 등록(`.desktop`)과 자동 실행, 초보자용(첫 실행 안내), 번역의 원어민 검토, 설정 창 안에서 표시 언어를 고르는 선택지, 일본어·중국어 페이지(옵션이 생길 때 추가).
+    패키지: `easime-settings` `.rpm`(Fedora 컨테이너에서 빌드)과 `.deb`(Debian 13 컨테이너에서 빌드)가 있고, 앱 메뉴에 "easime 설정"(`easime-settings.desktop`, 한·일·번체·간체 이름)으로 등록된다. CI가 두 패키지를 clean Fedora·Debian 컨테이너에 설치해 설정 창이 열리는지 확인한다.
+    **실제 데스크톱에 설치해 메뉴에서 연 사람의 확인은 없다.**
+    아직 없음: 자동 실행, 초보자용(첫 실행 안내), 번역의 원어민 검토, 설정 창 안에서 표시 언어를 고르는 선택지, 일본어·중국어 페이지(옵션이 생길 때 추가).
 - **가짜 KWin 테스트 하네스**: `crates/frontend-wayland/tests/` (순수 Rust Wayland 서버로 activate → 키 입력 → commit/preedit를
   검증). 실제 KWin이 없어도 프로토콜 흐름을 시험할 수 있고, 이미 실제 버그(`KeyState::Repeated` 처리)를 잡았다.
 - **실사용 보고(2026-11-07)**: Fedora 최신 + `107bb4bbcc24bfc83b063cfd69c4a052b44fb616`에서 사용자가 한·영 입력 동작을 확인했다. 앱별 범위는 미확인이다. 하단 패널 전체 이동은 KWin bug 527067 경로와 일치했고, 재부팅 전에는 박스 등장/퇴장 때 DBus visible=true/false 변화가 확인됐다. 이후 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용하자 문제가 재현되지 않는다고 사용자가 확인했다. 재부팅 후 DBus 속성은 재측정하지 않았다. 구버전 easime의 포커스 표시 문제와 새 한자 기능은 수정본 설치 후 검증이 남아 있다. [진단과 한자 재검증](kde-testing.md). 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
   (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
-- 알려진 미구현: 트레이 아이콘, 일본어 변환의 실제 KDE 검증과 사전 상태 안내 문구, 설정 창의 패키징·앱 메뉴 등록·초보자용, XIM, 문절 변환, 중국어, GNOME/Windows/macOS
+- 알려진 미구현: 트레이 아이콘, 일본어 변환의 실제 KDE 검증과 사전 상태 안내 문구, 설정 창의 자동 실행·초보자용, XIM, 문절 변환, 중국어, GNOME/Windows/macOS
 - 알려진 한계: 상태 박스와 후보창은 고정 다크 테마다. Plasma 색상 연동은 아직 없다.
 - 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
 

@@ -1,0 +1,252 @@
+name: Linux packages
+
+# Builds and checks every Linux package. The CI calls it with the tiny sample
+# dictionary; the release workflow calls it with the real Mozc dictionary and
+# publishes what it produces, so a release uses exactly the path the CI tests.
+#
+#   easime            the daemon (.deb and .rpm), built on Ubuntu
+#   easime-settings   the settings window (Qt 6 and Kirigami), built where those
+#                     are: the .rpm in Fedora, the .deb in Debian
+#
+# Each package is then installed into a clean container of its own distribution
+# (dependencies resolved from the distribution, nothing else installed) and the
+# settings window is started from the installed package.
+
+on:
+  workflow_call:
+    inputs:
+      dictionary:
+        description: "sample (tiny, for the CI) or mozc (the real one, for releases)"
+        type: string
+        default: sample
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  daemon:
+    name: easime .deb and .rpm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install --locked cargo-deb cargo-generate-rpm
+      - run: cargo build --release --locked -p easime
+      # `sample` builds a tiny dictionary from the committed fixture so the CI
+      # never downloads the big Mozc data; `mozc` downloads the pinned Mozc
+      # dictionary (checksums are verified, a mismatch fails the job). Either
+      # way the file is target/dictionary/mozc.bin, which the package metadata
+      # installs as /usr/share/easime/dictionary/mozc.bin.
+      - name: Build the dictionary (${{ inputs.dictionary }})
+        run: sh scripts/build-dictionary.sh ${{ inputs.dictionary }}
+      - name: A release needs the real dictionary, not the sample
+        if: inputs.dictionary == 'mozc'
+        run: |
+          size="$(stat -c %s target/dictionary/mozc.bin)"
+          echo "mozc.bin is $size bytes"
+          test "$size" -gt 10000000
+      - run: cargo deb -p easime --no-build
+      - run: cargo generate-rpm -p crates/easime
+      - name: Show package contents
+        run: |
+          dpkg-deb -I target/debian/*.deb
+          dpkg-deb -c target/debian/*.deb
+          rpm -qpl target/generate-rpm/*.rpm || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: part-daemon
+          path: |
+            target/debian/*.deb
+            target/generate-rpm/*.rpm
+          if-no-files-found: error
+          retention-days: 7
+
+  settings-rpm:
+    name: easime-settings .rpm (Fedora)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install Qt 6 and the Rust toolchain
+        run: |
+          dnf -y install git cargo rust gcc gcc-c++ make \
+            qt6-qtbase-devel qt6-qtdeclarative-devel
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: settings/kde
+      - run: cargo install --locked cargo-generate-rpm
+      - name: Build
+        working-directory: settings/kde
+        run: cargo build --release --locked
+      - name: Make the .rpm
+        working-directory: settings/kde
+        run: cargo generate-rpm
+      - name: Show package contents
+        working-directory: settings/kde
+        run: |
+          rpm -qpi target/generate-rpm/*.rpm
+          rpm -qpl target/generate-rpm/*.rpm
+          rpm -qpR target/generate-rpm/*.rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: part-settings-rpm
+          path: settings/kde/target/generate-rpm/*.rpm
+          if-no-files-found: error
+          retention-days: 7
+
+  settings-deb:
+    name: easime-settings .deb (Debian)
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install Qt 6 and build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config cmake dpkg-dev \
+            qt6-base-dev qt6-declarative-dev libgl-dev
+      # Debian's own Rust is older than this project needs; rustup gives the
+      # current stable one.
+      - name: Install the Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: settings/kde
+      - run: cargo install --locked cargo-deb
+      - name: Build
+        working-directory: settings/kde
+        run: cargo build --release --locked
+      - name: Make the .deb
+        working-directory: settings/kde
+        run: cargo deb --no-build
+      - name: Show package contents
+        working-directory: settings/kde
+        run: |
+          dpkg-deb -I target/debian/*.deb
+          dpkg-deb -c target/debian/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: part-settings-deb
+          path: settings/kde/target/debian/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-rpm:
+    name: Install the .rpm files in a clean Fedora
+    needs: [daemon, settings-rpm]
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: part-*
+          merge-multiple: true
+          path: pkgs
+      - name: Install the packages with their dependencies
+        run: |
+          ls -l pkgs
+          dnf -y install desktop-file-utils dejavu-sans-fonts ./pkgs/*.rpm
+      - name: The files are where the menu and KWin look for them
+        run: |
+          test -x /usr/bin/easime
+          test -x /usr/bin/easime-settings
+          desktop-file-validate /usr/share/applications/easime.desktop
+          desktop-file-validate /usr/share/applications/easime-settings.desktop
+          rpm -q --requires easime-settings
+          rpm -q --recommends easime
+      - name: Start the installed settings window
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+          XDG_RUNTIME_DIR: /tmp
+          QT_LOGGING_TO_CONSOLE: "1"
+          QT_FORCE_STDERR_LOGGING: "1"
+          LANG: C.UTF-8
+        run: |
+          export HOME="$PWD/home"; mkdir -p "$HOME" shots
+          set +e
+          timeout 120 easime-settings --ui-language=en --screenshots="$PWD/shots" > settings.log 2>&1
+          code=$?
+          set -e
+          cat settings.log
+          test "$code" = 0
+          grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
+          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 8
+          if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.log \
+              | grep -v 'Created graphical object was not placed in the graphics scene'; then
+            echo "QML reported warnings or errors (above)"; exit 1
+          fi
+
+  verify-deb:
+    name: Install the .deb files in a clean Debian
+    needs: [daemon, settings-deb]
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: part-*
+          merge-multiple: true
+          path: pkgs
+      - name: Install the packages with their dependencies
+        run: |
+          ls -l pkgs
+          apt-get update
+          apt-get install -y --no-install-recommends desktop-file-utils fonts-dejavu-core ./pkgs/*.deb
+      - name: The files are where the menu and KWin look for them
+        run: |
+          test -x /usr/bin/easime
+          test -x /usr/bin/easime-settings
+          desktop-file-validate /usr/share/applications/easime.desktop
+          desktop-file-validate /usr/share/applications/easime-settings.desktop
+          dpkg -s easime-settings | grep -E '^(Depends|Recommends):'
+          dpkg -s easime | grep -E '^(Depends|Recommends):'
+      - name: Start the installed settings window
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+          XDG_RUNTIME_DIR: /tmp
+          QT_LOGGING_TO_CONSOLE: "1"
+          QT_FORCE_STDERR_LOGGING: "1"
+          LANG: C.UTF-8
+        run: |
+          export HOME="$PWD/home"; mkdir -p "$HOME" shots
+          set +e
+          timeout 120 easime-settings --ui-language=en --screenshots="$PWD/shots" > settings.log 2>&1
+          code=$?
+          set -e
+          cat settings.log
+          test "$code" = 0
+          grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
+          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 8
+          if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.log \
+              | grep -v 'Created graphical object was not placed in the graphics scene'; then
+            echo "QML reported warnings or errors (above)"; exit 1
+          fi
+
+  # One download with all four packages, for the Actions run page (CI) and for
+  # the release workflow. Only after every package installed and started.
+  collect:
+    name: All packages in one download
+    needs: [daemon, settings-rpm, settings-deb, verify-rpm, verify-deb]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: part-*
+          merge-multiple: true
+          path: packages
+      - run: ls -l packages
+      - name: Expect exactly four packages
+        run: test "$(ls packages | wc -l)" = 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: easime-linux-packages-${{ github.sha }}
+          path: packages/*
+          if-no-files-found: error
+          retention-days: 30

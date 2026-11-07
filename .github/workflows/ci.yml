@@ -44,39 +44,16 @@ jobs:
       - run: cargo clippy ${{ env.PORTABLE }} --all-targets -- -D warnings
       - run: cargo test ${{ env.PORTABLE }}
 
+  # Every Linux package is built, installed into a clean Fedora or Debian and
+  # its settings window started; each CI run keeps all four for download
+  # (Actions run page -> Artifacts, easime-linux-packages-<commit>). They contain
+  # the tiny sample dictionary; the packages with the real Mozc dictionary come
+  # from the release workflow (GitHub Releases), which runs the same jobs.
   packages:
-    name: .deb and .rpm build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo install --locked cargo-deb cargo-generate-rpm
-      - run: cargo build --release --locked -p easime
-      # CI packages a tiny dictionary built from the committed fixture so the
-      # job never downloads the big Mozc data; the release workflow builds the
-      # real one (same file name, see crates/easime/Cargo.toml).
-      - run: sh scripts/build-dictionary.sh sample
-      - run: cargo deb -p easime --no-build
-      - run: cargo generate-rpm -p crates/easime
-      - name: Show package contents
-        run: |
-          dpkg-deb -I target/debian/*.deb
-          dpkg-deb -c target/debian/*.deb
-          rpm -qpl target/generate-rpm/*.rpm || true
-      # Every CI run keeps its packages for download (Actions run page ->
-      # Artifacts). These contain the tiny sample dictionary; the packages with
-      # the real Mozc dictionary come from the release workflow (GitHub
-      # Releases).
-      - uses: actions/upload-artifact@v4
-        with:
-          name: easime-linux-packages-${{ github.sha }}
-          path: |
-            target/debian/*.deb
-            target/generate-rpm/*.rpm
-          if-no-files-found: error
-          retention-days: 30
+    name: Linux packages
+    uses: ./.github/workflows/packages.yml
+    with:
+      dictionary: sample
 
   # The settings window needs Qt 6 and Kirigami, so it is built in Fedora (the
   # distribution the project targets) and is a separate cargo project that the

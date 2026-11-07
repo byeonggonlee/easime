@@ -12,46 +12,43 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  linux-packages:
-    name: .deb and .rpm
+  tag:
+    name: Tag matches the versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo install --locked cargo-deb cargo-generate-rpm
-
-      - name: Tag must match the crate version
+      - name: Tag must match the daemon and the settings window versions
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 \
+          daemon="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="easime"))')"
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "tag $GITHUB_REF_NAME does not match crate version v$version" >&2
+          settings="$(cargo metadata --no-deps --format-version 1 --manifest-path settings/kde/Cargo.toml \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="easime-settings"))')"
+          echo "tag $GITHUB_REF_NAME, easime $daemon, easime-settings $settings"
+          if [ "v$daemon" != "$GITHUB_REF_NAME" ] || [ "v$settings" != "$GITHUB_REF_NAME" ]; then
+            echo "the tag and both crate versions must be the same" >&2
             exit 1
           fi
 
-      - run: cargo build --release --locked -p easime
+  packages:
+    name: Linux packages
+    needs: tag
+    uses: ./.github/workflows/packages.yml
+    with:
+      dictionary: mozc
 
-      # Download the pinned Mozc dictionary (checksums are verified, a
-      # mismatch fails the job) and convert it to
-      # target/dictionary/mozc.bin, which the package metadata installs as
-      # /usr/share/easime/dictionary/mozc.bin.
-      - name: Build the Mozc dictionary
-        run: sh scripts/build-dictionary.sh mozc
-      - name: The dictionary must be the real one, not the sample
-        run: |
-          size="$(stat -c %s target/dictionary/mozc.bin)"
-          echo "mozc.bin is $size bytes"
-          test "$size" -gt 10000000
-
-      - run: cargo deb -p easime --no-build
-      - run: cargo generate-rpm -p crates/easime
-
+  publish:
+    name: Publish release
+    needs: packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: easime-linux-packages-${{ github.sha }}
+          path: dist
+      - run: ls -l dist
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            target/debian/*.deb target/generate-rpm/*.rpm \
-            --title "$GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

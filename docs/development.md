@@ -29,6 +29,15 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 설정 창은 실제 설정 파일(`~/.config/easime/config.toml`)을 바로 고친다. 시험할 때는 `XDG_CONFIG_HOME`을 임시 폴더로 바꿔 두는 편이 안전하다.
 Kirigami가 없는 환경(예: Ubuntu)에서는 빌드와 단위 테스트까지만 되고 화면은 열리지 않는다. 그 경우 화면 검증은 CI의 `settings` 잡(Fedora 컨테이너)이 맡는다.
 
+### 설정 창 패키지 만들기 (배포판 컨테이너에서)
+`easime-settings` 패키지는 Qt와 Kirigami가 있는 환경에서 만든다. CI는 `.github/workflows/packages.yml`에서 Fedora(`.rpm`)와 Debian 13(`.deb`) 컨테이너로 만든다.
+```sh
+cd settings/kde && cargo build --release --locked
+cargo generate-rpm          # Fedora: target/generate-rpm/easime-settings-*.rpm  (cargo install cargo-generate-rpm)
+cargo deb --no-build        # Debian: target/debian/easime-settings_*.deb        (cargo install cargo-deb)
+```
+`.desktop` 파일은 `data/easime-settings.desktop`이다. 다른 배포판이 요구하는 패키지 이름은 `settings/kde/Cargo.toml`의 `depends`/`requires`에 있다.
+
 ### 설정 창의 표시 언어와 번역
 표시 언어는 시스템 언어를 따르고, 시험할 때는 `--ui-language=ko|en|ja|zh-Hant|zh-Hans`(또는 `LANGUAGE=ja`)로 바꾼다.
 ```sh
