@@ -3,6 +3,12 @@
 use frontend_wayland::RunError;
 
 fn main() {
+    // The task bar icon follows the active language. The input method only
+    // sends it a message; the icon is drawn and served on its own thread.
+    let tray = easime::tray::start();
+    frontend_wayland::observe_language(move |language, cycle| {
+        let _ = tray.send((language, cycle.to_vec()));
+    });
     let Err(error) = frontend_wayland::run();
     frontend_wayland::log!("fatal: {error}");
     eprintln!("easime: {error}");
