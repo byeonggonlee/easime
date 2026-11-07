@@ -112,6 +112,14 @@ impl Romaji {
         std::mem::take(&mut self.kana)
     }
 
+    /// Start over with already converted kana (for example after cancelling a
+    /// conversion), with nothing waiting.
+    pub fn restore(&mut self, kana: &str) {
+        self.kana = kana.to_string();
+        self.pending.clear();
+        self.after_nn = false;
+    }
+
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -236,6 +244,16 @@ mod tests {
         r.backspace();
         r.push('a');
         assert_eq!(r.flush(), "あ");
+    }
+
+    #[test]
+    fn restore_resumes_editing_from_kana() {
+        let mut r = Romaji::new();
+        r.restore("にほん");
+        assert_eq!(r.preedit(), "にほん");
+        r.push('g');
+        r.push('o');
+        assert_eq!(r.flush(), "にほんご");
     }
 
     #[test]
