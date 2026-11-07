@@ -9,7 +9,7 @@ It does not depend on ibus or fcitx.
 
 Implemented so far: Korean (Dubeolsik) input, Japanese romaji to kana with word-by-word dictionary
 conversion (Mozc OSS dictionary, shown in the candidate popup; only tested against a fake compositor so far), key repeat, language cycling, live settings reload,
-a language indicator shown next to the cursor only when switching languages, an expert settings window (Kirigami; built and clicked through in CI, not packaged yet and never opened on a real Plasma desktop by a person), and `.deb` / `.rpm` packaging. Single-syllable Korean Hanja
+a language indicator shown next to the cursor only when switching languages, an expert settings window (Kirigami; in Korean, English, Japanese and Chinese, the translations being unreviewed drafts; built and clicked through in CI, not packaged yet and never opened on a real Plasma desktop by a person), and `.deb` / `.rpm` packaging. Single-syllable Korean Hanja
 conversion and a numbered candidate popup are implemented; real-KDE validation is pending. Still to do:
 tray icon, beginner settings and first-run guide, XWayland (XIM), Chinese, GNOME, Windows, macOS.
 

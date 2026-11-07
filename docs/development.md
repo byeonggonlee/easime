@@ -28,3 +28,12 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 ```
 설정 창은 실제 설정 파일(`~/.config/easime/config.toml`)을 바로 고친다. 시험할 때는 `XDG_CONFIG_HOME`을 임시 폴더로 바꿔 두는 편이 안전하다.
 Kirigami가 없는 환경(예: Ubuntu)에서는 빌드와 단위 테스트까지만 되고 화면은 열리지 않는다. 그 경우 화면 검증은 CI의 `settings` 잡(Fedora 컨테이너)이 맡는다.
+
+### 설정 창의 표시 언어와 번역
+표시 언어는 시스템 언어를 따르고, 시험할 때는 `--ui-language=ko|en|ja|zh-Hant|zh-Hans`(또는 `LANGUAGE=ja`)로 바꾼다.
+```sh
+cargo run --manifest-path settings/kde/Cargo.toml -- --ui-language=ja
+python3 settings/kde/tests/check_translations.py          # 번역표와 QML 문구 대조 (Qt 필요 없음)
+QT_QPA_PLATFORM=offscreen /usr/lib64/qt6/bin/qmltestrunner -input settings/kde/tests/tst_tr.qml   # 언어 선택 로직
+```
+화면의 문구는 `Tr.t("한국어 원문")`으로 쓰고, 같은 원문을 `settings/kde/qml/tr.js`의 표에 네 언어로 넣는다(원문을 고치면 표의 키도 고친다). 한국어 외의 번역은 원어민이 검토하기 전까지 초안이다.
