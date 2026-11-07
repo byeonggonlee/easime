@@ -115,6 +115,10 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
           XDG_RUNTIME_DIR: /tmp
+          # Qt in Fedora sends messages to the systemd journal instead of
+          # stderr when stderr is not a terminal; there is no journal here.
+          QT_LOGGING_TO_CONSOLE: "1"
+          QT_FORCE_STDERR_LOGGING: "1"
         run: |
           mkdir -p shots home
           export HOME="$PWD/home" XDG_CONFIG_HOME="$PWD/home/.config" XDG_STATE_HOME="$PWD/home/.state"
