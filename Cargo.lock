@@ -425,6 +425,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "frontend-tsf"
+version = "0.1.0"
+dependencies = [
+ "ime-core",
+ "ime-session",
+]
+
+[[package]]
 name = "frontend-wayland"
 version = "0.1.0"
 dependencies = [

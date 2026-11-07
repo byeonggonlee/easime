@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ime-core", "crates/ime-session", "crates/engine-hangul", "crates/easime-cli", "crates/frontend-wayland", "crates/easime", "crates/easime-config", "crates/engine-japanese", "crates/easime-dict-tool"]
+members = ["crates/ime-core", "crates/ime-session", "crates/frontend-tsf", "crates/engine-hangul", "crates/easime-cli", "crates/frontend-wayland", "crates/easime", "crates/easime-config", "crates/engine-japanese", "crates/easime-dict-tool"]
 
 [workspace.package]
 version = "0.1.0"

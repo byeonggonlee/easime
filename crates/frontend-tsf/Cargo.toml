@@ -1,0 +1,12 @@
+[package]
+name = "frontend-tsf"
+description = "Windows text service (TSF) frontend for easime: key handling that needs no Windows API, and later the COM parts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ime-core = { path = "../ime-core" }
+ime-session = { path = "../ime-session" }

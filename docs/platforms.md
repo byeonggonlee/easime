@@ -102,7 +102,8 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
   - 오른쪽 Alt: 일부 자판에서는 AltGr(Ctrl+Alt)로 동작한다. 그런 자판은 어댑터가 `KeyRole::Other`로 알려야 한다(예상, 조사 필요).
   - 키 반복은 OS가 한다(예상). `repeat.rs`에 해당하는 코드는 필요 없을 것이다.
 - 코어 바깥(OS 고유): WinUI 3 설정 앱(계획), MSI + TSF 등록. **MSI는 틀만 있다**: `packaging/windows`가 터미널 데모와 라이선스만 설치하고 입력기는 설치하지 않는다. CI의 Windows 러너에서 설치·제거·업그레이드를 시험한다.
-- 지금 Windows에서 되는 것: 코어 다섯 크레이트의 빌드와 테스트(CI). 이것은 Windows에서 입력이 된다는 뜻이 **아니다**.
+- 지금 Windows 쪽에 있는 것(모두 CI의 Windows 러너에서 빌드·테스트): 코어 다섯 크레이트, 키 입력 해석(`frontend-tsf::keys`: 가상 키·스캔 코드 → `KeyEvent`, 전환 키 분류), 시스템 언어 읽기, 설정 변경 감지(`ConfigReloader`), 설정·로그·사전 경로 규칙. **TSF 텍스트 서비스 자체(COM, 조합, 후보창, 등록)는 없다.** 이것은 Windows에서 입력이 된다는 뜻이 **아니다**.
+- **정해야 할 것(사용자 결정 필요)**: Windows에서 easime를 입력 방식 하나(내부에서 영어→한국어→일본어 순환)로 등록할지, 언어마다 프로필(한국어, 日本語, 繁體, 简体)로 등록해 OS의 Win+Space로 고르게 할지. 이것이 TSF 어댑터의 구조와 `Session` 사용 방식을 정한다.
 
 ### macOS (InputMethodKit): 계획
 
@@ -123,13 +124,13 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 |---|---|---|---|---|
 | 설정 파일 위치 | `easime-config/src/store.rs` | **있음** `~/.config/easime/config.toml` (`XDG_CONFIG_HOME`) | **있음(미검증)** `%APPDATA%\easime\config.toml` | **있음(미검증)** `~/Library/Application Support/easime/config.toml` |
 | 설정 저장(임시 파일 후 교체) | `easime-config/src/store.rs` | **있음** | **있음(미검증)**: 다른 프로세스가 파일을 열고 있을 때의 교체 실패는 조사 필요 | **있음(미검증)** |
-| 설정 변경 감지 | `frontend-wayland/src/watch.rs` | **있음** inotify | **계획** (`ReadDirectoryChangesW` 등, 조사 필요) | **계획** (FSEvents 등, 조사 필요) |
+| 설정 변경 감지 | `frontend-wayland/src/watch.rs`, `ime-session/src/reload.rs` | **있음** inotify(즉시) | **있음(미검증)** `ConfigReloader`: 키·포커스 같은 일이 있을 때 파일 시각을 한 번씩 본다(앱마다 감시자를 두지 않으려고). 단위 테스트만 | **있음(미검증)** 같은 `ConfigReloader`(FSEvents로 바꿀지는 조사 필요) |
 | 사전 폴더 | `engine-japanese/src/loader.rs` (`Os`) | **있음** `~/.local/share/easime/dictionary`, `/usr/share/easime/dictionary` (패키지가 설치) | **있음(코드·테스트만)** `%APPDATA%\easime\dictionary`, `%ProgramW6432%\easime\dictionary` (MSI는 아직 사전을 설치하지 않음) | **있음(코드·테스트만)** `~/Library/Application Support/easime/dictionary`, `/Library/Application Support/easime/dictionary` (설치 없음) |
 | 사전 읽기 | `engine-japanese/src/file_dict.rs` | **있음** 파일 전체를 메모리로 | 프로세스마다 읽으면 비싸다. **조사 필요** | 프로세스 하나라 Linux와 같을 것(예상) |
-| 시스템 언어 읽기 | `easime-config/src/locale.rs` | **있음** `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` | **없음**: 비어 있으면 영어만(안전한 폴백). 선호 UI 언어 API가 필요 | **없음**: 같은 폴백. 선호 언어 API가 필요 |
-| 로그 위치 | `frontend-wayland/src/log.rs`, `settings/kde/src/view.rs` | **있음** `~/.local/state/easime/easime.log` | **계획** | **계획** |
-| 키 코드 → `KeyEvent` | `frontend-wayland/src/translate.rs` | **있음** X keysym | **계획** 가상 키 코드 | **계획** macOS 키 코드 |
-| 전환 키 분류(`KeyRole`) | `translate.rs`의 `toggle_role` | **있음** | **계획** (AltGr 처리 조사 필요) | **계획** (수정 키 이벤트 조사 필요) |
+| 시스템 언어 읽기 | `easime-config/src/locale.rs` | **있음** `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` | **있음** `GetUserPreferredUILanguages`. CI의 Windows 러너에서 호출이 되는 것만 확인했고 한국어·일본어 Windows에서는 돌려 보지 않았다 | **없음**: 환경 변수가 비어 있어 영어만(안전한 폴백). 선호 언어 API가 필요 |
+| 로그 위치 | `easime-config/src/store.rs`(`log_path_for`), 쓰기는 `frontend-wayland/src/log.rs` | **있음** `~/.local/state/easime/easime.log` | 경로 **있음**(`%LOCALAPPDATA%\easime\easime.log`, 모든 OS에서 테스트), 쓰는 쪽은 **계획** | 경로 **있음**(`~/Library/Logs/easime/easime.log`), 쓰는 쪽은 **계획** |
+| 키 코드 → `KeyEvent` | `frontend-wayland/src/translate.rs`, `frontend-tsf/src/keys.rs` | **있음** X keysym | **있음(TSF에 연결 전)** 가상 키 코드 + 스캔 코드(물리 키 기준 US 글자, 레이아웃과 무관). 모든 OS에서 단위 테스트 | **계획** macOS 키 코드 |
+| 전환 키 분류(`KeyRole`) | `translate.rs`의 `toggle_role`, `frontend-tsf/src/keys.rs`의 `toggle_role` | **있음** | **있음(TSF에 연결 전)** 한/영 키, 오른쪽 Alt(확장 키 표시). AltGr 자판 처리는 **조사 필요** | **계획** (수정 키 이벤트 조사 필요) |
 | 키 반복 | `frontend-wayland/src/repeat.rs`, `timer.rs` | **있음** 직접 반복 | OS가 한다(예상) | OS가 한다(예상) |
 | 조합·확정 전달 | `frontend-wayland/src/app.rs`의 `apply` | **있음** `commit_string`, `preedit_string` | **계획** TSF composition | **계획** `setMarkedText`, `insertText` |
 | 후보창 | `frontend-wayland/src/candidate.rs`, `panel.rs` | **있음** 입력 패널 + 직접 그림 | **계획** | **계획** |

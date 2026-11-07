@@ -47,7 +47,7 @@ crates/
   frontend-wayland/  KWin input-method-v1 (Linux)
   frontend-xim/      XIM 서버 (XWayland, X11)
   frontend-ibus/     IBus 호환 D-Bus 서비스 (GNOME)
-  frontend-tsf/      Windows TSF DLL
+  frontend-tsf/      Windows TSF DLL (지금은 TSF 없이 되는 키 입력 해석만 있다. COM 텍스트 서비스는 없음)
   easime/            Linux 데몬 바이너리 (Wayland + XIM + IBus 프론트엔드, 트레이, D-Bus)
 settings/
   kde/               Linux 설정 앱: Rust + cxx-qt + QML + Kirigami
