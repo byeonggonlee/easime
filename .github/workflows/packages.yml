@@ -54,12 +54,12 @@ jobs:
           dpkg-deb -I target/debian/*.deb
           dpkg-deb -c target/debian/*.deb
           rpm -qpl target/generate-rpm/*.rpm || true
+      # Flat, so every part unpacks to plain files.
+      - run: mkdir out && cp target/debian/*.deb target/generate-rpm/*.rpm out/
       - uses: actions/upload-artifact@v4
         with:
           name: part-daemon
-          path: |
-            target/debian/*.deb
-            target/generate-rpm/*.rpm
+          path: out/*
           if-no-files-found: error
           retention-days: 7
 
@@ -70,7 +70,9 @@ jobs:
     steps:
       - name: Install Qt 6 and the Rust toolchain
         run: |
-          dnf -y install git cargo rust gcc gcc-c++ make \
+          # rpm-build: cargo-generate-rpm then finds the library requirements the
+          # way rpmbuild does (without it, it lists private libproxy plugins).
+          dnf -y install git cargo rust gcc gcc-c++ make rpm-build \
             qt6-qtbase-devel qt6-qtdeclarative-devel
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
@@ -197,7 +199,8 @@ jobs:
         run: |
           ls -l pkgs
           apt-get update
-          apt-get install -y --no-install-recommends desktop-file-utils fonts-dejavu-core ./pkgs/*.deb
+          apt-get install -y --no-install-recommends desktop-file-utils fonts-dejavu-core ./pkgs/*.deb \
+            || { echo "--- what Debian calls the QML modules:"; apt-cache search qml6-module | grep -iE 'kirigami|kde|qqc2|desktop'; apt-cache search qqc2; exit 1; }
       - name: The files are where the menu and KWin look for them
         run: |
           test -x /usr/bin/easime
