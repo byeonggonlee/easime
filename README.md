@@ -9,9 +9,9 @@ It does not depend on ibus or fcitx.
 
 Implemented so far: Korean (Dubeolsik) input, Japanese romaji to kana with word-by-word dictionary
 conversion (Mozc OSS dictionary, shown in the candidate popup; only tested against a fake compositor so far), key repeat, language cycling, live settings reload,
-a language indicator shown next to the cursor only when switching languages, and `.deb` / `.rpm` packaging. Single-syllable Korean Hanja
+a language indicator shown next to the cursor only when switching languages, an expert settings window (Kirigami; built and clicked through in CI, not packaged yet and never opened on a real Plasma desktop by a person), and `.deb` / `.rpm` packaging. Single-syllable Korean Hanja
 conversion and a numbered candidate popup are implemented; real-KDE validation is pending. Still to do:
-tray icon, settings app, XWayland (XIM), Chinese, GNOME, Windows, macOS.
+tray icon, beginner settings and first-run guide, XWayland (XIM), Chinese, GNOME, Windows, macOS.
 
 See [docs/concept.md](docs/concept.md) for the product concept (in Korean).
 See [DESIGN.md](DESIGN.md) for the UX/UI assessment and design guidelines (in Korean).
@@ -22,7 +22,7 @@ All agents should start with [AGENTS.md](AGENTS.md) and read DESIGN.md before wo
 1. ~~Korean (Dubeolsik) composition engine~~ done
 2. ~~Wayland input method frontend (`zwp_input_method_v1`, launched by KWin)~~ basic Korean/English input user-tested on Fedora KDE; broader testing pending
 3. Language indicator near the text cursor: done. Tray icon: todo
-4. Settings app (Qt 6 / Kirigami, native Plasma look): in progress
+4. Settings app (Qt 6 / Kirigami, native Plasma look): expert version done (separate cargo project, checked in a Fedora CI job, not packaged yet); beginner version later
 5. XIM frontend for XWayland apps (games, Wine, Steam)
 6. Japanese: romaji → kana done; kana → kanji with Mozc OSS data: engine, dictionary, daemon wiring and candidate popup done (fake-compositor tests only); validation on a real KDE desktop and clause conversion todo
 7. Chinese (pinyin, Simplified and Traditional)

@@ -36,20 +36,28 @@
     48x48 박스를 `indicator_ms`(기본 1000) 동안 표시. `zwp_input_panel_surface_v1.set_overlay_panel`(KWin이 커서 사각형 바로 아래에 배치,
     키보드 포커스 안 가짐, 빈 input region), 표시/숨김은 버퍼 attach/null attach, `[appearance] indicator_box`로 끄기.
     사용자가 Fedora KDE의 `107bb4b`에서 한·영 입력 성공을 보고했다. 하단 패널 전체 이동은 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용한 뒤 재현되지 않는다고 확인했다. 포커스 시 박스 표시 제거는 로컬 수정본 설치 후 검증이 필요하다. text-input-v1 앱은 커서 위치를 보내지 않아 창 왼쪽 위에 뜰 수 있다.
-  - CI: Linux는 전체, Windows/macOS는 OS 독립 crate만 (`fmt`, `clippy -D warnings`, `test`)
+  - CI: Linux는 전체, Windows/macOS는 OS 독립 crate만 (`fmt`, `clippy -D warnings`, `test`). 설정 창은 Fedora 컨테이너 잡이 따로 검증한다(아래).
+  - 설정 창(전문가용, `settings/kde`): Rust + cxx-qt + QML + Kirigami, 메인 워크스페이스와 별개의 cargo 프로젝트.
+    페이지: 일반(파일 위치, 다시 읽기, 기본값으로 되돌리기), 언어(켜기/끄기, 순서, 전환 순서 미리보기), 단축키(전환 키), 한국어(백스페이스 단위), 모양(상태 상자).
+    어떤 언어도 필수가 아니다(한국어만, 일본어만, 둘 다). 변경은 바로 저장되고 데몬이 다시 읽는다. 바뀐 키만 `toml_edit`으로 고치므로 직접 쓴 주석과 모르는 키가 남고,
+    읽을 수 없는 파일은 덮어쓰지 않으며(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다. 모델은 Qt 없이 단위 테스트한다(21개).
+    **검증 범위**: CI `settings` 잡(필수)이 Fedora 컨테이너에서 실제 Kirigami로 빌드하고, 오프스크린으로 5개 페이지를 모두 열어 QML 경고를 실패로 취급하며,
+    Switch·라디오·체크박스를 `click()`으로 눌러 설정 파일이 바뀌는 것까지 확인한다. 페이지별 화면 캡처는 Actions 아티팩트 `settings-window-pages`에 남는다.
+    **사람이 실제 Plasma에서 연 적은 없고**, 색·간격 같은 모양과 사이드바의 보이는 모습은 확인하지 못했다.
+    아직 없음: 패키지(.deb/.rpm) 포함, 앱 메뉴 등록(`.desktop`)과 자동 실행, 초보자용(첫 실행 안내), 설정 창 자신의 일본어 번역, 일본어·중국어 페이지(옵션이 생길 때 추가).
 - **가짜 KWin 테스트 하네스**: `crates/frontend-wayland/tests/` (순수 Rust Wayland 서버로 activate → 키 입력 → commit/preedit를
   검증). 실제 KWin이 없어도 프로토콜 흐름을 시험할 수 있고, 이미 실제 버그(`KeyState::Repeated` 처리)를 잡았다.
 - **실사용 보고(2026-11-07)**: Fedora 최신 + `107bb4bbcc24bfc83b063cfd69c4a052b44fb616`에서 사용자가 한·영 입력 동작을 확인했다. 앱별 범위는 미확인이다. 하단 패널 전체 이동은 KWin bug 527067 경로와 일치했고, 재부팅 전에는 박스 등장/퇴장 때 DBus visible=true/false 변화가 확인됐다. 이후 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용하자 문제가 재현되지 않는다고 사용자가 확인했다. 재부팅 후 DBus 속성은 재측정하지 않았다. 구버전 easime의 포커스 표시 문제와 새 한자 기능은 수정본 설치 후 검증이 남아 있다. [진단과 한자 재검증](kde-testing.md). 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
   (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
-- 알려진 미구현: 트레이 아이콘, 일본어 변환의 실제 KDE 검증과 사전 상태 안내 문구, 설정 GUI(`settings-gui-kde` 브랜치에 중간본), XIM, 문절 변환, 중국어, GNOME/Windows/macOS
+- 알려진 미구현: 트레이 아이콘, 일본어 변환의 실제 KDE 검증과 사전 상태 안내 문구, 설정 창의 패키징·앱 메뉴 등록·초보자용, XIM, 문절 변환, 중국어, GNOME/Windows/macOS
 - 알려진 한계: 상태 박스와 후보창은 고정 다크 테마다. Plasma 색상 연동은 아직 없다.
 - 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
 
 ## 중단된 작업 (이어서 할 것)
 토큰 소진으로 2026-11-07에 아래 두 작업을 중간에 멈췄다. 커밋은 로컬 브랜치/워크트리에 남아 있고 `main`에는 아직 없다
 (`git branch -a`, `git worktree list`로 확인. 워크트리: `.claude/worktrees/`).
-- `settings-gui-kde`: Kirigami 설정 앱(`settings/kde`, 워크스페이스에서 제외). 완성 여부는 브랜치 로그와 스크린샷으로 확인할 것.
-- `candidate-window`: 후보창(입력 패널 공유, 페이지 나누기). 완성 여부는 브랜치 로그로 확인할 것.
+- `settings-gui-kde`: 형님 로컬에만 있는 Kirigami 설정 앱 중간본. `main`에 같은 경로(`settings/kde`)로 새 구현이 들어갔으므로 합치지 말고, 필요한 부분(화면 구성, 스크린샷)만 비교해서 가져올 것.
+- `candidate-window`: 형님 로컬에만 있는 후보창 중간본. `main`에는 이미 후보창이 있다(`frontend-wayland/src/candidate.rs`, 한국어 한자와 일본어 공용). 합치기 전에 비교할 것.
 - 병합 방법: `git cherry-pick <첫커밋>^..<마지막커밋>` 후 `fmt`/`clippy -D warnings`/`test --workspace` 확인, 푸시, CI 확인.
-- 다음 후보 작업: 클립보드 기록(`Super+V`)과 이모지 선택기(`Super+.`) ([concept.md](concept.md), [decisions.md](decisions.md)), 시스템 색상 연동, 사전을 데몬에 연결(`engine_japanese::load_default()`, 시작 시 한 번, 약 0.1초), 트레이 아이콘, XIM, 실제 KWin 시험.
+- 다음 후보 작업: 클립보드 기록(`Super+V`)과 이모지 선택기(`Super+.`) ([concept.md](concept.md), [decisions.md](decisions.md)), 시스템 색상 연동, 설정 창을 패키지에 넣고 앱 메뉴에 등록하기, 트레이 아이콘, XIM, 실제 KWin 시험.
 

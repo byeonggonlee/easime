@@ -86,8 +86,6 @@ jobs:
     name: Settings window (KDE, Fedora)
     runs-on: ubuntu-latest
     container: fedora:latest
-    # New job: it must be seen green before it is allowed to fail the CI.
-    continue-on-error: true
     steps:
       - name: Install Qt 6, Kirigami and the Rust toolchain
         run: |
