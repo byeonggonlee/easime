@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets you run the CI by hand on any branch (Actions tab -> CI -> Run workflow).
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -63,3 +65,15 @@ jobs:
           dpkg-deb -I target/debian/*.deb
           dpkg-deb -c target/debian/*.deb
           rpm -qpl target/generate-rpm/*.rpm || true
+      # Every CI run keeps its packages for download (Actions run page ->
+      # Artifacts). These contain the tiny sample dictionary; the packages with
+      # the real Mozc dictionary come from the release workflow (GitHub
+      # Releases).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: easime-linux-packages-${{ github.sha }}
+          path: |
+            target/debian/*.deb
+            target/generate-rpm/*.rpm
+          if-no-files-found: error
+          retention-days: 30
