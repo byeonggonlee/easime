@@ -7,7 +7,7 @@
 //!
 //! Directories searched, in this order (earlier entries win): first the user
 //! directory, then the system directory. Where those are depends on the
-//! operating system ([`Os`]):
+//! operating system ([`ime_core::Os`]):
 //!
 //! | OS | user directory | system directory |
 //! |---|---|---|
@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 
 use crate::dictionary::{Dictionary, MemoryDictionary};
 use crate::file_dict::FileDictionary;
+use ime_core::Os;
 
 /// Where Linux distribution packages install dictionaries.
 pub const SYSTEM_DICTIONARY_DIR: &str = "/usr/share/easime/dictionary";
@@ -87,28 +88,6 @@ impl Dictionary for LayeredDictionary {
             }
         }
         merged
-    }
-}
-
-/// The operating system whose conventions decide where dictionaries live.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Os {
-    Linux,
-    MacOs,
-    Windows,
-}
-
-impl Os {
-    /// The OS this program was built for. Anything that is not Windows or
-    /// macOS follows the Linux (XDG) conventions.
-    pub fn current() -> Self {
-        if cfg!(target_os = "windows") {
-            Os::Windows
-        } else if cfg!(target_os = "macos") {
-            Os::MacOs
-        } else {
-            Os::Linux
-        }
     }
 }
 
@@ -442,14 +421,6 @@ mod tests {
             user_dictionary_dir(),
             user_dictionary_dir_for(Os::current(), &real)
         );
-        let expected = if cfg!(target_os = "windows") {
-            Os::Windows
-        } else if cfg!(target_os = "macos") {
-            Os::MacOs
-        } else {
-            Os::Linux
-        };
-        assert_eq!(Os::current(), expected);
     }
 
     #[test]

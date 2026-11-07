@@ -12,4 +12,4 @@ pub use locale::{
     system_languages_in,
 };
 pub use model::{Appearance, BackspaceUnit, Config, Korean, Languages, Shortcuts, ToggleKey};
-pub use store::{StoreError, config_path};
+pub use store::{StoreError, config_path, config_path_for, log_path, log_path_for};

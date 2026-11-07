@@ -1,6 +1,7 @@
 //! Where the settings file lives and how it is read and written.
 
 use crate::Config;
+use ime_core::Os;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
@@ -31,20 +32,46 @@ fn macos_dir(env: Env) -> Option<PathBuf> {
     absolute(env("HOME")).map(|h| h.join("Library").join("Application Support"))
 }
 
-fn platform_base(env: Env) -> Option<PathBuf> {
-    if cfg!(target_os = "windows") {
-        windows_dir(env)
-    } else if cfg!(target_os = "macos") {
-        macos_dir(env)
-    } else {
-        linux_dir(env)
+/// The directory settings live in on `os`.
+fn config_base_for(os: Os, env: Env) -> Option<PathBuf> {
+    match os {
+        Os::Windows => windows_dir(env),
+        Os::MacOs => macos_dir(env),
+        Os::Linux => linux_dir(env),
     }
+}
+
+/// The settings file path on `os`, or `None` if no home directory is known.
+pub fn config_path_for(os: Os, env: Env) -> Option<PathBuf> {
+    config_base_for(os, env).map(|base| base.join(APP_DIR).join(FILE_NAME))
 }
 
 /// The settings file path for this OS, or `None` if no home directory is known.
 pub fn config_path() -> Option<PathBuf> {
-    let env = |name: &str| std::env::var_os(name);
-    platform_base(&env).map(|base| base.join(APP_DIR).join(FILE_NAME))
+    config_path_for(Os::current(), &|name| std::env::var_os(name))
+}
+
+/// The directory the log lives in on `os`: Linux the XDG state directory
+/// (`$XDG_STATE_HOME`, default `~/.local/state`), macOS `~/Library/Logs`,
+/// Windows `%LOCALAPPDATA%`.
+fn log_base_for(os: Os, env: Env) -> Option<PathBuf> {
+    match os {
+        Os::Linux => absolute(env("XDG_STATE_HOME"))
+            .or_else(|| absolute(env("HOME")).map(|h| h.join(".local").join("state"))),
+        Os::MacOs => absolute(env("HOME")).map(|h| h.join("Library").join("Logs")),
+        Os::Windows => absolute(env("LOCALAPPDATA")),
+    }
+}
+
+/// The log file path on `os` (`easime/easime.log` below the log directory), or
+/// `None` if no home directory is known.
+pub fn log_path_for(os: Os, env: Env) -> Option<PathBuf> {
+    log_base_for(os, env).map(|base| base.join(APP_DIR).join("easime.log"))
+}
+
+/// The log file path for this OS.
+pub fn log_path() -> Option<PathBuf> {
+    log_path_for(Os::current(), &|name| std::env::var_os(name))
 }
 
 /// Why a settings file could not be read or written.
@@ -186,6 +213,94 @@ mod tests {
     fn no_home_means_no_path() {
         assert_eq!(linux_dir(&env_of(&[])), None);
         assert_eq!(macos_dir(&env_of(&[])), None);
+    }
+
+    #[test]
+    fn each_os_has_its_own_settings_file() {
+        let env = env_of(&[
+            ("HOME", &abs("/home/u")),
+            ("APPDATA", &abs("/Users/u/AppData/Roaming")),
+        ]);
+        let file = |os| config_path_for(os, &env);
+        assert_eq!(
+            file(Os::Linux),
+            Some(
+                abs_path("/home/u")
+                    .join(".config")
+                    .join("easime")
+                    .join("config.toml")
+            )
+        );
+        assert_eq!(
+            file(Os::Windows),
+            Some(
+                abs_path("/Users/u/AppData/Roaming")
+                    .join("easime")
+                    .join("config.toml")
+            )
+        );
+        assert_eq!(
+            file(Os::MacOs),
+            Some(
+                abs_path("/home/u")
+                    .join("Library")
+                    .join("Application Support")
+                    .join("easime")
+                    .join("config.toml")
+            )
+        );
+    }
+
+    #[test]
+    fn the_log_lives_where_each_os_keeps_logs() {
+        let env = env_of(&[
+            ("XDG_STATE_HOME", &abs("/x/state")),
+            ("HOME", &abs("/home/u")),
+            ("LOCALAPPDATA", &abs("/Users/u/AppData/Local")),
+        ]);
+        let log = |os| log_path_for(os, &env);
+        assert_eq!(
+            log(Os::Linux),
+            Some(abs_path("/x/state").join("easime").join("easime.log"))
+        );
+        assert_eq!(
+            log(Os::Windows),
+            Some(
+                abs_path("/Users/u/AppData/Local")
+                    .join("easime")
+                    .join("easime.log")
+            )
+        );
+        assert_eq!(
+            log(Os::MacOs),
+            Some(
+                abs_path("/home/u")
+                    .join("Library")
+                    .join("Logs")
+                    .join("easime")
+                    .join("easime.log")
+            )
+        );
+    }
+
+    #[test]
+    fn the_linux_log_falls_back_to_the_home_directory() {
+        for bad in ["", "rel/path"] {
+            let env = env_of(&[("XDG_STATE_HOME", bad), ("HOME", &abs("/home/u"))]);
+            assert_eq!(
+                log_path_for(Os::Linux, &env),
+                Some(
+                    abs_path("/home/u")
+                        .join(".local")
+                        .join("state")
+                        .join("easime")
+                        .join("easime.log")
+                )
+            );
+        }
+        assert_eq!(log_path_for(Os::Linux, &env_of(&[])), None);
+        assert_eq!(log_path_for(Os::Windows, &env_of(&[])), None);
+        assert_eq!(log_path_for(Os::MacOs, &env_of(&[])), None);
     }
 
     fn scratch_dir(name: &str) -> PathBuf {

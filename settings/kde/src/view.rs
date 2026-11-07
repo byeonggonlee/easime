@@ -3,7 +3,6 @@
 //! produces codes and technical details.
 
 use crate::model::{Failure, FailureKind, Model, backspace_code, language_code, toggle_key_code};
-use std::path::PathBuf;
 
 /// The code QML switches on for a failure.
 pub fn failure_code(kind: FailureKind) -> &'static str {
@@ -53,20 +52,10 @@ impl View {
     }
 }
 
-/// Where the daemon writes its log: `$XDG_STATE_HOME/easime/easime.log`,
-/// else under `~/.local/state`. Only absolute directories count.
-pub fn log_file(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
-    let absolute = |name: &str| env(name).map(PathBuf::from).filter(|p| p.is_absolute());
-    let state = absolute("XDG_STATE_HOME")
-        .or_else(|| absolute("HOME").map(|home| home.join(".local").join("state")))?;
-    Some(state.join("easime").join("easime.log"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use ime_core::Language;
-    use std::ffi::OsString;
 
     #[test]
     fn the_default_view_matches_the_default_settings() {
@@ -108,52 +97,5 @@ mod tests {
                 assert_ne!(a, b);
             }
         }
-    }
-
-    fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> + use<> {
-        let pairs: Vec<(String, OsString)> = pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), OsString::from(v)))
-            .collect();
-        move |name| {
-            pairs
-                .iter()
-                .find(|(k, _)| k == name)
-                .map(|(_, v)| v.clone())
-        }
-    }
-
-    /// An absolute path on the OS running the tests.
-    fn abs(path: &str) -> String {
-        std::env::temp_dir()
-            .join(path)
-            .to_string_lossy()
-            .into_owned()
-    }
-
-    #[test]
-    fn the_log_follows_the_state_directory_rules() {
-        let state = abs("state");
-        let home = abs("home");
-        let from_state = log_file(env_of(&[("XDG_STATE_HOME", &state), ("HOME", &home)]));
-        assert_eq!(
-            from_state,
-            Some(PathBuf::from(&state).join("easime").join("easime.log"))
-        );
-        let from_home = log_file(env_of(&[("HOME", &home)]));
-        assert_eq!(
-            from_home,
-            Some(
-                PathBuf::from(&home)
-                    .join(".local")
-                    .join("state")
-                    .join("easime")
-                    .join("easime.log")
-            )
-        );
-        // A relative XDG_STATE_HOME is ignored.
-        let relative = log_file(env_of(&[("XDG_STATE_HOME", "state"), ("HOME", &home)]));
-        assert_eq!(relative, from_home);
-        assert_eq!(log_file(env_of(&[])), None);
     }
 }

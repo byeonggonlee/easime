@@ -3,7 +3,7 @@
 //! happened after each action in `resultKind` / `resultDetail`.
 
 use crate::model::{Failure, Model, backspace_from_code, language_from_code, toggle_key_from_code};
-use crate::view::{View, failure_code, log_file};
+use crate::view::{View, failure_code};
 use core::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
@@ -106,7 +106,7 @@ impl Default for EasimeSettingsRust {
             result_kind: QString::default(),
             result_detail: QString::default(),
             config_path: path_text(model.path()),
-            log_path: path_text(log_file(|name| std::env::var_os(name)).as_deref()),
+            log_path: path_text(easime_config::log_path().as_deref()),
             model,
         }
     }
