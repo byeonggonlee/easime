@@ -33,6 +33,9 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `engine-h
 - New third-party data: check its license, keep the original LICENSE in `data/<source>/`, record it in `THIRD_PARTY_LICENSES.md`.
 - Before every commit run fmt, clippy and test, chained with `&&` so a failure aborts the commit.
 - Small commits, pushed right after committing. Stage explicit paths, never `git add -A` (agent worktrees were committed that way once).
+- **Until v0.1.0 is released, push straight to `main` and do not open pull requests** (decided by the user; revisit after the release).
+  CI only runs after the push, so run the checks above first, and fix a red CI on `main` before any other work.
+  For OS-specific code, run CI by hand on a branch first (Actions > CI > Run workflow). Do not push tags: releases are the user's call.
 
 ## LLM attribution (every tool)
 - End each commit that an LLM wrote or substantially changed with `Co-Authored-By: <tool> <model and version> <noreply address>`.
