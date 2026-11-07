@@ -15,7 +15,7 @@ engine-japanese = { path = "../engine-japanese" }
 wayland-client = "0.31"
 wayland-scanner = "0.31"
 xkbcommon = "0.8"
-rustix = { version = "1", features = ["event", "time"] }
+rustix = { version = "1", features = ["event", "time", "fs"] }
 
 [dev-dependencies]
 wayland-server = "0.31"

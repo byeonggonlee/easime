@@ -7,5 +7,6 @@ pub mod repeat;
 pub mod timer;
 pub mod toggle;
 pub mod translate;
+pub mod watch;
 
 pub use app::{RunError, run, run_on, run_with};
