@@ -598,44 +598,41 @@ impl Fake {
         std::mem::take(&mut self.state.panel_log)
     }
 
-    /// Serve the client until a committed buffer is attached, and return its
-    /// content. Events up to and including that commit are consumed.
-    pub fn wait_for_indicator_shown(&mut self) -> Shot {
+    /// Serve the client until a committed buffer is attached. Returns the
+    /// events up to and including that commit, which are consumed; the last
+    /// one is the `Commit` carrying the buffer.
+    pub fn wait_for_indicator_events(&mut self) -> Vec<PanelEv> {
+        let shown = |e: &PanelEv| {
+            matches!(
+                e,
+                PanelEv::Commit {
+                    buffer: Some(_),
+                    ..
+                }
+            )
+        };
         self.wait_until("the indicator to be shown", |s| {
-            s.panel_log.iter().any(|e| {
-                matches!(
-                    e,
-                    PanelEv::Commit {
-                        buffer: Some(_),
-                        ..
-                    }
-                )
-            })
+            s.panel_log.iter().any(shown)
         });
         let at = self
             .state
             .panel_log
             .iter()
-            .position(|e| {
-                matches!(
-                    e,
-                    PanelEv::Commit {
-                        buffer: Some(_),
-                        ..
-                    }
-                )
-            })
+            .position(shown)
             .expect("commit present");
-        let mut rest = self.state.panel_log.split_off(at + 1);
-        let Some(PanelEv::Commit {
-            buffer: Some(shot), ..
-        }) = self.state.panel_log.pop()
-        else {
-            unreachable!()
-        };
-        self.state.panel_log.clear();
-        self.state.panel_log.append(&mut rest);
-        shot
+        let rest = self.state.panel_log.split_off(at + 1);
+        std::mem::replace(&mut self.state.panel_log, rest)
+    }
+
+    /// Like [`Fake::wait_for_indicator_events`], returning only the shown
+    /// buffer.
+    pub fn wait_for_indicator_shown(&mut self) -> Shot {
+        match self.wait_for_indicator_events().pop() {
+            Some(PanelEv::Commit {
+                buffer: Some(shot), ..
+            }) => shot,
+            other => panic!("expected a commit with a buffer, got {other:?}"),
+        }
     }
 
     /// Serve the client until it has unmapped the panel surface (a commit with
