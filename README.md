@@ -11,6 +11,8 @@ Implemented so far: Korean (Dubeolsik) input, Japanese romaji to kana with dicti
 a language indicator box next to the cursor, and `.deb` / `.rpm` packaging. Still to do: candidate window,
 tray icon, settings app, XWayland (XIM), Chinese, GNOME, Windows, macOS.
 
+See [docs/concept.md](docs/concept.md) for the product concept (in Korean).
+
 ## Roadmap
 1. ~~Korean (Dubeolsik) composition engine~~ done
 2. ~~Wayland input method frontend (`zwp_input_method_v1`, launched by KWin)~~ done, untested on real KWin
