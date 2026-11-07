@@ -32,7 +32,7 @@
   - `easime-dict-tool`: Mozc OSS 사전 → easime 이진 사전 변환기. `scripts/fetch-mozc-dictionary.sh`(고정 SHA, 체크섬 검증),
     `scripts/build-dictionary.sh sample|mozc`. 라이선스(BSD-3, IPAdic, 오키나와 사전)는 `THIRD_PARTY_LICENSES.md`와 `data/mozc/`.
   - 설정 즉시 반영: 설정 파일을 inotify로 감시해 한/영 키, 백스페이스 단위, 언어 목록을 재시작 없이 적용(깨진 파일은 무시)
-  - 패키징: 패키지 둘(`easime` 데몬, `easime-settings` 설정 창)을 `.deb`/`.rpm`으로 만든다. 빌드·설치 검증은 `.github/workflows/packages.yml` 하나이고, CI는 샘플 사전으로, 태그 `v*` 푸시 시 릴리스 워크플로는 실제 Mozc 사전으로 같은 흐름을 쓴다. 태그와 두 크레이트(`easime`, `easime-settings`)의 버전이 같아야 릴리스가 진행된다.
+  - 패키징: **배포판당 패키지 하나**(`easime`: 데몬, 설정 창, 두 `.desktop`, 사전)를 `.deb`/`.rpm`으로 만든다. 설치가 한 번에 끝나도록 한 사용자 요청(2026-11-07)으로 데몬과 설정 창 패키지를 합쳤다. 빌드·설치 검증은 `.github/workflows/packages.yml` 하나이고, CI와 태그 `v*` 푸시 시 릴리스 워크플로가 같은 흐름과 **같은 실제 Mozc 사전**을 쓴다(CI 패키지에 샘플 사전이 들어 있어 일본어 변환이 가나만 내던 문제를 고친 것: 2026-11-07 실사용 보고). 태그와 두 크레이트(`easime`, `easime-settings`)의 버전이 같아야 릴리스가 진행된다.
   - Windows 설치 프로그램(MSI, WiX 5, `packaging/windows`): **터미널 데모와 라이선스만 담는다. Windows 입력기(TSF)가 없으므로 입력기를 설치하지 않는다.** CI의 Windows 러너에서 설치 → `easime-cli` 실행 → 제거 → PATH 옵션 → 업그레이드·다운그레이드 거부까지 시험한다. 릴리스에는 올리지 않는다. 사전과 설정 앱(WinUI 3)은 아직 넣지 않았다.
   - `frontend-wayland` + `easime` 데몬: KWin `zwp_input_method_v1` 클라이언트, 키 반복(자체 타이머와 컴포지터 `repeated`),
     한/영 키와 오른쪽 Alt 탭 전환, Caps Lock 무시, 언어 순환, 설정 읽기
@@ -52,7 +52,7 @@
     문구는 한국어 원문을 키로 한 표 한 개(`settings/kde/qml/tr.js`)에 있다. **한국어 외의 번역은 원어민 검토 전 초안**이고 번역된 화면의 일반 페이지가 그렇게 알린다.
     자동 검사: 번역표와 QML 문구의 대조(누락·미사용·빈 번역·`%1` 불일치, `tests/check_translations.py`), 언어 선택 로직(`tests/tst_tr.qml`), CI가 다섯 언어로 각각 창을 열어 클릭→파일 저장과 번역 누락·QML 경고 없음을 확인하고 시스템 언어 감지를 시험한다.
     **번역의 정확성·자연스러움과 언어별 한자 자형은 확인하지 않았다.**
-    패키지: `easime-settings` `.rpm`(Fedora 컨테이너에서 빌드)과 `.deb`(Debian 13 컨테이너에서 빌드)가 있고, 앱 메뉴에 "easime 설정"(`easime-settings.desktop`, 한·일·번체·간체 이름)으로 등록된다. CI가 두 패키지를 clean Fedora·Debian 컨테이너에 설치해 설정 창이 열리는지 확인한다.
+    패키지: 데몬과 같은 하나의 `.rpm`(Fedora 컨테이너에서 빌드)/`.deb`(Debian 13 컨테이너에서 빌드)에 들어 있고, 앱 메뉴에 "easime 설정"(`easime-settings.desktop`, 한·일·번체·간체 이름)으로 등록된다. CI가 패키지를 clean Fedora·Debian 컨테이너에 설치해 설정 창이 열리고 데몬이 시작되는지 확인한다. 설치만으로는 easime가 입력기로 선택되지 않는다(시스템 설정의 가상 키보드에서 고른다).
     **실제 데스크톱에 설치해 메뉴에서 연 사람의 확인은 없다.**
     아직 없음: 자동 실행, 초보자용(첫 실행 안내), 번역의 원어민 검토, 설정 창 안에서 표시 언어를 고르는 선택지, 일본어·중국어 페이지(옵션이 생길 때 추가).
 - **가짜 KWin 테스트 하네스**: `crates/frontend-wayland/tests/` (순수 Rust Wayland 서버로 activate → 키 입력 → commit/preedit를

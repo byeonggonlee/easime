@@ -29,14 +29,16 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 설정 창은 실제 설정 파일(`~/.config/easime/config.toml`)을 바로 고친다. 시험할 때는 `XDG_CONFIG_HOME`을 임시 폴더로 바꿔 두는 편이 안전하다.
 Kirigami가 없는 환경(예: Ubuntu)에서는 빌드와 단위 테스트까지만 되고 화면은 열리지 않는다. 그 경우 화면 검증은 CI의 `settings` 잡(Fedora 컨테이너)이 맡는다.
 
-### 설정 창 패키지 만들기 (배포판 컨테이너에서)
-`easime-settings` 패키지는 Qt와 Kirigami가 있는 환경에서 만든다. CI는 `.github/workflows/packages.yml`에서 Fedora(`.rpm`)와 Debian 13(`.deb`) 컨테이너로 만든다.
+### 패키지 만들기 (배포판 컨테이너에서)
+패키지는 배포판당 하나이고(데몬, 설정 창, 사전), Qt와 Kirigami가 있는 환경에서 만든다. CI는 `.github/workflows/packages.yml`에서 Fedora(`.rpm`)와 Debian 13(`.deb`) 컨테이너로 만든다. 같은 순서를 손으로 하면:
 ```sh
-cd settings/kde && cargo build --release --locked
-cargo generate-rpm          # Fedora: target/generate-rpm/easime-settings-*.rpm  (cargo install cargo-generate-rpm)
-cargo deb --no-build        # Debian: target/debian/easime-settings_*.deb        (cargo install cargo-deb)
+sh scripts/build-dictionary.sh mozc                                   # 실제 Mozc 사전(내려받기, 체크섬 확인). sample은 시험용이라 패키지에 넣지 않는다
+cargo build --release --locked -p easime
+cargo build --release --locked --manifest-path settings/kde/Cargo.toml
+cargo generate-rpm -p crates/easime     # Fedora: target/generate-rpm/easime-*.rpm  (cargo install cargo-generate-rpm)
+cargo deb -p easime --no-build          # Debian: target/debian/easime_*.deb        (cargo install cargo-deb)
 ```
-`.desktop` 파일은 `data/easime-settings.desktop`이다. 다른 배포판이 요구하는 패키지 이름은 `settings/kde/Cargo.toml`의 `depends`/`requires`에 있다.
+`.desktop` 파일은 `data/easime.desktop`(가상 키보드 등록)과 `data/easime-settings.desktop`(앱 메뉴)이다. 배포판이 요구하는 패키지 이름은 `crates/easime/Cargo.toml`의 `depends`/`requires`에 있다.
 
 ### Windows 설치 프로그램 만들기와 시험
 Windows에서만 된다. WiX 5가 필요하다: `dotnet tool install --global wix --version 5.0.2`.

@@ -98,10 +98,11 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 
 ## 패키징과 배포
 - **Linux**: GitHub Actions에서 빌드해 **GitHub Releases에 .deb / .rpm** 업로드(`cargo-deb`, `cargo-generate-rpm`).
-  패키지는 둘로 나뉜다. 설정 창이 Qt 6와 Kirigami를 요구하므로, 데몬을 그 의존성 없이 설치할 수 있게 하기 위해서다(엔지니어링 결정).
-  - `easime`: 데몬, `easime.desktop`(가상 키보드 등록용, 메뉴에는 안 보임), 사전. 의존성: libxkbcommon 등. `easime-settings`를 Recommends한다.
-  - `easime-settings`(`settings/kde`의 메타데이터): 설정 창과 `easime-settings.desktop`(앱 메뉴의 "easime 설정", 이름은 한·일·번체·간체로 현지화). `easime`와 Qt 6·Kirigami·qt6-wayland를 요구한다. `.rpm`은 Fedora 컨테이너에서, `.deb`는 Debian 13(trixie) 컨테이너에서 빌드한다(그 배포판의 Qt·Kirigami로 만들어야 하므로). 그러므로 `.deb`는 Debian 13 이상, Ubuntu는 Plasma 6와 Qt가 충분히 새로운 25.04 이상을 대상으로 한다. 시험한 것은 clean `debian:trixie`와 `fedora:latest` 컨테이너뿐이다.
-  - 빌드와 검증은 `.github/workflows/packages.yml`(재사용 워크플로) 하나다. CI는 샘플 사전으로, 릴리스(`release.yml`)는 실제 Mozc 사전으로 같은 흐름을 부른다. 패키지마다 clean 컨테이너(Fedora, Debian)에 배포판의 의존성만으로 설치하고, 설치된 설정 창을 오프스크린으로 띄워 모든 페이지가 열리는지 확인한 뒤에야 네 파일이 한 아티팩트(`easime-linux-packages-<commit>`)로 묶인다.
+  **배포판당 패키지는 하나다**(사용자 요청, 2026-11-07: 키보드와 설정을 따로 설치하게 하지 않는다). 데몬(`easime`), 설정 창(`easime-settings`), 가상 키보드 등록용 `easime.desktop`(메뉴에는 안 보임), 앱 메뉴의 "easime 설정"(`easime-settings.desktop`, 이름은 한·일·번체·간체로 현지화), 일본어 사전이 한 파일에 들어 있다. 패키지 메타데이터는 `crates/easime/Cargo.toml`에 있다.
+  - Qt 6와 Kirigami가 있는 환경에서 만든다: `.rpm`은 Fedora 컨테이너에서, `.deb`는 Debian 13(trixie) 컨테이너에서 그 배포판의 라이브러리로 만든다. 그러므로 `.deb`는 Debian 13 이상, Ubuntu는 Plasma 6와 Qt가 충분히 새로운 25.04 이상을 대상으로 한다. 시험한 것은 clean `debian:trixie`와 `fedora:latest` 컨테이너뿐이다.
+  - 데몬이 Qt 6·Kirigami에 의존하게 되므로 KDE가 아닌 데스크톱(GNOME 등)에 설치하면 Qt가 함께 설치된다. GNOME 지원이 생기면 다시 나눌지 따진다.
+  - 빌드와 검증은 `.github/workflows/packages.yml`(재사용 워크플로) 하나다. CI와 릴리스(`release.yml`)가 같은 흐름과 **같은 실제 Mozc 사전**을 쓴다. 사전은 먼저 한 번 만들어 おおさか→大阪 같은 조회를 확인한 뒤 두 패키지가 쓴다. 각 패키지는 clean 컨테이너(Fedora, Debian)에 배포판의 의존성만으로 설치하고, 설치된 데몬이 시작되어 이유를 말하며 멈추는지(컴포지터가 없으므로)와 설치된 설정 창이 모든 페이지를 여는지 확인한 뒤에야 두 파일이 한 아티팩트(`easime-linux-packages-<commit>`)로 묶인다.
+  - 패키지를 설치해도 easime가 입력기로 **선택되지는 않는다**: 시스템 설정 → 키보드 → 가상 키보드에서 고르고 다시 로그인해야 한다. 사용자의 데스크톱 설정을 설치 스크립트가 몰래 바꾸지 않기 때문이다(AGENTS.md). 확인과 되돌리기를 갖춘 활성화 화면은 초보자용 첫 실행 안내의 몫이다.
 - **Windows**: **MSI(WiX 5)**, `packaging/windows/easime.wxs`. `build.ps1`이 만들고 `test.ps1`이 CI의 Windows 러너에 실제로 설치·사용·업그레이드·제거를 시험한다.
   **지금은 터미널 데모(`easime-cli.exe`)와 라이선스만 담는다. Windows 입력기(TSF)가 아직 없으므로 입력기를 설치하지 않는다.**
   그래서 릴리스에는 올리지 않고 CI 아티팩트로만 둔다. TSF DLL이 생기면 메인 기능에 구성요소를 하나 더하고 설치 때 등록, 제거 때 등록 해제를 붙인다.

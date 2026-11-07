@@ -37,8 +37,6 @@ jobs:
     name: Linux packages
     needs: tag
     uses: ./.github/workflows/packages.yml
-    with:
-      dictionary: mozc
 
   publish:
     name: Publish release

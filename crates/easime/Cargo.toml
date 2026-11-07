@@ -10,48 +10,70 @@ authors.workspace = true
 [dependencies]
 frontend-wayland = { path = "../frontend-wayland" }
 
-# --- Linux packages -------------------------------------------------------
-# .deb: `cargo deb -p easime`   .rpm: `cargo generate-rpm -p crates/easime`
-# Both expect `cargo build --release -p easime` to have run first.
+# --- Linux package -----------------------------------------------------------
+# One package per distribution holds everything: the input method daemon, the
+# settings window, both menu entries and the dictionary, so installing it is one
+# step. Built where Qt 6 and Kirigami are (the .rpm in Fedora, the .deb in
+# Debian 13; .github/workflows/packages.yml), after
+#   cargo build --release --locked -p easime
+#   (cd settings/kde && cargo build --release --locked)
+#   sh scripts/build-dictionary.sh mozc
+# and then   .deb: `cargo deb -p easime --no-build`
+#            .rpm: `cargo generate-rpm -p crates/easime`
 
 [package.metadata.deb]
 name = "easime"
 maintainer = "Byeonggon Lee <byeonggonlee@gmail.com>"
 section = "utils"
 priority = "optional"
-depends = "$auto"
-recommends = "easime-settings"
+depends = """\
+$auto, qt6-wayland, \
+qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-layouts, \
+qml6-module-qtquick-templates, qml6-module-qtquick-window, \
+qml6-module-org-kde-kirigami, qml6-module-org-kde-desktop"""
+recommends = "breeze-icon-theme, fonts-noto-cjk"
 extended-description = """\
-Easy Eastern Asian IME: a Korean (and soon Japanese and Chinese) input \
-method for KDE Plasma 6 on Wayland, written in Rust. After installing, \
-select it in System Settings > Keyboard > Virtual Keyboard."""
+Easy Eastern Asian IME: a Korean and Japanese (and soon Chinese) input \
+method for KDE Plasma 6 on Wayland, written in Rust, with its settings \
+window ("easime Settings" in the application menu) and the Japanese \
+dictionary. After installing, select easime in System Settings > Keyboard > \
+Virtual Keyboard."""
 assets = [
     ["target/release/easime", "usr/bin/", "755"],
+    ["../../settings/kde/target/release/easime-settings", "usr/bin/", "755"],
     ["../../data/easime.desktop", "usr/share/applications/", "644"],
+    ["../../data/easime-settings.desktop", "usr/share/applications/", "644"],
     ["../../README.md", "usr/share/doc/easime/", "644"],
     ["../../LICENSE-MIT", "usr/share/doc/easime/", "644"],
     ["../../LICENSE-APACHE", "usr/share/doc/easime/", "644"],
     ["../../THIRD_PARTY_LICENSES.md", "usr/share/doc/easime/", "644"],
-    # Built by `scripts/build-dictionary.sh sample|mozc` before packaging.
+    # Built by `scripts/build-dictionary.sh mozc` before packaging.
     ["../../target/dictionary/mozc.bin", "usr/share/easime/dictionary/", "644"],
 ]
 
 [package.metadata.generate-rpm]
 name = "easime"
-summary = "Easy Eastern Asian IME for KDE Plasma 6 (Wayland)"
+summary = "Easy Eastern Asian IME for KDE Plasma 6 (Wayland), with its settings window"
 assets = [
     { source = "target/release/easime", dest = "/usr/bin/easime", mode = "0755" },
+    { source = "settings/kde/target/release/easime-settings", dest = "/usr/bin/easime-settings", mode = "0755" },
     { source = "data/easime.desktop", dest = "/usr/share/applications/easime.desktop", mode = "0644" },
+    { source = "data/easime-settings.desktop", dest = "/usr/share/applications/easime-settings.desktop", mode = "0644" },
     { source = "README.md", dest = "/usr/share/doc/easime/README.md", mode = "0644", doc = true },
     { source = "LICENSE-MIT", dest = "/usr/share/licenses/easime/LICENSE-MIT", mode = "0644", license = true },
     { source = "LICENSE-APACHE", dest = "/usr/share/licenses/easime/LICENSE-APACHE", mode = "0644", license = true },
     { source = "THIRD_PARTY_LICENSES.md", dest = "/usr/share/licenses/easime/THIRD_PARTY_LICENSES.md", mode = "0644", license = true },
-    # Built by `scripts/build-dictionary.sh sample|mozc` before packaging.
+    # Built by `scripts/build-dictionary.sh mozc` before packaging.
     { source = "target/dictionary/mozc.bin", dest = "/usr/share/easime/dictionary/mozc.bin", mode = "0644" },
 ]
 
 [package.metadata.generate-rpm.requires]
 libxkbcommon = "*"
+kf6-kirigami = "*"
+kf6-qqc2-desktop-style = "*"
+qt6-qtdeclarative = "*"
+qt6-qtwayland = "*"
 
 [package.metadata.generate-rpm.recommends]
-easime-settings = "*"
+breeze-icon-theme = "*"
+google-noto-sans-cjk-fonts = "*"

@@ -5,13 +5,15 @@
 #
 # Usage:
 #   scripts/build-dictionary.sh sample   # tiny dictionary from the committed
-#                                        # fixture; no download (used by CI)
+#                                        # fixture; no download (quick local
+#                                        # tries only: it cannot convert real
+#                                        # words, so never package it)
 #   scripts/build-dictionary.sh mozc [SRC_DIR]
 #                                        # real dictionary: fetches the pinned
 #                                        # Mozc files (checksum verified) into
 #                                        # SRC_DIR (default target/mozc-src)
-#                                        # and converts them (used by the
-#                                        # release workflow)
+#                                        # and converts them (used by the CI
+#                                        # and the release workflow)
 #
 # Run from the repository root.
 

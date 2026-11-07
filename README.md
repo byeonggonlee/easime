@@ -23,7 +23,7 @@ All agents should start with [AGENTS.md](AGENTS.md) and read DESIGN.md before wo
 1. ~~Korean (Dubeolsik) composition engine~~ done
 2. ~~Wayland input method frontend (`zwp_input_method_v1`, launched by KWin)~~ basic Korean/English input user-tested on Fedora KDE; broader testing pending
 3. Language indicator near the text cursor: done. Tray icon: todo
-4. Settings app (Qt 6 / Kirigami, native Plasma look): expert version done (separate cargo project, checked in a Fedora CI job, packaged as `easime-settings`); beginner version later
+4. Settings app (Qt 6 / Kirigami, native Plasma look): expert version done (separate cargo project, checked in a Fedora CI job, packaged together with the daemon); beginner version later
 5. XIM frontend for XWayland apps (games, Wine, Steam)
 6. Japanese: romaji → kana done; kana → kanji with Mozc OSS data: engine, dictionary, daemon wiring and candidate popup done (fake-compositor tests only); validation on a real KDE desktop and clause conversion todo
 7. Chinese (pinyin; Simplified and Traditional are separate input languages)
@@ -31,8 +31,8 @@ All agents should start with [AGENTS.md](AGENTS.md) and read DESIGN.md before wo
 ## Platforms
 Linux first (KDE Plasma 6, then GNOME), followed by Windows (TSF) and macOS (InputMethodKit).
 Linux packages (`.deb` / `.rpm`) are built by CI and will be published on GitHub Releases when a `v*` tag is pushed:
-`easime` (the input method daemon) and `easime-settings` (the settings window, listed in the app menu as "easime Settings").
-CI installs both into a clean Fedora and a clean Debian 13 container and starts the settings window from the installed package; nobody has installed them on a real desktop yet.
+one package per distribution (`.rpm` for Fedora, `.deb` for Debian 13) with the input method daemon, the settings window (listed in the app menu as "easime Settings") and the Japanese dictionary.
+CI installs each into a clean Fedora or Debian 13 container and starts the daemon and the settings window from the installed package. After installing, select easime in System Settings > Keyboard > Virtual Keyboard.
 A Windows installer (MSI) is built and tested in CI too, but it only contains a terminal demo: there is no Windows input method yet, so it is not published.
 
 ## License

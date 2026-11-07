@@ -44,16 +44,13 @@ jobs:
       - run: cargo clippy ${{ env.PORTABLE }} --all-targets -- -D warnings
       - run: cargo test ${{ env.PORTABLE }}
 
-  # Every Linux package is built, installed into a clean Fedora or Debian and
-  # its settings window started; each CI run keeps all four for download
-  # (Actions run page -> Artifacts, easime-linux-packages-<commit>). They contain
-  # the tiny sample dictionary; the packages with the real Mozc dictionary come
-  # from the release workflow (GitHub Releases), which runs the same jobs.
+  # The Linux packages (one .rpm, one .deb) are built, installed into a clean
+  # Fedora or Debian, and started; each CI run keeps them for download
+  # (Actions run page -> Artifacts, easime-linux-packages-<commit>). They are the
+  # same packages a release publishes, with the real Mozc dictionary.
   packages:
     name: Linux packages
     uses: ./.github/workflows/packages.yml
-    with:
-      dictionary: sample
 
   # The Windows installer (MSI, WiX). It only contains the terminal demo and the
   # licenses: there is no Windows text service (TSF) yet, so it does not add an

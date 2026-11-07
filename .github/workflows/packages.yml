@@ -1,114 +1,117 @@
 name: Linux packages
 
-# Builds and checks every Linux package. The CI calls it with the tiny sample
-# dictionary; the release workflow calls it with the real Mozc dictionary and
-# publishes what it produces, so a release uses exactly the path the CI tests.
+# Builds and checks the Linux packages. The CI and the release workflow both
+# call it, so a release is built by exactly the path the CI tests.
 #
-#   easime            the daemon (.deb and .rpm), built on Ubuntu
-#   easime-settings   the settings window (Qt 6 and Kirigami), built where those
-#                     are: the .rpm in Fedora, the .deb in Debian
+# There is one package per distribution, holding everything (the input method
+# daemon, the settings window, both menu entries and the Japanese dictionary),
+# so installing it is one step:
 #
-# Each package is then installed into a clean container of its own distribution
-# (dependencies resolved from the distribution, nothing else installed) and the
-# settings window is started from the installed package.
+#   easime-<version>.x86_64.rpm   built in Fedora
+#   easime_<version>_amd64.deb    built in Debian 13
+#
+# They are built where Qt 6 and Kirigami are (the settings window needs them),
+# with that distribution's own libraries. Each package is then installed into a
+# clean container of its distribution (dependencies resolved from the
+# distribution, nothing else installed), the installed settings window is
+# started, and the installed daemon is started far enough to see that it runs.
+#
+# The dictionary is the real Mozc one in the CI too: a package without it can
+# only offer kana when converting Japanese, which hides real problems.
 
 on:
   workflow_call:
-    inputs:
-      dictionary:
-        description: "sample (tiny, for the CI) or mozc (the real one, for releases)"
-        type: string
-        default: sample
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  daemon:
-    name: easime .deb and .rpm
+  dictionary:
+    name: Japanese dictionary (Mozc)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install --locked cargo-deb cargo-generate-rpm
-      - run: cargo build --release --locked -p easime
-      # `sample` builds a tiny dictionary from the committed fixture so the CI
-      # never downloads the big Mozc data; `mozc` downloads the pinned Mozc
-      # dictionary (checksums are verified, a mismatch fails the job). Either
-      # way the file is target/dictionary/mozc.bin, which the package metadata
-      # installs as /usr/share/easime/dictionary/mozc.bin.
-      - name: Build the dictionary (${{ inputs.dictionary }})
-        run: sh scripts/build-dictionary.sh ${{ inputs.dictionary }}
-      - name: A release needs the real dictionary, not the sample
-        if: inputs.dictionary == 'mozc'
+      # The pinned Mozc files (checksums are verified by the script); cached so
+      # a normal run does not download them again.
+      - uses: actions/cache@v4
+        with:
+          path: target/mozc-src
+          key: mozc-src-${{ hashFiles('scripts/fetch-mozc-dictionary.sh') }}
+      - name: Build the dictionary
+        run: sh scripts/build-dictionary.sh mozc
+      - name: It is the real dictionary and knows common words
         run: |
           size="$(stat -c %s target/dictionary/mozc.bin)"
           echo "mozc.bin is $size bytes"
           test "$size" -gt 10000000
-      - run: cargo deb -p easime --no-build
-      - run: cargo generate-rpm -p crates/easime
-      - name: Show package contents
-        run: |
-          dpkg-deb -I target/debian/*.deb
-          dpkg-deb -c target/debian/*.deb
-          rpm -qpl target/generate-rpm/*.rpm || true
-      # Flat, so every part unpacks to plain files.
-      - run: mkdir out && cp target/debian/*.deb target/generate-rpm/*.rpm out/
+          found="$(cargo run -q --release --locked -p easime-dict-tool -- lookup target/dictionary/mozc.bin おおさか とうきょう にほん)"
+          echo "$found"
+          # Each word must offer its kanji, not only kana.
+          echo "$found" | grep -q '^おおさか	.*大阪'
+          echo "$found" | grep -q '^とうきょう	.*東京'
+          echo "$found" | grep -q '^にほん	.*日本'
       - uses: actions/upload-artifact@v4
         with:
-          name: part-daemon
-          path: out/*
+          name: dictionary
+          path: target/dictionary/mozc.bin
           if-no-files-found: error
           retention-days: 7
 
-  settings-rpm:
-    name: easime-settings .rpm (Fedora)
+  rpm:
+    name: easime .rpm (Fedora)
+    needs: dictionary
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
-      - name: Install Qt 6 and the Rust toolchain
+      - name: Install the build tools, Qt 6 and libxkbcommon
         run: |
           # rpm-build: cargo-generate-rpm then finds the library requirements the
           # way rpmbuild does (without it, it lists private libproxy plugins).
-          dnf -y install git cargo rust gcc gcc-c++ make rpm-build \
-            qt6-qtbase-devel qt6-qtdeclarative-devel
+          dnf -y install git cargo rust gcc gcc-c++ make rpm-build pkgconf-pkg-config \
+            libxkbcommon-devel qt6-qtbase-devel qt6-qtdeclarative-devel
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: settings/kde
+          workspaces: |
+            . -> target
+            settings/kde -> target
+      - uses: actions/download-artifact@v4
+        with:
+          name: dictionary
+          path: target/dictionary
       - run: cargo install --locked cargo-generate-rpm
-      - name: Build
-        working-directory: settings/kde
-        run: cargo build --release --locked
+      - name: Build the daemon and the settings window
+        run: |
+          cargo build --release --locked -p easime
+          cargo build --release --locked --manifest-path settings/kde/Cargo.toml
       - name: Make the .rpm
-        working-directory: settings/kde
-        run: cargo generate-rpm
+        run: cargo generate-rpm -p crates/easime
       - name: Show package contents
-        working-directory: settings/kde
         run: |
           rpm -qpi target/generate-rpm/*.rpm
           rpm -qpl target/generate-rpm/*.rpm
           rpm -qpR target/generate-rpm/*.rpm
       - uses: actions/upload-artifact@v4
         with:
-          name: part-settings-rpm
-          path: settings/kde/target/generate-rpm/*.rpm
+          name: part-rpm
+          path: target/generate-rpm/*.rpm
           if-no-files-found: error
           retention-days: 7
 
-  settings-deb:
-    name: easime-settings .deb (Debian)
+  deb:
+    name: easime .deb (Debian 13)
+    needs: dictionary
     runs-on: ubuntu-latest
     container: debian:trixie
     steps:
-      - name: Install Qt 6 and build tools
+      - name: Install the build tools, Qt 6 and libxkbcommon
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git build-essential pkg-config cmake dpkg-dev \
-            qt6-base-dev qt6-declarative-dev libgl-dev
+            libxkbcommon-dev qt6-base-dev qt6-declarative-dev libgl-dev
       # Debian's own Rust is older than this project needs; rustup gives the
       # current stable one.
       - name: Install the Rust toolchain
@@ -118,50 +121,57 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: settings/kde
+          workspaces: |
+            . -> target
+            settings/kde -> target
+      - uses: actions/download-artifact@v4
+        with:
+          name: dictionary
+          path: target/dictionary
       - run: cargo install --locked cargo-deb
-      - name: Build
-        working-directory: settings/kde
-        run: cargo build --release --locked
+      - name: Build the daemon and the settings window
+        run: |
+          cargo build --release --locked -p easime
+          cargo build --release --locked --manifest-path settings/kde/Cargo.toml
       - name: Make the .deb
-        working-directory: settings/kde
-        run: cargo deb --no-build
+        run: cargo deb -p easime --no-build
       - name: Show package contents
-        working-directory: settings/kde
         run: |
           dpkg-deb -I target/debian/*.deb
           dpkg-deb -c target/debian/*.deb
       - uses: actions/upload-artifact@v4
         with:
-          name: part-settings-deb
-          path: settings/kde/target/debian/*.deb
+          name: part-deb
+          path: target/debian/*.deb
           if-no-files-found: error
           retention-days: 7
 
   verify-rpm:
-    name: Install the .rpm files in a clean Fedora
-    needs: [daemon, settings-rpm]
+    name: Install the .rpm in a clean Fedora
+    needs: rpm
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: part-*
-          merge-multiple: true
+          name: part-rpm
           path: pkgs
-      - name: Install the packages with their dependencies
+      - name: Install the package with its dependencies
         run: |
           ls -l pkgs
           dnf -y install desktop-file-utils dejavu-sans-fonts ./pkgs/*.rpm
-      - name: The files are where the menu and KWin look for them
+      - name: Everything is where the menu, KWin and the daemon look for it
         run: |
+          rpm -q --requires easime
+          rpm -q --recommends easime
           test -x /usr/bin/easime
           test -x /usr/bin/easime-settings
           desktop-file-validate /usr/share/applications/easime.desktop
           desktop-file-validate /usr/share/applications/easime-settings.desktop
-          rpm -q --requires easime-settings
-          rpm -q --recommends easime
-      - name: Start the installed settings window
+          size="$(stat -c %s /usr/share/easime/dictionary/mozc.bin)"
+          echo "installed dictionary: $size bytes"
+          test "$size" -gt 10000000
+      - name: Start the installed daemon and settings window
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
@@ -171,6 +181,15 @@ jobs:
           LANG: C.UTF-8
         run: |
           export HOME="$PWD/home"; mkdir -p "$HOME" shots
+          # Without a compositor the daemon cannot serve, but it must start,
+          # find its libraries and say why it stops.
+          set +e
+          env -u WAYLAND_DISPLAY easime > daemon.log 2>&1
+          code=$?
+          set -e
+          cat daemon.log
+          test "$code" = 1
+          grep -q '^easime: ' daemon.log
           set +e
           timeout 120 easime-settings --ui-language=en --screenshots="$PWD/shots" > settings.log 2>&1
           code=$?
@@ -185,31 +204,32 @@ jobs:
           fi
 
   verify-deb:
-    name: Install the .deb files in a clean Debian
-    needs: [daemon, settings-deb]
+    name: Install the .deb in a clean Debian 13
+    needs: deb
     runs-on: ubuntu-latest
     container: debian:trixie
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: part-*
-          merge-multiple: true
+          name: part-deb
           path: pkgs
-      - name: Install the packages with their dependencies
+      - name: Install the package with its dependencies
         run: |
           ls -l pkgs
           apt-get update
           apt-get install -y --no-install-recommends desktop-file-utils fonts-dejavu-core ./pkgs/*.deb \
             || { echo "--- what Debian calls the QML modules:"; apt-cache search qml6-module | grep -iE 'kirigami|qml6-module-org-kde-desktop'; exit 1; }
-      - name: The files are where the menu and KWin look for them
+      - name: Everything is where the menu, KWin and the daemon look for it
         run: |
+          dpkg -s easime | grep -E '^(Depends|Recommends):'
           test -x /usr/bin/easime
           test -x /usr/bin/easime-settings
           desktop-file-validate /usr/share/applications/easime.desktop
           desktop-file-validate /usr/share/applications/easime-settings.desktop
-          dpkg -s easime-settings | grep -E '^(Depends|Recommends):'
-          dpkg -s easime | grep -E '^(Depends|Recommends):'
-      - name: Start the installed settings window
+          size="$(stat -c %s /usr/share/easime/dictionary/mozc.bin)"
+          echo "installed dictionary: $size bytes"
+          test "$size" -gt 10000000
+      - name: Start the installed daemon and settings window
         env:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
@@ -219,6 +239,13 @@ jobs:
           LANG: C.UTF-8
         run: |
           export HOME="$PWD/home"; mkdir -p "$HOME" shots
+          set +e
+          env -u WAYLAND_DISPLAY easime > daemon.log 2>&1
+          code=$?
+          set -e
+          cat daemon.log
+          test "$code" = 1
+          grep -q '^easime: ' daemon.log
           set +e
           timeout 120 easime-settings --ui-language=en --screenshots="$PWD/shots" > settings.log 2>&1
           code=$?
@@ -232,11 +259,11 @@ jobs:
             echo "QML reported warnings or errors (above)"; exit 1
           fi
 
-  # One download with all four packages, for the Actions run page (CI) and for
-  # the release workflow. Only after every package installed and started.
+  # One download with both packages, for the Actions run page (CI) and for the
+  # release workflow. Only after each package installed and started.
   collect:
-    name: All packages in one download
-    needs: [daemon, settings-rpm, settings-deb, verify-rpm, verify-deb]
+    name: Both packages in one download
+    needs: [rpm, deb, verify-rpm, verify-deb]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -245,8 +272,10 @@ jobs:
           merge-multiple: true
           path: packages
       - run: ls -l packages
-      - name: Expect exactly four packages
-        run: test "$(ls packages | wc -l)" = 4
+      - name: Expect exactly one .rpm and one .deb
+        run: |
+          test "$(ls packages | wc -l)" = 2
+          ls packages/*.rpm packages/*.deb
       - uses: actions/upload-artifact@v4
         with:
           name: easime-linux-packages-${{ github.sha }}
