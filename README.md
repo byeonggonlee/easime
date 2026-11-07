@@ -33,6 +33,7 @@ Linux first (KDE Plasma 6, then GNOME), followed by Windows (TSF) and macOS (Inp
 Linux packages (`.deb` / `.rpm`) are built by CI and will be published on GitHub Releases when a `v*` tag is pushed:
 `easime` (the input method daemon) and `easime-settings` (the settings window, listed in the app menu as "easime Settings").
 CI installs both into a clean Fedora and a clean Debian 13 container and starts the settings window from the installed package; nobody has installed them on a real desktop yet.
+A Windows installer (MSI) is built and tested in CI too, but it only contains a terminal demo: there is no Windows input method yet, so it is not published.
 
 ## License
 Licensed under either of

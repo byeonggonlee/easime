@@ -1,6 +1,10 @@
 name: Release
 
 # Push a tag like v0.1.0 to build the Linux packages and publish a release.
+#
+# The Windows installer is NOT published: it only contains the terminal demo
+# until the Windows input method (TSF) exists (see packaging/windows). The CI
+# builds and tests it on every push.
 on:
   push:
     tags: ["v*"]

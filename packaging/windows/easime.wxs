@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  easime for Windows (MSI). Built with WiX 5:
+
+    wix build -arch x64 -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d Root=<repository root> \
+      -o easime.msi packaging/windows/easime.wxs
+
+  WHAT IT INSTALLS TODAY: the terminal demo (easime-cli.exe) and the licenses.
+  There is no Windows text service (TSF) yet, so this installer does NOT add an
+  input method to Windows. When the TSF DLL exists it is added here as one more
+  component of the main feature, registered on install and unregistered on
+  uninstall (docs/architecture.md, "Windows").
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="easime" Manufacturer="Byeonggon Lee" Version="$(Version)"
+           UpgradeCode="FEE90A7B-20AC-4B9B-8D9E-DDDAFE8C7866" Scope="perMachine">
+    <SummaryInformation Description="easime: Easy Eastern Asian IME (terminal demo only; the Windows input method is not included yet)" />
+    <Property Id="ARPCOMMENTS" Value="Terminal demo only. The Windows input method (TSF) is not included yet." />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/byeonggonlee/easime" />
+
+    <!-- A newer version replaces an older one; installing an older one over a
+         newer one is refused. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of easime is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="easime">
+        <Component Id="Demo">
+          <File Id="EasimeCliExe" Source="$(Binaries)/easime-cli.exe" />
+        </Component>
+        <Component Id="Licenses">
+          <File Id="LicenseMit" Source="$(Root)/LICENSE-MIT" />
+          <File Id="LicenseApache" Source="$(Root)/LICENSE-APACHE" />
+          <File Id="ThirdParty" Source="$(Root)/THIRD_PARTY_LICENSES.md" />
+        </Component>
+        <!-- Only with ADDLOCAL=ALL (or ADDLOCAL=Main,AddToPath): the folder is
+             added to the system PATH so `easime-cli` runs from any terminal.
+             Left off by default because it changes a system setting. -->
+        <Component Id="PathEntry" Guid="9C4E2C2A-6D3B-4F77-9B1A-3B5A7F0D2E41">
+          <CreateFolder />
+          <Environment Id="PathEasime" Name="PATH" Value="[INSTALLFOLDER]" Action="set"
+                       Part="last" System="yes" Permanent="no" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="easime" Level="1" AllowAdvertise="no" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentRef Id="Demo" />
+      <ComponentRef Id="Licenses" />
+      <Feature Id="AddToPath" Title="Add easime to the PATH" Level="2" AllowAdvertise="no">
+        <ComponentRef Id="PathEntry" />
+      </Feature>
+    </Feature>
+  </Package>
+</Wix>

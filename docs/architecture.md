@@ -23,7 +23,7 @@
 - TSF DLL은 각 앱 프로세스에 로드된다 → "전체 공통 입력 상태"를 위해 상태 공유 방법이 필요하다
   (공유 메모리 또는 named pipe 서비스).
 - 후보창과 상태 박스는 Win32 레이어드 창으로 그린다. 상태는 알림 영역 아이콘(또는 언어 바)으로 표시한다.
-- 설치: MSI(WiX) 또는 설치 프로그램 + TSF 등록(`regsvr32` 방식). 코드 서명은 선택 사항.
+- 설치: **MSI(WiX 5)** + TSF 등록(`regsvr32` 방식). 코드 서명은 선택 사항. 설치 프로그램의 틀은 이미 있다(`packaging/windows`, 아래 "패키징과 배포"). TSF DLL이 아직 없어서 지금의 MSI는 입력기를 설치하지 않는다.
 
 ### macOS (마지막)
 - **InputMethodKit**: Objective-C/Swift 껍데기 + Rust 정적 라이브러리, `~/Library/Input Methods`에 `.app` 번들 설치
@@ -100,7 +100,10 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - `easime`: 데몬, `easime.desktop`(가상 키보드 등록용, 메뉴에는 안 보임), 사전. 의존성: libxkbcommon 등. `easime-settings`를 Recommends한다.
   - `easime-settings`(`settings/kde`의 메타데이터): 설정 창과 `easime-settings.desktop`(앱 메뉴의 "easime 설정", 이름은 한·일·번체·간체로 현지화). `easime`와 Qt 6·Kirigami·qt6-wayland를 요구한다. `.rpm`은 Fedora 컨테이너에서, `.deb`는 Debian 13(trixie) 컨테이너에서 빌드한다(그 배포판의 Qt·Kirigami로 만들어야 하므로). 그러므로 `.deb`는 Debian 13 이상, Ubuntu는 Plasma 6와 Qt가 충분히 새로운 25.04 이상을 대상으로 한다. 시험한 것은 clean `debian:trixie`와 `fedora:latest` 컨테이너뿐이다.
   - 빌드와 검증은 `.github/workflows/packages.yml`(재사용 워크플로) 하나다. CI는 샘플 사전으로, 릴리스(`release.yml`)는 실제 Mozc 사전으로 같은 흐름을 부른다. 패키지마다 clean 컨테이너(Fedora, Debian)에 배포판의 의존성만으로 설치하고, 설치된 설정 창을 오프스크린으로 띄워 모든 페이지가 열리는지 확인한 뒤에야 네 파일이 한 아티팩트(`easime-linux-packages-<commit>`)로 묶인다.
-- **Windows**: MSI(WiX), TSF DLL 등록 포함
+- **Windows**: **MSI(WiX 5)**, `packaging/windows/easime.wxs`. `build.ps1`이 만들고 `test.ps1`이 CI의 Windows 러너에 실제로 설치·사용·업그레이드·제거를 시험한다.
+  **지금은 터미널 데모(`easime-cli.exe`)와 라이선스만 담는다. Windows 입력기(TSF)가 아직 없으므로 입력기를 설치하지 않는다.**
+  그래서 릴리스에는 올리지 않고 CI 아티팩트로만 둔다. TSF DLL이 생기면 메인 기능에 구성요소를 하나 더하고 설치 때 등록, 제거 때 등록 해제를 붙인다.
+  시스템 PATH에 폴더를 더하는 기능은 기본이 꺼져 있다(`ADDLOCAL=ALL`로 켠다): 시스템 설정을 바꾸는 일이기 때문이다.
 - **macOS**: `.pkg` (서명/공증)
 - 버전은 workspace 전체가 하나의 버전을 공유한다. 태그 `vX.Y.Z`를 푸시하면 릴리스 워크플로가 동작한다.
 

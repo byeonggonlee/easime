@@ -38,6 +38,16 @@ cargo deb --no-build        # Debian: target/debian/easime-settings_*.deb       
 ```
 `.desktop` 파일은 `data/easime-settings.desktop`이다. 다른 배포판이 요구하는 패키지 이름은 `settings/kde/Cargo.toml`의 `depends`/`requires`에 있다.
 
+### Windows 설치 프로그램 만들기와 시험
+Windows에서만 된다. WiX 5가 필요하다: `dotnet tool install --global wix --version 5.0.2`.
+```powershell
+pwsh packaging\windows\build.ps1                       # target\easime-<버전>-x64.msi
+# 시험은 컴퓨터를 바꾼다(설치·제거). CI 러너나 가상 머신에서만 실행한다.
+pwsh packaging\windows\build.ps1 -Version 0.0.1 -OutDir target\upgrade-test
+pwsh packaging\windows\test.ps1 -Msi target\easime-<버전>-x64.msi -OldMsi target\upgrade-test\easime-0.0.1-x64.msi
+```
+지금의 MSI는 터미널 데모와 라이선스만 설치한다. 입력기(TSF)는 아직 없다.
+
 ### 설정 창의 표시 언어와 번역
 표시 언어는 시스템 언어를 따르고, 시험할 때는 `--ui-language=ko|en|ja|zh-Hant|zh-Hans`(또는 `LANGUAGE=ja`)로 바꾼다.
 ```sh

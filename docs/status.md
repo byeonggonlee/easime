@@ -32,6 +32,7 @@
     `scripts/build-dictionary.sh sample|mozc`. 라이선스(BSD-3, IPAdic, 오키나와 사전)는 `THIRD_PARTY_LICENSES.md`와 `data/mozc/`.
   - 설정 즉시 반영: 설정 파일을 inotify로 감시해 한/영 키, 백스페이스 단위, 언어 목록을 재시작 없이 적용(깨진 파일은 무시)
   - 패키징: 패키지 둘(`easime` 데몬, `easime-settings` 설정 창)을 `.deb`/`.rpm`으로 만든다. 빌드·설치 검증은 `.github/workflows/packages.yml` 하나이고, CI는 샘플 사전으로, 태그 `v*` 푸시 시 릴리스 워크플로는 실제 Mozc 사전으로 같은 흐름을 쓴다. 태그와 두 크레이트(`easime`, `easime-settings`)의 버전이 같아야 릴리스가 진행된다.
+  - Windows 설치 프로그램(MSI, WiX 5, `packaging/windows`): **터미널 데모와 라이선스만 담는다. Windows 입력기(TSF)가 없으므로 입력기를 설치하지 않는다.** CI의 Windows 러너에서 설치 → `easime-cli` 실행 → 제거 → PATH 옵션 → 업그레이드·다운그레이드 거부까지 시험한다. 릴리스에는 올리지 않는다. 사전과 설정 앱(WinUI 3)은 아직 넣지 않았다.
   - `frontend-wayland` + `easime` 데몬: KWin `zwp_input_method_v1` 클라이언트, 키 반복(자체 타이머와 컴포지터 `repeated`),
     한/영 키와 오른쪽 Alt 탭 전환, Caps Lock 무시, 언어 순환, 설정 읽기
   - 커서 옆 상태 박스(`frontend-wayland/src/{indicator,font,panel}.rs`): 사용자가 언어를 전환할 때만 `A`/`한`/`あ`/`中`

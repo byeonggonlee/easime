@@ -55,6 +55,37 @@ jobs:
     with:
       dictionary: sample
 
+  # The Windows installer (MSI, WiX). It only contains the terminal demo and the
+  # licenses: there is no Windows text service (TSF) yet, so it does not add an
+  # input method to Windows. The job builds it, installs it on the runner, uses
+  # what was installed, upgrades it and removes it again.
+  windows-installer:
+    name: Windows installer (MSI, terminal demo only)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install WiX
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Build the installer, and an older one for the upgrade test
+        run: |
+          $version = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object { $_.name -eq "easime-cli" }).version
+          .\packaging\windows\build.ps1 -Version 0.0.1 -OutDir target\upgrade-test
+          .\packaging\windows\build.ps1 -Version $version
+          "MSI_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Install, use, upgrade and remove it
+        run: .\packaging\windows\test.ps1 -Msi "target\easime-$env:MSI_VERSION-x64.msi" -OldMsi target\upgrade-test\easime-0.0.1-x64.msi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: easime-windows-installer-terminal-demo-${{ github.sha }}
+          path: |
+            target/easime-*-x64.msi
+            msi-logs/*.log
+          if-no-files-found: warn
+          retention-days: 30
+
   # The settings window needs Qt 6 and Kirigami, so it is built in Fedora (the
   # distribution the project targets) and is a separate cargo project that the
   # jobs above never touch. It opens every page without a display and keeps a
