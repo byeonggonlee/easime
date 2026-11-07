@@ -345,3 +345,97 @@ fn right_alt_held_with_another_key_is_forwarded_and_does_not_toggle() {
     assert_eq!(last_preedit(&requests), Some("ㅎ"), "{requests:#?}");
 }
 
+// ---- Repeated keys -------------------------------------------------------
+
+// Both tests below fail today: wayland-client's generated `KeyState` already
+// has `Repeated` (wl_keyboard v10), so a repeated key arrives as
+// `WEnum::Value(KeyState::Repeated)`, but `KeyAction::from_wire` only maps
+// `WEnum::Unknown(2)` and drops everything else. The unit test in app.rs
+// feeds it `Unknown(2)`, which the library never produces for state 2.
+
+#[test]
+#[ignore = "bug: key state 2 (repeated) arrives as KeyState::Repeated and is dropped by KeyAction::from_wire"]
+fn repeated_state_is_forwarded_as_repeated_never_as_release() {
+    let mut fake = Fake::start();
+    fake.activate();
+    fake.tap_all(&[KEY_HANGEUL]);
+    fake.press(KEY_G);
+    fake.repeat(KEY_G);
+    fake.repeat(KEY_G);
+    fake.release(KEY_G);
+    let requests = fake.settle();
+    assert_eq!(
+        forwarded(&requests),
+        [(KEY_G, 1), (KEY_G, 2), (KEY_G, 2), (KEY_G, 0)],
+        "{requests:#?}"
+    );
+}
+
+#[test]
+#[ignore = "bug: key state 2 (repeated) arrives as KeyState::Repeated and is dropped by KeyAction::from_wire"]
+fn repeated_state_is_forwarded_for_a_passed_key_in_korean_mode_too() {
+    let mut fake = Fake::start();
+    fake.activate();
+    fake.press(KEY_TAB);
+    fake.repeat(KEY_TAB);
+    fake.release(KEY_TAB);
+    let requests = fake.settle();
+    assert_eq!(
+        forwarded(&requests),
+        [(KEY_TAB, 1), (KEY_TAB, 2), (KEY_TAB, 0)],
+        "{requests:#?}"
+    );
+}
+
+// ---- Deactivation --------------------------------------------------------
+
+#[test]
+fn deactivate_releases_the_keyboard_and_destroys_the_context() {
+    let mut fake = Fake::start();
+    fake.activate();
+    fake.deactivate();
+    let requests = fake.take_requests();
+    assert_eq!(
+        requests,
+        [Req::KeyboardRelease, Req::ContextDestroy],
+        "the grab must be released before the context goes away"
+    );
+}
+
+#[test]
+fn deactivate_commits_a_pending_syllable_before_destroying() {
+    let mut fake = Fake::start();
+    fake.activate();
+    fake.tap_all(&[KEY_G, KEY_K]);
+    fake.settle();
+    let serial = fake.commit_serial;
+    fake.deactivate();
+    let requests = fake.take_requests();
+    assert_eq!(
+        requests,
+        [
+            Req::KeyboardRelease,
+            Req::CommitString {
+                serial,
+                text: "하".into()
+            },
+            Req::ContextDestroy
+        ]
+    );
+}
+
+#[test]
+fn the_input_method_can_be_activated_again_after_deactivation() {
+    let mut fake = Fake::start();
+    fake.activate();
+    fake.press(KEY_G);
+    fake.deactivate();
+    fake.take_requests();
+
+    fake.activate();
+    // A fresh context starts with a clean engine.
+    fake.press(KEY_K);
+    let requests = fake.settle();
+    assert_eq!(last_preedit(&requests), Some("ㅏ"), "{requests:#?}");
+}
+
