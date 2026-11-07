@@ -27,16 +27,23 @@ ColumnLayout {
         return ""
     }
 
+    // Here, not in the Connections below: the Window attached property only
+    // works on an Item.
+    function announce() {
+        var text = goodNews(EasimeSettings.resultKind, EasimeSettings.resultDetail)
+        var window = Window.window
+        if (text !== "" && window) {
+            window.showPassiveNotification(text, EasimeSettings.resultKind === "reset" ? 8000 : 3000)
+        }
+    }
+
     spacing: Kirigami.Units.smallSpacing
 
     Connections {
         target: EasimeSettings
 
         function onResultKindChanged() {
-            var text = messages.goodNews(EasimeSettings.resultKind, EasimeSettings.resultDetail)
-            if (text !== "" && Window.window) {
-                Window.window.showPassiveNotification(text, EasimeSettings.resultKind === "reset" ? 8000 : 3000)
-            }
+            messages.announce()
         }
     }
 
