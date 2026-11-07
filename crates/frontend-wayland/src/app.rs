@@ -10,14 +10,15 @@
 use crate::log;
 use crate::protocol::client::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
 use crate::protocol::client::zwp_input_method_v1::{self, ZwpInputMethodV1};
+use crate::repeat::RepeatInfo;
 use crate::timer::Timer;
 use crate::toggle::{Decision, ToggleTracker};
 use crate::translate::{case_from_shift, is_modifier_keysym, translate};
 use engine_hangul::HangulEngine;
-use ime_core::{EngineOutput, InputEngine, Modifiers};
+use ime_core::{EngineOutput, InputEngine, KeyEvent, Modifiers};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::ErrorKind;
@@ -34,6 +35,9 @@ const PREEDIT_STYLE_UNDERLINE: u32 = 5;
 
 /// evdev keycodes are offset by 8 in XKB.
 const EVDEV_OFFSET: u32 = 8;
+
+/// Upper bound on repeats replayed after one timer wakeup.
+const MAX_REPEATS_PER_WAKEUP: u64 = 8;
 
 /// What happened to a key. `Repeated` (wl_keyboard key state 2, since
 /// version 10) is sent by KWin when it repeats keys on the client's behalf.
@@ -57,7 +61,20 @@ impl KeyAction {
 }
 
 struct Xkb {
+    keymap: xkb::Keymap,
     state: xkb::State,
+}
+
+/// A key whose press we consumed, so its release must be dropped too.
+#[derive(Debug, Clone, Copy)]
+struct Swallowed {
+    /// The engine input to replay when the key repeats. `None` for keys that
+    /// must not repeat (the language toggle).
+    event: Option<KeyEvent>,
+    /// Serial and time of the original press, reused if the key is later
+    /// handed over to the application.
+    serial: u32,
+    time: u32,
 }
 
 struct App {
@@ -70,8 +87,11 @@ struct App {
     commit_serial: u32,
     xkb_context: xkb::Context,
     xkb: Option<Xkb>,
-    /// Keys whose press we consumed; their release must be dropped too.
-    swallowed: HashSet<u32>,
+    swallowed: HashMap<u32, Swallowed>,
+    /// From `wl_keyboard.repeat_info`.
+    repeat_info: RepeatInfo,
+    /// The consumed key our own timer is currently repeating.
+    repeating: Option<u32>,
     toggle: ToggleTracker,
     /// Fires when a consumed key should repeat.
     timer: Timer,
@@ -87,16 +107,66 @@ impl App {
             commit_serial: 0,
             xkb_context: xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
             xkb: None,
-            swallowed: HashSet::new(),
+            swallowed: HashMap::new(),
+            repeat_info: RepeatInfo::default(),
+            repeating: None,
             toggle: ToggleTracker::new(),
             timer: Timer::new()?,
         })
     }
 
-    /// The repeat timer fired.
+    /// The repeat timer fired: replay the repeating key once per expiration.
     fn on_timer(&mut self) {
-        // Draining the fd is all there is to do until repeat is wired in.
-        let _ = self.timer.take_expirations();
+        let expirations = self.timer.take_expirations().unwrap_or(0);
+        // A long stall must not turn into a burst of hundreds of characters.
+        for _ in 0..expirations.min(MAX_REPEATS_PER_WAKEUP) {
+            match self.repeating {
+                Some(key) => self.repeat_key(key),
+                None => break,
+            }
+        }
+    }
+
+    /// Start repeating a consumed key with our own timer, if the compositor
+    /// wants us to (rate > 0) and the key repeats at all.
+    fn start_repeat(&mut self, key: u32) {
+        self.stop_repeat();
+        let repeats = self.xkb.as_ref().is_some_and(|xkb| {
+            xkb.keymap
+                .key_repeats(xkb::Keycode::new(key + EVDEV_OFFSET))
+        });
+        let Some((delay, interval)) = self.repeat_info.timings() else {
+            return;
+        };
+        if repeats && self.timer.arm(delay, interval).is_ok() {
+            self.repeating = Some(key);
+        }
+    }
+
+    fn stop_repeat(&mut self) {
+        if self.repeating.take().is_some() {
+            let _ = self.timer.disarm();
+        }
+    }
+
+    /// Replay a consumed key. If the engine no longer wants it (for example
+    /// Backspace once the syllable is gone), hand the key to the application,
+    /// which then repeats it by itself.
+    fn repeat_key(&mut self, key: u32) {
+        let Some(sw) = self.swallowed.get(&key).copied() else {
+            return;
+        };
+        let Some(event) = sw.event else {
+            return;
+        };
+        let output = self.engine.process_key(event);
+        let handled = output.handled;
+        self.apply(output);
+        if !handled {
+            self.swallowed.remove(&key);
+            self.stop_repeat();
+            self.forward_key(sw.serial, sw.time, key, KeyAction::Pressed);
+        }
     }
 
     fn activate(&mut self, context: ZwpInputMethodContextV1, qh: &QueueHandle<App>) {
@@ -107,6 +177,7 @@ impl App {
         self.engine.reset();
         self.swallowed.clear();
         self.toggle.clear();
+        self.stop_repeat();
     }
 
     fn deactivate(&mut self) {
@@ -116,6 +187,7 @@ impl App {
 
     /// Finish any composition and drop the current context and keyboard grab.
     fn release_focus(&mut self) {
+        self.stop_repeat();
         let leftover = self.engine.flush();
         // Release the grab first. The proxy reports version 1 (it inherits the
         // context's), but the compositor's wl_keyboard is newer and the client
@@ -159,6 +231,7 @@ impl App {
                 log!("keymap loaded");
                 self.xkb = Some(Xkb {
                     state: xkb::State::new(&keymap),
+                    keymap,
                 });
             }
             None => log!("keymap compile failed"),
@@ -206,19 +279,29 @@ impl App {
             KeyAction::Released => {
                 if self.toggle.on_release(key) == Decision::Toggle {
                     self.toggle_language();
-                } else if !self.swallowed.remove(&key) {
+                } else if self.swallowed.remove(&key).is_none() {
                     self.forward_key(serial, time, key, KeyAction::Released);
+                }
+                if self.repeating == Some(key) {
+                    self.stop_repeat();
                 }
                 return;
             }
             KeyAction::Repeated => {
-                // Keys we consumed are not repeated yet; the rest go to the app.
-                if !self.swallowed.contains(&key) && !self.toggle.holds(key) {
+                // The compositor repeats for us only when our own timer is off.
+                if self.swallowed.contains_key(&key) {
+                    if self.repeating != Some(key) {
+                        self.repeat_key(key);
+                    }
+                } else if !self.toggle.holds(key) {
                     self.forward_key(serial, time, key, KeyAction::Repeated);
                 }
                 return;
             }
-            KeyAction::Pressed => {}
+            KeyAction::Pressed => {
+                // The most recently pressed key is the one that repeats.
+                self.stop_repeat();
+            }
         }
 
         let keysym = match &self.xkb {
@@ -239,7 +322,14 @@ impl App {
         match decision {
             Decision::Toggle => {
                 self.toggle_language();
-                self.swallowed.insert(key);
+                self.swallowed.insert(
+                    key,
+                    Swallowed {
+                        event: None,
+                        serial,
+                        time,
+                    },
+                );
                 return;
             }
             Decision::Swallow => return,
@@ -251,13 +341,20 @@ impl App {
         }
 
         let keysym = case_from_shift(keysym, self.shift_held());
-        let output = self
-            .engine
-            .process_key(translate(keysym, self.current_modifiers()));
+        let event = translate(keysym, self.current_modifiers());
+        let output = self.engine.process_key(event);
         let handled = output.handled;
         self.apply(output);
         if handled {
-            self.swallowed.insert(key);
+            self.swallowed.insert(
+                key,
+                Swallowed {
+                    event: Some(event),
+                    serial,
+                    time,
+                },
+            );
+            self.start_repeat(key);
         } else {
             self.forward_key(serial, time, key, KeyAction::Pressed);
         }
@@ -393,6 +490,10 @@ impl Dispatch<WlKeyboard, ()> for App {
                 mods_locked,
                 group,
             } => app.on_modifiers(serial, mods_depressed, mods_latched, mods_locked, group),
+            wl_keyboard::Event::RepeatInfo { rate, delay } => {
+                log!("repeat_info rate={rate} delay={delay}");
+                app.repeat_info = RepeatInfo { rate, delay };
+            }
             _ => {}
         }
     }
