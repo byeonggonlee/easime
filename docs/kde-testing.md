@@ -78,6 +78,9 @@ Fedora KDE 터미널에서 다음을 실행한다. 스크립트는 설정이나 
 
 ## 한자 입력 재검증
 
+[GitHub Actions](https://github.com/byeonggonlee/easime/actions/runs/42342646904)에서 Linux 전체 테스트 294개와 macOS·Windows 테스트, Linux 패키지 빌드가 통과했다.
+한자 통합 테스트 6개와 상태 박스 테스트 18개는 가짜 컴포지터 검증이다. 새 설치본의 실제 KDE 사용 확인과 구분한다.
+
 이 작업에서 추가한 첫 범위는 조합 중 한 글자 변환이다.
 한국어 상태에서 한을 조합한 뒤 한자 키를 누르면 韓·漢 등의 후보가 나타나야 한다.
 ↑↓ 또는 Space로 이동하고, PgUp/PgDn으로 페이지를 바꾸며, Enter나 현재 페이지의 1–9로 확정한다.

@@ -42,11 +42,11 @@ Mac에서는 OS 독립 crate를 실행하고 Linux 대상은 컴파일 검사한
 
 - 한자 엔진 새 테스트 8개 실패를 확인한 뒤 구현했고, 현재 한자 동작 테스트 12개가 통과했다.
 - OS 독립 crate 전체 188개 테스트, Mac에서 독립 실행한 기존 렌더링·키 변환 모듈 27개 테스트가 통과했다.
-- Linux 대상 워크스페이스 전체와 테스트 타깃의 컴파일·clippy 검사를 통과했다. Linux 통합 테스트 실행과 실제 KDE 재검증은 아직 하지 못했다.
+- Linux 대상 워크스페이스 전체와 테스트 타깃의 컴파일·clippy 검사를 통과했다. 후속 GitHub Actions에서 Linux 전체 테스트 294개(한자 통합 6개, 표시 테스트 18개 포함)가 통과했다. 새 기능의 실제 KDE 재검증은 남아 있다.
 - 리뷰에서 일본어에 한국어용 페이지 안내가 노출되는 문제를 발견해, 이번 후보 UI 연결을 한국어로 한정했다.
 - 태스크바 전체 이동은 KWin 6.8.1의 visible 오분류 → Plasma floating 상태 변경 경로와 일치한다. 사용자는 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용하자 문제가 재현되지 않는다고 확인했다. [확인 기록](../../kde-testing.md).
 
-Host verification limitation: native Mac cargo test --workspace cannot compile the existing Linux-only memfd_create/timerfd/inotify imports. Linux-target all-target compilation and clippy passed instead; Linux tests were not executed.
+Host verification limitation: native Mac cargo test --workspace cannot compile the existing Linux-only memfd_create/timerfd/inotify imports. Linux-target all-target compilation and clippy passed locally; the full Linux suite subsequently passed in GitHub Actions.
 
 ## 후속 사용자 피드백: 포커스 진입 시 표시 제거
 
@@ -54,4 +54,6 @@ Host verification limitation: native Mac cargo test --workspace cannot compile t
 언어 전환 때만 언어 박스를 표시하고 한자 후보창은 유지한다. 최초 포커스·일반 입력·재포커스로 표시되지 않으며, 명시적 전환 후에는 표시되는 것을 회귀 검사한다.
 기존 크기·타이머·버퍼 재사용 검사는 먼저 전환 키를 눌러 표시하도록 갱신한다. 이는 태스크바 이동의 근본 원인 해결과는 구분한다.
 
-Verification: Linux-target workspace/all-test-target clippy passed. The focused native test attempt could not compile the existing Linux-only memfd_create/timerfd/inotify calls on macOS; runtime regression confirmation remains pending on Linux.
+Verification: Linux-target workspace/all-test-target clippy passed. The focused native test attempt could not compile the existing Linux-only memfd_create/timerfd/inotify calls on macOS; the subsequent remote Linux workspace suite passed, including the focus regression test.
+
+Remote verification: [CI run 42342646904](https://github.com/byeonggonlee/easime/actions/runs/42342646904) passed Linux, macOS, Windows and Linux packaging before the main push.
