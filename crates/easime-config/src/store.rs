@@ -129,36 +129,56 @@ mod tests {
         move |name| map.get(name).cloned()
     }
 
+    /// An absolute path that is valid on the OS running the tests.
+    fn abs(path: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{}", path.replace('/', "\\"))
+        } else {
+            path.to_string()
+        }
+    }
+
+    fn abs_path(path: &str) -> PathBuf {
+        PathBuf::from(abs(path))
+    }
+
     #[test]
     fn linux_prefers_absolute_xdg_config_home() {
-        let env = env_of(&[("XDG_CONFIG_HOME", "/x/cfg"), ("HOME", "/home/u")]);
-        assert_eq!(linux_dir(&env), Some(PathBuf::from("/x/cfg")));
+        let env = env_of(&[
+            ("XDG_CONFIG_HOME", &abs("/x/cfg")),
+            ("HOME", &abs("/home/u")),
+        ]);
+        assert_eq!(linux_dir(&env), Some(abs_path("/x/cfg")));
     }
 
     #[test]
     fn linux_ignores_empty_or_relative_xdg_config_home() {
         for bad in ["", "rel/path"] {
-            let env = env_of(&[("XDG_CONFIG_HOME", bad), ("HOME", "/home/u")]);
-            assert_eq!(linux_dir(&env), Some(PathBuf::from("/home/u/.config")));
+            let env = env_of(&[("XDG_CONFIG_HOME", bad), ("HOME", &abs("/home/u"))]);
+            assert_eq!(linux_dir(&env), Some(abs_path("/home/u").join(".config")));
         }
     }
 
     #[test]
     fn windows_uses_appdata() {
-        let env = env_of(&[("APPDATA", "/C/Users/u/AppData/Roaming")]);
+        let env = env_of(&[("APPDATA", &abs("/Users/u/AppData/Roaming"))]);
         assert_eq!(
             windows_dir(&env),
-            Some(PathBuf::from("/C/Users/u/AppData/Roaming"))
+            Some(abs_path("/Users/u/AppData/Roaming"))
         );
         assert_eq!(windows_dir(&env_of(&[])), None);
     }
 
     #[test]
     fn macos_uses_application_support() {
-        let env = env_of(&[("HOME", "/Users/u")]);
+        let env = env_of(&[("HOME", &abs("/Users/u"))]);
         assert_eq!(
             macos_dir(&env),
-            Some(PathBuf::from("/Users/u/Library/Application Support"))
+            Some(
+                abs_path("/Users/u")
+                    .join("Library")
+                    .join("Application Support")
+            )
         );
     }
 
