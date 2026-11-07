@@ -5,11 +5,20 @@
 //! resulting [`LayeredDictionary`] to
 //! [`JapaneseEngine::with_dictionary`](crate::JapaneseEngine::with_dictionary).
 //!
-//! Directories searched, in this order (earlier entries win):
+//! Directories searched, in this order (earlier entries win): first the user
+//! directory, then the system directory. Where those are depends on the
+//! operating system ([`Os`]):
 //!
-//! 1. the user directory `$XDG_DATA_HOME/easime/dictionary`
-//!    (default `~/.local/share/easime/dictionary`)
-//! 2. the system directory `/usr/share/easime/dictionary`
+//! | OS | user directory | system directory |
+//! |---|---|---|
+//! | Linux | `$XDG_DATA_HOME/easime/dictionary` (default `~/.local/share/easime/dictionary`) | `/usr/share/easime/dictionary` |
+//! | macOS | `~/Library/Application Support/easime/dictionary` | `/Library/Application Support/easime/dictionary` |
+//! | Windows | `%APPDATA%\easime\dictionary` | `%ProgramW6432%\easime\dictionary` (else `%ProgramFiles%`) |
+//!
+//! Only Linux is in use today. The macOS and Windows rows are the planned
+//! places (the Windows one is the folder the MSI installs into) and are
+//! checked by unit tests on every OS, but no installer puts a dictionary
+//! there yet. See `docs/platforms.md`.
 //!
 //! In each directory `*.tsv` files (the [`MemoryDictionary`] text format)
 //! and `*.bin` files (the [`FileDictionary`] binary format) are loaded in
@@ -17,13 +26,13 @@
 //! exist is simply skipped; a file that cannot be loaded is reported in
 //! [`LoadReport::failed`] and does not stop the others.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use crate::dictionary::{Dictionary, MemoryDictionary};
 use crate::file_dict::FileDictionary;
 
-/// Where distribution packages install dictionaries.
+/// Where Linux distribution packages install dictionaries.
 pub const SYSTEM_DICTIONARY_DIR: &str = "/usr/share/easime/dictionary";
 
 /// Several dictionaries searched together. Candidates of earlier layers come
@@ -81,39 +90,88 @@ impl Dictionary for LayeredDictionary {
     }
 }
 
-/// The user dictionary directory for the given environment values.
-/// `XDG_DATA_HOME` is only honoured when it is an absolute path, as the
-/// XDG specification requires.
-pub fn user_dictionary_dir_from(
-    xdg_data_home: Option<&OsStr>,
-    home: Option<&OsStr>,
-) -> Option<PathBuf> {
-    let data_home = match xdg_data_home.map(Path::new) {
-        Some(path) if path.is_absolute() => path.to_path_buf(),
-        _ => {
-            let home = Path::new(home?);
-            if home.as_os_str().is_empty() {
-                return None;
-            }
-            home.join(".local/share")
+/// The operating system whose conventions decide where dictionaries live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Os {
+    Linux,
+    MacOs,
+    Windows,
+}
+
+impl Os {
+    /// The OS this program was built for. Anything that is not Windows or
+    /// macOS follows the Linux (XDG) conventions.
+    pub fn current() -> Self {
+        if cfg!(target_os = "windows") {
+            Os::Windows
+        } else if cfg!(target_os = "macos") {
+            Os::MacOs
+        } else {
+            Os::Linux
         }
+    }
+}
+
+/// Environment variable lookup, passed in so tests do not touch the real one.
+pub type Env<'a> = &'a dyn Fn(&str) -> Option<OsString>;
+
+/// The value of an environment variable if it is an absolute path.
+fn absolute(env: Env, name: &str) -> Option<PathBuf> {
+    env(name).map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
+fn under_easime(base: PathBuf) -> PathBuf {
+    base.join("easime").join("dictionary")
+}
+
+/// The user dictionary directory on `os`, or `None` if its base directory is
+/// not known. Relative paths in environment variables are ignored (the XDG
+/// specification requires that for `XDG_DATA_HOME`; the others follow it).
+pub fn user_dictionary_dir_for(os: Os, env: Env) -> Option<PathBuf> {
+    let base = match os {
+        Os::Linux => absolute(env, "XDG_DATA_HOME")
+            .or_else(|| absolute(env, "HOME").map(|home| home.join(".local").join("share")))?,
+        Os::MacOs => absolute(env, "HOME")?
+            .join("Library")
+            .join("Application Support"),
+        Os::Windows => absolute(env, "APPDATA")?,
     };
-    Some(data_home.join("easime").join("dictionary"))
+    Some(under_easime(base))
 }
 
-/// The user dictionary directory according to the environment.
+/// The system-wide dictionary directory on `os`.
+///
+/// On Windows `ProgramW6432` is the 64-bit Program Files even for a 32-bit
+/// process (a text service DLL is loaded into 32-bit applications too);
+/// `ProgramFiles` is the fallback.
+pub fn system_dictionary_dir_for(os: Os, env: Env) -> Option<PathBuf> {
+    match os {
+        Os::Linux => Some(PathBuf::from(SYSTEM_DICTIONARY_DIR)),
+        Os::MacOs => Some(under_easime(
+            PathBuf::from("/Library").join("Application Support"),
+        )),
+        Os::Windows => absolute(env, "ProgramW6432")
+            .or_else(|| absolute(env, "ProgramFiles"))
+            .map(under_easime),
+    }
+}
+
+/// User directory first, then the system directory, for `os`.
+pub fn dictionary_dirs_for(os: Os, env: Env) -> Vec<PathBuf> {
+    user_dictionary_dir_for(os, env)
+        .into_iter()
+        .chain(system_dictionary_dir_for(os, env))
+        .collect()
+}
+
+/// The user dictionary directory on this OS, from the real environment.
 pub fn user_dictionary_dir() -> Option<PathBuf> {
-    user_dictionary_dir_from(
-        std::env::var_os("XDG_DATA_HOME").as_deref(),
-        std::env::var_os("HOME").as_deref(),
-    )
+    user_dictionary_dir_for(Os::current(), &|name| std::env::var_os(name))
 }
 
-/// User directory first, then the system directory.
+/// User directory first, then the system directory, on this OS.
 pub fn default_dictionary_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = user_dictionary_dir().into_iter().collect();
-    dirs.push(PathBuf::from(SYSTEM_DICTIONARY_DIR));
-    dirs
+    dictionary_dirs_for(Os::current(), &|name| std::env::var_os(name))
 }
 
 /// Result of [`load_dictionaries`].
@@ -255,39 +313,143 @@ mod tests {
         assert_eq!(d.lookup("かみ"), ["上", "紙", "神"]);
     }
 
-    #[test]
-    fn user_dir_follows_the_xdg_rules() {
-        let dir = |x: Option<&OsStr>, h: Option<&OsStr>| user_dictionary_dir_from(x, h);
-        // Absolute paths are platform specific ("/data" has no drive letter,
-        // so Windows does not call it absolute): build them from the
-        // temporary directory, which is absolute everywhere.
-        let data = std::env::temp_dir().join("data");
-        let home = std::env::temp_dir().join("home");
-        let easime = |base: &Path| base.join("easime").join("dictionary");
-        let from_home = easime(&home.join(".local").join("share"));
+    /// An environment of the given variables.
+    fn env_of(pairs: &[(&str, &Path)]) -> impl Fn(&str) -> Option<OsString> + use<> {
+        let pairs: Vec<(String, OsString)> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.as_os_str().to_owned()))
+            .collect();
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+        }
+    }
 
-        assert_eq!(
-            dir(Some(data.as_os_str()), Some(home.as_os_str())),
-            Some(easime(&data))
-        );
-        assert_eq!(dir(None, Some(home.as_os_str())), Some(from_home.clone()));
-        // A relative XDG_DATA_HOME is ignored.
-        assert_eq!(
-            dir(Some(OsStr::new("relative")), Some(home.as_os_str())),
-            Some(from_home.clone())
-        );
-        assert_eq!(
-            dir(Some(OsStr::new("")), Some(home.as_os_str())),
-            Some(from_home)
-        );
-        assert_eq!(dir(None, None), None);
-        assert_eq!(dir(None, Some(OsStr::new(""))), None);
+    /// Absolute paths are platform specific ("/data" has no drive letter, so
+    /// Windows does not call it absolute): build them from the temporary
+    /// directory, which is absolute everywhere.
+    fn abs(name: &str) -> PathBuf {
+        std::env::temp_dir().join(name)
+    }
+
+    fn easime(base: &Path) -> PathBuf {
+        base.join("easime").join("dictionary")
     }
 
     #[test]
-    fn default_dirs_end_with_the_system_dir() {
-        let dirs = default_dictionary_dirs();
-        assert_eq!(dirs.last(), Some(&PathBuf::from(SYSTEM_DICTIONARY_DIR)));
+    fn linux_follows_the_xdg_rules() {
+        let (data, home) = (abs("data"), abs("home"));
+        let from_home = easime(&home.join(".local").join("share"));
+        let dir = |pairs: &[(&str, &Path)]| user_dictionary_dir_for(Os::Linux, &env_of(pairs));
+
+        assert_eq!(
+            dir(&[("XDG_DATA_HOME", &data), ("HOME", &home)]),
+            Some(easime(&data))
+        );
+        assert_eq!(dir(&[("HOME", &home)]), Some(from_home.clone()));
+        // A relative XDG_DATA_HOME is ignored, and so is an empty one.
+        assert_eq!(
+            dir(&[("XDG_DATA_HOME", Path::new("relative")), ("HOME", &home)]),
+            Some(from_home.clone())
+        );
+        assert_eq!(
+            dir(&[("XDG_DATA_HOME", Path::new("")), ("HOME", &home)]),
+            Some(from_home)
+        );
+        assert_eq!(dir(&[]), None);
+        assert_eq!(dir(&[("HOME", Path::new(""))]), None);
+        assert_eq!(
+            system_dictionary_dir_for(Os::Linux, &env_of(&[])),
+            Some(PathBuf::from(SYSTEM_DICTIONARY_DIR))
+        );
+    }
+
+    #[test]
+    fn macos_keeps_dictionaries_in_application_support() {
+        let home = abs("home");
+        let user = user_dictionary_dir_for(Os::MacOs, &env_of(&[("HOME", &home)]));
+        assert_eq!(
+            user,
+            Some(easime(&home.join("Library").join("Application Support")))
+        );
+        assert_eq!(user_dictionary_dir_for(Os::MacOs, &env_of(&[])), None);
+        // XDG variables mean nothing on macOS.
+        assert_eq!(
+            user_dictionary_dir_for(Os::MacOs, &env_of(&[("XDG_DATA_HOME", &abs("data"))])),
+            None
+        );
+        assert_eq!(
+            system_dictionary_dir_for(Os::MacOs, &env_of(&[])),
+            Some(easime(
+                &PathBuf::from("/Library").join("Application Support")
+            ))
+        );
+    }
+
+    #[test]
+    fn windows_uses_appdata_and_program_files() {
+        let (appdata, w6432, files) = (abs("appdata"), abs("program-w6432"), abs("program-files"));
+        assert_eq!(
+            user_dictionary_dir_for(Os::Windows, &env_of(&[("APPDATA", &appdata)])),
+            Some(easime(&appdata))
+        );
+        // HOME and XDG variables mean nothing on Windows.
+        assert_eq!(
+            user_dictionary_dir_for(Os::Windows, &env_of(&[("HOME", &abs("home"))])),
+            None
+        );
+        let system =
+            |pairs: &[(&str, &Path)]| system_dictionary_dir_for(Os::Windows, &env_of(pairs));
+        // The 64-bit Program Files wins, also for a 32-bit process.
+        assert_eq!(
+            system(&[("ProgramW6432", &w6432), ("ProgramFiles", &files)]),
+            Some(easime(&w6432))
+        );
+        assert_eq!(system(&[("ProgramFiles", &files)]), Some(easime(&files)));
+        assert_eq!(system(&[("ProgramFiles", Path::new("relative"))]), None);
+        assert_eq!(system(&[]), None);
+    }
+
+    #[test]
+    fn the_user_directory_comes_before_the_system_directory() {
+        let home = abs("home");
+        let dirs = dictionary_dirs_for(Os::Linux, &env_of(&[("HOME", &home)]));
+        assert_eq!(
+            dirs,
+            [
+                easime(&home.join(".local").join("share")),
+                PathBuf::from(SYSTEM_DICTIONARY_DIR)
+            ]
+        );
+        // Without a user directory only the system one is searched.
+        assert_eq!(
+            dictionary_dirs_for(Os::Linux, &env_of(&[])),
+            [PathBuf::from(SYSTEM_DICTIONARY_DIR)]
+        );
+        assert!(dictionary_dirs_for(Os::Windows, &env_of(&[])).is_empty());
+    }
+
+    #[test]
+    fn this_os_uses_its_own_rules() {
+        let real = |name: &str| std::env::var_os(name);
+        assert_eq!(
+            default_dictionary_dirs(),
+            dictionary_dirs_for(Os::current(), &real)
+        );
+        assert_eq!(
+            user_dictionary_dir(),
+            user_dictionary_dir_for(Os::current(), &real)
+        );
+        let expected = if cfg!(target_os = "windows") {
+            Os::Windows
+        } else if cfg!(target_os = "macos") {
+            Os::MacOs
+        } else {
+            Os::Linux
+        };
+        assert_eq!(Os::current(), expected);
     }
 
     #[test]

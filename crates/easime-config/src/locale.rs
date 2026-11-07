@@ -3,6 +3,20 @@
 //! Until the user picks languages, easime enables the ones that match the
 //! system language (see [`crate::Languages`]): a Korean system gets Korean, a
 //! Japanese system gets Japanese, and anything else gets English only.
+//!
+//! Matching a language *tag* to an input language is the same everywhere
+//! ([`language_for_tag`], [`languages_for_tags`]). Reading the system's
+//! language is not:
+//!
+//! | OS | where the tags come from | state |
+//! |---|---|---|
+//! | Linux | `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` | done ([`system_languages`]) |
+//! | Windows | the user's preferred UI languages (`GetUserPreferredUILanguages`) | **not done**: the environment variables are normally not set, so the result is empty, which means English only |
+//! | macOS | the preferred languages (`AppleLanguages`, `CFLocaleCopyPreferredLanguages`) | **not done**, same fallback |
+//!
+//! An empty result is the safe fallback: nothing is switched on that the user
+//! did not ask for. When a Windows or macOS frontend is written it feeds the
+//! tags of its OS to [`languages_for_tags`]. See `docs/platforms.md`.
 
 use ime_core::Language;
 use std::ffi::OsString;
@@ -62,7 +76,8 @@ pub fn languages_for_tags<'a>(tags: impl IntoIterator<Item = &'a str>) -> Vec<La
 }
 
 /// The languages the user has told the system they use, read from the
-/// environment like gettext does: `LANGUAGE` is a preference list (Plasma sets
+/// environment like gettext does (**Linux**; on Windows and macOS the
+/// environment does not say, see the module documentation): `LANGUAGE` is a preference list (Plasma sets
 /// it from its language settings) unless the locale is `C` or `POSIX`;
 /// otherwise the first of `LC_ALL`, `LC_MESSAGES` and `LANG` that is set.
 pub fn system_languages() -> Vec<Language> {
