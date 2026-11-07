@@ -46,6 +46,18 @@ impl LanguageSwitcher {
         &self.cycle
     }
 
+    /// Switch to `language` if it is part of the cycle. Returns false (and
+    /// changes nothing) otherwise.
+    pub fn select(&mut self, language: Language) -> bool {
+        match self.cycle.iter().position(|&l| l == language) {
+            Some(index) => {
+                self.index = index;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Move to the next language and return it.
     pub fn advance(&mut self) -> Language {
         self.index = (self.index + 1) % self.cycle.len();
@@ -84,6 +96,22 @@ mod tests {
         let mut s = LanguageSwitcher::new(&[]);
         assert_eq!(s.current(), English);
         assert_eq!(s.advance(), English);
+    }
+
+    #[test]
+    fn select_jumps_to_a_language_in_the_cycle() {
+        let mut s = LanguageSwitcher::new(&[Korean, Japanese]);
+        assert!(s.select(Japanese));
+        assert_eq!(s.current(), Japanese);
+        assert!(s.select(English));
+        assert_eq!(s.current(), English);
+    }
+
+    #[test]
+    fn select_ignores_languages_outside_the_cycle() {
+        let mut s = LanguageSwitcher::new(&[Korean]);
+        assert!(!s.select(Chinese));
+        assert_eq!(s.current(), Korean);
     }
 
     #[test]
