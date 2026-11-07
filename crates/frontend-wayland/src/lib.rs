@@ -18,4 +18,6 @@ pub mod timer;
 pub mod translate;
 pub mod watch;
 
-pub use app::{RunError, run, run_on, run_watching, run_with, run_with_dictionary};
+pub use app::{
+    RunError, observe_language, run, run_on, run_watching, run_with, run_with_dictionary,
+};

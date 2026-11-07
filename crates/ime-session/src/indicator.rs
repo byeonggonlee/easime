@@ -19,9 +19,37 @@ pub fn language_glyph(language: Language) -> char {
     }
 }
 
+/// The name of `language` in its own script, for a menu or a tooltip: people
+/// pick a language by what it looks like to them, not by a translation
+/// (DESIGN.md 4.1). The two Chinese scripts are told apart by their names.
+pub fn language_native_name(language: Language) -> &'static str {
+    match language {
+        Language::English => "English",
+        Language::Korean => "한국어",
+        Language::Japanese => "日本語",
+        Language::ChineseSimplified => "简体中文",
+        Language::ChineseTraditional => "繁體中文",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn languages_are_named_in_their_own_script() {
+        assert_eq!(language_native_name(Language::English), "English");
+        assert_eq!(language_native_name(Language::Korean), "한국어");
+        assert_eq!(language_native_name(Language::Japanese), "日本語");
+        assert_eq!(
+            language_native_name(Language::ChineseSimplified),
+            "简体中文"
+        );
+        assert_eq!(
+            language_native_name(Language::ChineseTraditional),
+            "繁體中文"
+        );
+    }
 
     #[test]
     fn each_language_has_its_glyph() {

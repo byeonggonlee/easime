@@ -24,7 +24,7 @@ use crate::translate::{case_from_shift, is_modifier_keysym, toggle_role, transla
 use crate::watch::ConfigWatcher;
 use easime_config::Config;
 use engine_japanese::Dictionary;
-use ime_core::{EngineOutput, Key, KeyEvent, Modifiers};
+use ime_core::{EngineOutput, Key, KeyEvent, Language, Modifiers};
 use ime_session::{Decision, Held, JapaneseDictionary, Session, ToggleTracker};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
@@ -34,7 +34,7 @@ use std::fs::File;
 use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use wayland_client::backend::WaylandError;
 use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
@@ -57,6 +57,26 @@ const EVDEV_OFFSET: u32 = 8;
 
 /// Upper bound on repeats replayed after one timer wakeup.
 const MAX_REPEATS_PER_WAKEUP: u64 = 8;
+
+/// Who is told when the active language changes (the tray icon).
+type LanguageObserver = Box<dyn Fn(Language, &[Language]) + Send + Sync>;
+
+static LANGUAGE_OBSERVER: OnceLock<LanguageObserver> = OnceLock::new();
+
+/// Ask to be told the active language and the cycle it belongs to: once when
+/// the input method starts serving, and every time the language changes (the
+/// switch key, new settings). Called on the input thread, so it must return
+/// quickly; do not block in it. One observer per process: returns `false` and
+/// keeps the first if one is already set.
+pub fn observe_language(observer: impl Fn(Language, &[Language]) + Send + Sync + 'static) -> bool {
+    LANGUAGE_OBSERVER.set(Box::new(observer)).is_ok()
+}
+
+fn notify_language(session: &Session) {
+    if let Some(observer) = LANGUAGE_OBSERVER.get() {
+        observer(session.language(), session.cycle());
+    }
+}
 
 /// What happened to a key. `Repeated` (wl_keyboard key state 2, since
 /// version 10) is sent by KWin when it repeats keys on the client's behalf.
@@ -181,6 +201,7 @@ impl App {
         let leftover = self.session.apply_config(config);
         self.toggle = ToggleTracker::with_setting(config.shortcuts.toggle_key);
         self.set_indicator(IndicatorSettings::from_config(config));
+        notify_language(&self.session);
 
         self.apply(EngineOutput {
             commit: leftover,
@@ -530,6 +551,7 @@ impl App {
         // Finishes the text in progress before switching.
         let (leftover, language) = self.session.switch_language();
         log!("language -> {language:?}");
+        notify_language(&self.session);
         self.apply(EngineOutput {
             commit: leftover,
             ..EngineOutput::default()
@@ -834,6 +856,7 @@ fn serve(
     log!("bound zwp_input_method_v1");
 
     let mut app = App::new(config, dictionary).map_err(|e| startup(&e))?;
+    notify_language(&app.session);
     app.panel = bind_panel(&globals, &qh);
     if app.indicator.enabled
         && let Some(panel) = &app.panel

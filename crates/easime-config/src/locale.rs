@@ -75,23 +75,29 @@ pub fn languages_for_tags<'a>(tags: impl IntoIterator<Item = &'a str>) -> Vec<La
     found
 }
 
-/// The languages the user has told the system they use.
+/// The language tags the system reports for the user, best first
+/// (`ko-KR`, `ja_JP.UTF-8`, `en`).
 ///
 /// Windows asks the system for the preferred UI languages. Everywhere else (and
-/// on Windows if that gives nothing) the environment is read like gettext does;
-/// on macOS it normally says nothing, see the module documentation: `LANGUAGE` is a preference list (Plasma sets
-/// it from its language settings) unless the locale is `C` or `POSIX`;
-/// otherwise the first of `LC_ALL`, `LC_MESSAGES` and `LANG` that is set.
-pub fn system_languages() -> Vec<Language> {
+/// on Windows if that gives nothing) the environment is read like gettext does,
+/// see [`system_language_tags_in`]; on macOS it normally says nothing, see the
+/// module documentation.
+pub fn system_language_tags() -> Vec<String> {
     #[cfg(windows)]
     {
         let tags = windows_api::preferred_ui_languages();
-        let found = languages_for_tags(tags.iter().map(String::as_str));
         if !tags.is_empty() {
-            return found;
+            return tags;
         }
     }
-    system_languages_in(&|name| std::env::var_os(name))
+    system_language_tags_in(&|name| std::env::var_os(name))
+}
+
+/// The input languages that match [`system_language_tags`]. Empty means none of
+/// them (or no language known), which is English only.
+pub fn system_languages() -> Vec<Language> {
+    let tags = system_language_tags();
+    languages_for_tags(tags.iter().map(String::as_str))
 }
 
 // Only Windows reads such a list; it is plain data handling, so every OS tests it.
@@ -145,8 +151,17 @@ mod windows_api {
     }
 }
 
-/// [`system_languages`] with the environment passed in, for tests.
+/// [`system_languages`] from an environment passed in, for tests.
 pub fn system_languages_in(env: &dyn Fn(&str) -> Option<OsString>) -> Vec<Language> {
+    let tags = system_language_tags_in(env);
+    languages_for_tags(tags.iter().map(String::as_str))
+}
+
+/// The tags in an environment, read like gettext does: `LANGUAGE` is a
+/// preference list (Plasma sets it from its language settings) unless the
+/// locale is `C` or `POSIX`; otherwise the first of `LC_ALL`, `LC_MESSAGES` and
+/// `LANG` that is set.
+pub fn system_language_tags_in(env: &dyn Fn(&str) -> Option<OsString>) -> Vec<String> {
     let get = |name: &str| {
         env(name)
             .and_then(|value| value.into_string().ok())
@@ -157,16 +172,16 @@ pub fn system_languages_in(env: &dyn Fn(&str) -> Option<OsString>) -> Vec<Langua
         .or_else(|| get("LANG"));
     let neutral = matches!(locale.as_deref(), Some("C" | "POSIX"));
     let list = if neutral { None } else { get("LANGUAGE") };
-    let mut tags: Vec<&str> = match &list {
-        Some(list) => list.split(':').collect(),
+    let mut tags: Vec<String> = match &list {
+        Some(list) => list.split(':').map(str::to_owned).collect(),
         None => Vec::new(),
     };
     if tags.is_empty()
-        && let Some(locale) = &locale
+        && let Some(locale) = locale
     {
         tags.push(locale);
     }
-    languages_for_tags(tags)
+    tags
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@
 //! * [`toggle`]: which presses of the switch key (Hangul key, tapped right Alt)
 //!   switch language.
 //! * [`dictionary`]: the Japanese dictionary, opened once and shared.
-//! * [`indicator`]: the letter that stands for a language.
+//! * [`indicator`]: the letter and the name that stand for a language.
 //! * [`reload`]: noticing a changed settings file without an OS watcher API (for
 //!   frontends that cannot or should not watch files).
 //!
