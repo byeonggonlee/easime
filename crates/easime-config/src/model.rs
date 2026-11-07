@@ -64,6 +64,26 @@ pub struct Korean {
     pub backspace: BackspaceUnit,
 }
 
+/// How easime looks on screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Appearance {
+    /// Show a small box with the language glyph next to the text cursor when
+    /// the language is switched and when a text field gains focus.
+    pub indicator_box: bool,
+    /// How long the box stays visible, in milliseconds.
+    pub indicator_ms: u32,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            indicator_box: true,
+            indicator_ms: 1000,
+        }
+    }
+}
+
 /// All settings.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -71,6 +91,7 @@ pub struct Config {
     pub languages: Languages,
     pub shortcuts: Shortcuts,
     pub korean: Korean,
+    pub appearance: Appearance,
 }
 
 impl Config {
@@ -93,6 +114,23 @@ mod tests {
         let c = Config::default();
         assert_eq!(c.shortcuts.toggle_key, ToggleKey::Both);
         assert_eq!(c.korean.backspace, BackspaceUnit::Jamo);
+        assert!(c.appearance.indicator_box);
+        assert_eq!(c.appearance.indicator_ms, 1000);
+    }
+
+    #[test]
+    fn appearance_can_be_set_and_keeps_other_defaults() {
+        let c = Config::from_toml("[appearance]\nindicator_box = false\n").unwrap();
+        assert!(!c.appearance.indicator_box);
+        assert_eq!(c.appearance.indicator_ms, 1000);
+        let c = Config::from_toml("[appearance]\nindicator_ms = 250\n").unwrap();
+        assert!(c.appearance.indicator_box);
+        assert_eq!(c.appearance.indicator_ms, 250);
+    }
+
+    #[test]
+    fn negative_indicator_time_is_an_error() {
+        assert!(Config::from_toml("[appearance]\nindicator_ms = -5\n").is_err());
     }
 
     #[test]
@@ -149,6 +187,10 @@ mod tests {
             },
             korean: Korean {
                 backspace: BackspaceUnit::Syllable,
+            },
+            appearance: Appearance {
+                indicator_box: false,
+                indicator_ms: 400,
             },
         };
         assert_eq!(Config::from_toml(&c.to_toml()).unwrap(), c);
