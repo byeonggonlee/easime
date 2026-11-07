@@ -103,6 +103,7 @@ Kirigami.ApplicationWindow {
             return
         }
         current = index
+        EasimeSettings.clearResult()
         pageStack.clear()
         pageStack.push(Qt.resolvedUrl(entries[index].file))
     }

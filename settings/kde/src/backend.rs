@@ -57,6 +57,10 @@ pub mod qobject {
         fn set_indicator_milliseconds(self: Pin<&mut EasimeSettings>, milliseconds: i32);
 
         #[qinvokable]
+        #[cxx_name = "clearResult"]
+        fn clear_result(self: Pin<&mut EasimeSettings>);
+
+        #[qinvokable]
         fn reload(self: Pin<&mut EasimeSettings>);
 
         #[qinvokable]
@@ -194,6 +198,13 @@ impl qobject::EasimeSettings {
             model.set_indicator_ms(milliseconds)?;
             Ok(Outcome::Done("saved", String::new()))
         });
+    }
+
+    /// Forget what the last action reported, for example when the user moves
+    /// to another page: "saved" belongs to the page where it was saved.
+    fn clear_result(mut self: Pin<&mut Self>) {
+        self.as_mut().set_result_kind(QString::default());
+        self.as_mut().set_result_detail(QString::default());
     }
 
     fn reload(self: Pin<&mut Self>) {
