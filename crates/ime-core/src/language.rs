@@ -47,7 +47,7 @@ impl LanguageSwitcher {
     }
 
     /// Move to the next language and return it.
-    pub fn next(&mut self) -> Language {
+    pub fn advance(&mut self) -> Language {
         self.index = (self.index + 1) % self.cycle.len();
         self.current()
     }
@@ -66,24 +66,24 @@ mod tests {
     #[test]
     fn cycles_english_then_enabled_languages_in_order() {
         let mut s = LanguageSwitcher::new(&[Korean, Japanese, Chinese]);
-        assert_eq!(s.next(), Japanese);
-        assert_eq!(s.next(), Chinese);
-        assert_eq!(s.next(), English);
-        assert_eq!(s.next(), Korean);
+        assert_eq!(s.advance(), Japanese);
+        assert_eq!(s.advance(), Chinese);
+        assert_eq!(s.advance(), English);
+        assert_eq!(s.advance(), Korean);
     }
 
     #[test]
     fn single_language_toggles_with_english() {
         let mut s = LanguageSwitcher::new(&[Korean]);
-        assert_eq!(s.next(), English);
-        assert_eq!(s.next(), Korean);
+        assert_eq!(s.advance(), English);
+        assert_eq!(s.advance(), Korean);
     }
 
     #[test]
     fn no_languages_stays_on_english() {
         let mut s = LanguageSwitcher::new(&[]);
         assert_eq!(s.current(), English);
-        assert_eq!(s.next(), English);
+        assert_eq!(s.advance(), English);
     }
 
     #[test]
