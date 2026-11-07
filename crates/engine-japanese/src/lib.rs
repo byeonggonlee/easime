@@ -2,6 +2,7 @@
 
 pub mod dictionary;
 pub mod engine;
+pub mod file_dict;
 pub mod kana;
 pub mod romaji;
 pub mod table;
