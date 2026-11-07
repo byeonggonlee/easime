@@ -29,13 +29,14 @@ cargo test --manifest-path settings/kde/Cargo.toml   # settings window, its own 
 Linux builds need `libxkbcommon` and Wayland dev packages (list in `docs/development.md`).
 
 ## Crates (`crates/`)
-`ime-core` (key events, `InputEngine`, `LanguageSwitcher`), `engine-hangul`, `engine-japanese` (romaji to kana, dictionaries),
+`ime-core` (key events, `InputEngine`, `LanguageSwitcher`), `ime-session` (the `Session` every frontend drives: engines, language cycle, switch-key rules, dictionary), `engine-hangul`, `engine-japanese` (romaji to kana, dictionaries),
 `easime-dict-tool` (Mozc dictionary to binary), `easime-config` (TOML settings, OS paths), `easime-cli` (terminal demo),
 `frontend-wayland` (KWin `zwp_input_method_v1`), `easime` (Linux daemon). Planned crates: `docs/architecture.md`.
-Portable crates, which also build on Windows and macOS CI: `ime-core`, `engine-hangul`, `engine-japanese`, `easime-dict-tool`, `easime-config`, `easime-cli`.
+Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-session`, `engine-hangul`, `engine-japanese`, `easime-dict-tool`, `easime-config`, `easime-cli`.
 
 ## Rules
-- Engine crates (`ime-core`, `engine-*`) have no OS or UI dependencies (Wayland, X11, Qt, Win32). OS-specific code goes in its own crate or under `#[cfg(target_os = ...)]`.
+- Engine crates (`ime-core`, `ime-session`, `engine-*`) have no OS or UI dependencies (Wayland, X11, Qt, Win32). OS-specific code goes in its own crate or under `#[cfg(target_os = ...)]`.
+- What happens to a key (engines, language switching, switch-key rules, not losing text) belongs in the shared core, not in a frontend; how an OS delivers keys and shows text belongs in the frontend. When a path or behaviour must differ per OS, take the OS as an argument so every OS's rule is tested everywhere, and update the OS table in `docs/platforms.md`.
 - A language engine only implements `InputEngine`; frontends and settings apps must work with any engine.
 - Tests in portable crates must not hard-code absolute paths or path separators (this has failed the Windows CI).
 - New third-party data: check its license, keep the original LICENSE in `data/<source>/`, record it in `THIRD_PARTY_LICENSES.md`.
@@ -59,6 +60,7 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `engine-h
 |---|---|
 | `docs/concept.md` | product concept, target user, what the popups and indicator should feel like |
 | `docs/decisions.md` | any design or product question: goals, decided choices, license notes |
+| `docs/platforms.md` | deciding whether logic belongs in the shared core or in an OS frontend; anything OS-dependent (paths, keys, repeat, locale); starting a Windows/macOS/GNOME frontend |
 | `docs/architecture.md` | touching a frontend or protocol (KWin, GNOME, Windows, macOS), config format, settings GUI, packaging |
 | `docs/status.md` | choosing what to do next: roadmap, what exists, known gaps, unfinished branches |
 | `docs/development.md` | trying the daemon in KWin, recovery steps, build dependencies |

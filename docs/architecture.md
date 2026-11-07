@@ -1,6 +1,7 @@
 # easime 아키텍처와 플랫폼별 연결 방식
 
 플랫폼 프로토콜, crate 구성, 핵심 trait, 설정 GUI, 패키징을 다룬다.
+**무엇이 모든 OS 공통 코어이고 무엇이 OS마다 다른지는 [platforms.md](platforms.md)에 있다.**
 
 ## 플랫폼별 연결 방식
 ### Linux — KDE Plasma 6 (Wayland) ★ 최우선, 사용자의 주 환경 (Fedora, Plasma 6.8.x)
@@ -35,7 +36,8 @@ Cargo workspace. **언어 엔진은 OS 독립**, 프론트엔드와 설정 GUI�
 
 ```
 crates/
-  ime-core/          공통 타입, InputEngine trait, LanguageSwitcher (의존성 최소, OS 독립)
+  ime-core/          공통 타입, InputEngine trait, LanguageSwitcher, CandidateList (의존성 최소, OS 독립)
+  ime-session/       모든 프런트엔드가 쓰는 Session: 엔진 구성, 언어 순환, 전환 키 판정, 사전 공유 (OS 독립)
   engine-hangul/     순수 Rust 한글 조합 엔진 (외부 의존성 없음)
   engine-japanese/   로마자→가나, 사전 기반 변환(Mozc OSS 사전), 사전 로더
   easime-dict-tool/  Mozc 사전 → easime 이진 사전 변환 도구 (OS 독립)
