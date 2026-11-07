@@ -4,5 +4,7 @@
 //! ignored, so older and newer versions can share one file.
 
 mod model;
+mod store;
 
 pub use model::{BackspaceUnit, Config, Korean, Shortcuts, ToggleKey};
+pub use store::{StoreError, config_path};
