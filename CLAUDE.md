@@ -156,12 +156,16 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - `engine-japanese`: 로마자 → 히라가나/가타카나 (Enter 확정, Space 확정+공백, Esc 취소). 한자 변환은 아직 없음
   - `frontend-wayland` + `easime` 데몬: KWin `zwp_input_method_v1` 클라이언트, 키 반복(자체 타이머와 컴포지터 `repeated`),
     한/영 키와 오른쪽 Alt 탭 전환, Caps Lock 무시, 언어 순환, 설정 읽기
+  - 커서 옆 상태 박스(`frontend-wayland/src/{indicator,font,panel}.rs`): 언어 전환과 포커스 진입(activate) 때 `A`/`한`/`あ`/`中`
+    48x48 박스를 `indicator_ms`(기본 1000) 동안 표시. `zwp_input_panel_surface_v1.set_overlay_panel`(KWin이 커서 사각형 바로 아래에 배치,
+    키보드 포커스 안 가짐, 빈 input region), 표시/숨김은 버퍼 attach/null attach, `[appearance] indicator_box`로 끄기.
+    KWin 소스로만 확인했고 실제 KWin에서는 아직 못 봤다. text-input-v1 앱은 커서 위치를 보내지 않아 창 왼쪽 위에 뜰 수 있다.
   - CI: Linux는 전체, Windows/macOS는 OS 독립 crate만 (`fmt`, `clippy -D warnings`, `test`)
 - **가짜 KWin 테스트 하네스**: `crates/frontend-wayland/tests/` (순수 Rust Wayland 서버로 activate → 키 입력 → commit/preedit를
   검증). 실제 KWin이 없어도 프로토콜 흐름을 시험할 수 있고, 이미 실제 버그(`KeyState::Repeated` 처리)를 잡았다.
 - **아직 실제 KWin에서 시험하지 않았다.** 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
   (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
-- 알려진 미구현: 설정 변경 즉시 반영(파일 감시), 트레이/상태 박스, 후보창, 설정 GUI, XIM, 일본어 한자 변환, 중국어, 패키징
+- 알려진 미구현: 트레이 아이콘, 후보창, 설정 GUI, XIM, 일본어 한자 변환, 중국어, 패키징
 - 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
 
 ## 작업 습관 (이 저장소에서 있었던 실수에서)
