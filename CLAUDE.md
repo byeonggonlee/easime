@@ -168,6 +168,14 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 - 알려진 미구현: 트레이 아이콘, 후보창, 설정 GUI, XIM, 일본어 한자 변환, 중국어, 패키징
 - 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
 
+## 중단된 작업 (이어서 할 것)
+토큰 소진으로 2026-11-07에 아래 두 작업을 중간에 멈췄다. 커밋은 로컬 브랜치/워크트리에 남아 있고 `main`에는 아직 없다
+(`git branch -a`, `git worktree list`로 확인. 워크트리: `.claude/worktrees/`).
+- `settings-gui-kde`: Kirigami 설정 앱(`settings/kde`, 워크스페이스에서 제외). 완성 여부는 브랜치 로그와 스크린샷으로 확인할 것.
+- `candidate-window`: 후보창(입력 패널 공유, 페이지 나누기). 완성 여부는 브랜치 로그로 확인할 것.
+- 병합 방법: `git cherry-pick <첫커밋>^..<마지막커밋>` 후 `fmt`/`clippy -D warnings`/`test --workspace` 확인, 푸시, CI 확인.
+- 다음 후보 작업: 사전을 데몬에 연결(`engine_japanese::load_default()`, 시작 시 한 번, 약 0.1초), 트레이 아이콘, XIM, 실제 KWin 시험.
+
 ## 작업 습관 (이 저장소에서 있었던 실수에서)
 - 커밋은 작게, 커밋 직후 푸시. 검사(`fmt`/`clippy -D warnings`/`test`)는 `&&`로 이어서 실패하면 커밋되지 않게 한다.
 - `git add -A` 대신 경로를 지정한다 (에이전트 워크트리가 딸려 들어간 적이 있음).
