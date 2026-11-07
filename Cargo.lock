@@ -176,10 +176,10 @@ version = "0.1.0"
 dependencies = [
  "ab_glyph",
  "easime-config",
- "engine-hangul",
  "engine-japanese",
  "fontdb",
  "ime-core",
+ "ime-session",
  "png",
  "rustix",
  "wayland-backend",
@@ -201,6 +201,16 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "toml",
+]
+
+[[package]]
+name = "ime-session"
+version = "0.1.0"
+dependencies = [
+ "easime-config",
+ "engine-hangul",
+ "engine-japanese",
+ "ime-core",
 ]
 
 [[package]]

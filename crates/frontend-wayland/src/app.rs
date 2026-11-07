@@ -6,6 +6,11 @@
 //! 2. We `grab_keyboard`, so every key goes to us first.
 //! 3. For each key we either consume it (engine composes, we send
 //!    `commit_string` / `preedit_string`) or forward it back with `key`.
+//!
+//! **OS-specific: Linux/Wayland.** The protocol, the keyboard grab, the keymap and our own
+//! key repeat live here. What decides what happens to a key (the engines, the
+//! language cycle, the switch key) is shared, in `ime-session`. See
+//! `docs/platforms.md` for what another OS has to provide instead.
 
 use crate::log;
 use crate::panel::Panel;
@@ -15,13 +20,12 @@ use crate::protocol::client::zwp_input_panel_surface_v1::ZwpInputPanelSurfaceV1;
 use crate::protocol::client::zwp_input_panel_v1::ZwpInputPanelV1;
 use crate::repeat::RepeatInfo;
 use crate::timer::Timer;
-use crate::toggle::{Decision, ToggleTracker};
-use crate::translate::{case_from_shift, is_modifier_keysym, translate};
+use crate::translate::{case_from_shift, is_modifier_keysym, toggle_role, translate};
 use crate::watch::ConfigWatcher;
-use easime_config::{BackspaceUnit, Config};
-use engine_hangul::{BackspaceMode, HangulEngine};
-use engine_japanese::{Dictionary, JapaneseEngine};
-use ime_core::{EngineOutput, InputEngine, Key, KeyEvent, Language, LanguageSwitcher, Modifiers};
+use easime_config::Config;
+use engine_japanese::Dictionary;
+use ime_core::{EngineOutput, Key, KeyEvent, Modifiers};
+use ime_session::{Decision, Held, JapaneseDictionary, Session, ToggleTracker};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::io::Errno;
 use std::collections::HashMap;
@@ -31,7 +35,7 @@ use std::io::ErrorKind;
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use wayland_client::backend::WaylandError;
 use wayland_client::globals::{GlobalList, GlobalListContents, registry_queue_init};
 use wayland_client::protocol::wl_buffer::WlBuffer;
@@ -95,10 +99,9 @@ struct Swallowed {
 }
 
 pub(crate) struct App {
-    /// One engine per enabled language. English has none: keys pass through.
-    engines: HashMap<Language, Box<dyn InputEngine>>,
-    /// Which language is active and what the toggle key switches to next.
-    switcher: LanguageSwitcher,
+    /// The engines, the active language and the rules around them (shared by
+    /// every frontend, in `ime-session`).
+    session: Session,
     context: Option<ZwpInputMethodContextV1>,
     keyboard: Option<WlKeyboard>,
     /// Serial of the latest `commit_state`, used for text requests.
@@ -110,7 +113,9 @@ pub(crate) struct App {
     repeat_info: RepeatInfo,
     /// The consumed key our own timer is currently repeating.
     repeating: Option<u32>,
-    toggle: ToggleTracker,
+    /// The switch key. The key is the evdev code; the token is what forwarding
+    /// a held-back press to the application needs: its serial and time.
+    toggle: ToggleTracker<u32, (u32, u32)>,
     /// Fires when a consumed key should repeat.
     timer: Timer,
     /// Where settings are re-read from when the file changes, if watched.
@@ -121,8 +126,6 @@ pub(crate) struct App {
     /// Fires when the indicator box has been shown long enough.
     indicator_timer: Timer,
     candidates_visible: bool,
-    /// Kept for engines built when the settings change.
-    dictionary: JapaneseDictionary,
 }
 
 /// The `[appearance]` settings the indicator box needs.
@@ -147,125 +150,11 @@ struct Settings {
     watcher: ConfigWatcher,
 }
 
-/// The Japanese dictionary, shared by every Japanese engine we build.
-///
-/// Settings changes rebuild the engines, but the dictionary (tens of
-/// megabytes, about 0.1 s to open) is only loaded once, when the first
-/// Japanese engine is needed.
-pub(crate) struct JapaneseDictionary {
-    loaded: Option<Arc<dyn Dictionary>>,
-}
-
-impl JapaneseDictionary {
-    /// Load the installed dictionaries when first needed.
-    pub(crate) fn installed() -> Self {
-        Self { loaded: None }
-    }
-
-    /// Use `dictionary` and never look at the disk (tests).
-    pub(crate) fn fixed(dictionary: Arc<dyn Dictionary>) -> Self {
-        Self {
-            loaded: Some(dictionary),
-        }
-    }
-
-    fn get(&mut self) -> Arc<dyn Dictionary> {
-        self.loaded.get_or_insert_with(load_installed).clone()
-    }
-}
-
-/// Open the dictionaries in the user and system directories and say in the
-/// log what was found: with no dictionary conversion only offers kana, and
-/// the log is where that can be told apart from "the word is not in it".
-fn load_installed() -> Arc<dyn Dictionary> {
-    let started = Instant::now();
-    let dirs = engine_japanese::loader::default_dictionary_dirs();
-    let report = engine_japanese::load_dictionaries(&dirs);
-    for (path, why) in &report.failed {
-        log!(
-            "japanese dictionary: could not load {}: {why}",
-            path.display()
-        );
-    }
-    if report.skipped_lines > 0 {
-        log!(
-            "japanese dictionary: skipped {} malformed lines in text files",
-            report.skipped_lines
-        );
-    }
-    if report.loaded.is_empty() {
-        let searched: Vec<_> = dirs.iter().map(|d| d.display().to_string()).collect();
-        log!(
-            "japanese dictionary: none loaded (looked in {}); conversion offers only kana",
-            searched.join(", ")
-        );
-    } else {
-        let files: Vec<_> = report
-            .loaded
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
-        log!(
-            "japanese dictionary: loaded {} in {} ms",
-            files.join(", "),
-            started.elapsed().as_millis()
-        );
-    }
-    Arc::new(report.dictionary)
-}
-
-/// Engines for the enabled languages and the cycle over them.
-///
-/// Only languages that have an engine take part in the cycle.
-fn build_engines(
-    config: &Config,
-    dictionary: &mut JapaneseDictionary,
-) -> (HashMap<Language, Box<dyn InputEngine>>, LanguageSwitcher) {
-    let backspace = match config.korean.backspace {
-        BackspaceUnit::Jamo => BackspaceMode::Jamo,
-        BackspaceUnit::Syllable => BackspaceMode::Syllable,
-    };
-    let mut engines: HashMap<Language, Box<dyn InputEngine>> = HashMap::new();
-    let system = easime_config::system_languages();
-    let enabled = config.languages.resolved(&system);
-    if config.languages.follows_system() {
-        log!("languages not chosen in the settings; following the system language: {enabled:?}");
-    } else {
-        log!("languages chosen in the settings: {enabled:?}");
-    }
-    for &language in &enabled {
-        match language {
-            Language::Korean => {
-                engines.insert(
-                    language,
-                    Box::new(HangulEngine::with_backspace_mode(backspace)),
-                );
-            }
-            Language::Japanese => {
-                engines.insert(
-                    language,
-                    Box::new(JapaneseEngine::with_dictionary(Box::new(dictionary.get()))),
-                );
-            }
-            Language::English | Language::ChineseSimplified | Language::ChineseTraditional => {
-                log!("language {language:?} is not available yet, ignoring");
-            }
-        }
-    }
-    let usable: Vec<Language> = enabled
-        .iter()
-        .copied()
-        .filter(|l| engines.contains_key(l))
-        .collect();
-    (engines, LanguageSwitcher::new(&usable))
-}
-
 impl App {
-    fn new(config: &Config, mut dictionary: JapaneseDictionary) -> std::io::Result<Self> {
-        let (engines, switcher) = build_engines(config, &mut dictionary);
+    fn new(config: &Config, dictionary: JapaneseDictionary) -> std::io::Result<Self> {
+        let session = Session::new(config, dictionary, Box::new(|message| log!("{message}")));
         Ok(Self {
-            engines,
-            switcher,
+            session,
             context: None,
             keyboard: None,
             commit_serial: 0,
@@ -281,7 +170,6 @@ impl App {
             indicator: IndicatorSettings::from_config(config),
             indicator_timer: Timer::new()?,
             candidates_visible: false,
-            dictionary,
         })
     }
 
@@ -289,14 +177,8 @@ impl App {
     /// first, and the current language is kept if it is still enabled.
     fn apply_config(&mut self, config: &Config) {
         log!("applying new settings");
-        let leftover = self.engine().map(|e| e.flush()).unwrap_or_default();
-        let previous = self.switcher.current();
         self.stop_repeat();
-
-        let (engines, mut switcher) = build_engines(config, &mut self.dictionary);
-        switcher.select(previous);
-        self.engines = engines;
-        self.switcher = switcher;
+        let leftover = self.session.apply_config(config);
         self.toggle = ToggleTracker::with_setting(config.shortcuts.toggle_key);
         self.set_indicator(IndicatorSettings::from_config(config));
 
@@ -325,7 +207,7 @@ impl App {
         let Some(panel) = &mut self.panel else {
             return;
         };
-        panel.show(self.switcher.current());
+        panel.show(self.session.language());
         // A zero duration would disarm the timer; show it for a moment anyway.
         let duration = self.indicator.duration.max(Duration::from_millis(1));
         if self.indicator_timer.arm(duration, Duration::ZERO).is_err() {
@@ -368,12 +250,6 @@ impl App {
             // Keep what we have: a half-edited file must not break typing.
             Err(e) => log!("ignoring unreadable settings: {e}"),
         }
-    }
-
-    /// The engine of the active language, or `None` for English.
-    fn engine(&mut self) -> Option<&mut (dyn InputEngine + 'static)> {
-        let language = self.switcher.current();
-        self.engines.get_mut(&language).map(|e| e.as_mut())
     }
 
     /// The repeat timer fired: replay the repeating key once per expiration.
@@ -420,10 +296,9 @@ impl App {
         let Some(event) = sw.event else {
             return;
         };
-        let Some(engine) = self.engine() else {
+        let Some(output) = self.session.process_key(event) else {
             return;
         };
-        let output = engine.process_key(event);
         let handled = output.handled;
         self.apply(output);
         if !handled {
@@ -438,9 +313,7 @@ impl App {
         self.release_focus();
         self.keyboard = Some(context.grab_keyboard(qh, ()));
         self.context = Some(context);
-        for engine in self.engines.values_mut() {
-            engine.reset();
-        }
+        self.session.reset();
         self.swallowed.clear();
         self.toggle.clear();
         self.stop_repeat();
@@ -458,7 +331,7 @@ impl App {
         self.candidates_visible = false;
         self.hide_indicator();
         self.stop_repeat();
-        let leftover = self.engine().map(|e| e.flush()).unwrap_or_default();
+        let leftover = self.session.flush();
         // Release the grab first. The proxy reports version 1 (it inherits the
         // context's), but the compositor's wl_keyboard is newer and the client
         // library does not enforce `since` on requests.
@@ -585,9 +458,15 @@ impl App {
             }
         };
 
-        let (held_back, decision) = self.toggle.on_press(serial, time, key, keysym);
-        if let Some(p) = held_back {
-            self.forward_key(p.serial, p.time, p.key, KeyAction::Pressed);
+        let (held_back, decision) = self
+            .toggle
+            .on_press(key, toggle_role(keysym), (serial, time));
+        if let Some(Held {
+            key,
+            token: (serial, time),
+        }) = held_back
+        {
+            self.forward_key(serial, time, key, KeyAction::Pressed);
         }
         match decision {
             Decision::Toggle => {
@@ -618,12 +497,11 @@ impl App {
             return;
         }
         let was_converting = self.candidates_visible;
-        let Some(engine) = self.engine() else {
+        let Some(output) = self.session.process_key(event) else {
             // English: the application gets the key untouched.
             self.forward_key(serial, time, key, KeyAction::Pressed);
             return;
         };
-        let output = engine.process_key(event);
         let handled = output.handled;
         self.apply(output);
         if handled {
@@ -649,9 +527,8 @@ impl App {
     }
 
     fn toggle_language(&mut self) {
-        // Finish the text in progress before switching.
-        let leftover = self.engine().map(|e| e.flush()).unwrap_or_default();
-        let language = self.switcher.advance();
+        // Finishes the text in progress before switching.
+        let (leftover, language) = self.session.switch_language();
         log!("language -> {language:?}");
         self.apply(EngineOutput {
             commit: leftover,
@@ -674,7 +551,7 @@ impl App {
     /// Send the engine's result to the application.
     fn apply(&mut self, mut output: EngineOutput) {
         if let Some(list) = output.candidates.as_ref() {
-            let language = self.switcher.current();
+            let language = self.session.language();
             // Korean keeps the Hangul on screen while converting, so the preedit
             // is the reading; Japanese shows the chosen candidate there.
             let reading = if list.reading.is_empty() {
@@ -691,8 +568,8 @@ impl App {
                 self.candidates_visible = true;
             } else {
                 // Never allow a selection that the user could not see.
-                if let Some(engine) = self.engine() {
-                    output = engine.process_key(KeyEvent::new(Key::Escape));
+                if let Some(taken_back) = self.session.cancel_conversion() {
+                    output = taken_back;
                 }
                 self.candidates_visible = false;
                 if let Some(panel) = &mut self.panel {
@@ -797,7 +674,7 @@ impl Dispatch<ZwpInputMethodContextV1, ()> for App {
             }
             zwp_input_method_context_v1::Event::Reset => {
                 // The application discarded its text state.
-                if let Some(engine) = app.engine() {
+                if let Some(engine) = app.session.engine() {
                     engine.reset();
                 }
                 app.candidates_visible = false;

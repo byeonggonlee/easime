@@ -5,9 +5,11 @@
 //! optionally, a font, and it returns pixels. Finding a font is the job of
 //! [`crate::font`]. Without a font (or if the font lacks the glyph) the box is
 //! still drawn, just empty, because a missing font must never break typing.
+//!
+//! **Portable drawing, shared letter.** Which glyph stands for a language is shared
+//! (`ime_session::indicator`); this module only draws it.
 
 use ab_glyph::{Font, PxScale, point};
-use ime_core::Language;
 
 /// Edge length of the box in logical pixels.
 pub const BOX_SIZE: u32 = 48;
@@ -21,17 +23,8 @@ const RADIUS: f32 = 0.22;
 /// Glyph height (font size) as a fraction of the box size.
 const GLYPH_SIZE: f32 = 0.64;
 
-/// The glyph shown for a language.
-pub fn glyph_for(language: Language) -> char {
-    match language {
-        Language::English => 'A',
-        Language::Korean => '한',
-        Language::Japanese => 'あ',
-        // Both scripts show the same letter for now; telling them apart in the
-        // box is still open (docs/decisions.md).
-        Language::ChineseSimplified | Language::ChineseTraditional => '中',
-    }
-}
+/// The glyph shown for a language (shared by every frontend).
+pub use ime_session::indicator::language_glyph as glyph_for;
 
 /// An ARGB8888 image as `wl_shm` wants it: little-endian 32-bit words with
 /// premultiplied alpha, so the bytes are B, G, R, A.
@@ -190,6 +183,7 @@ fn draw_glyph<F: Font>(data: &mut [u8], size: u32, glyph: char, font: &F) {
 mod tests {
     use super::*;
     use ab_glyph::FontVec;
+    use ime_core::Language;
 
     fn empty_box() -> Bitmap {
         render::<FontVec>('A', None, BOX_SIZE)
@@ -197,11 +191,11 @@ mod tests {
 
     #[test]
     fn glyphs_per_language() {
-        assert_eq!(glyph_for(Language::English), 'A');
-        assert_eq!(glyph_for(Language::Korean), '한');
-        assert_eq!(glyph_for(Language::Japanese), 'あ');
-        assert_eq!(glyph_for(Language::ChineseSimplified), '中');
-        assert_eq!(glyph_for(Language::ChineseTraditional), '中');
+        // The mapping itself is tested in ime-session; the box must be able to
+        // draw each of its glyphs.
+        for language in [Language::English, Language::Korean, Language::Japanese] {
+            assert_ne!(glyph_for(language), ' ');
+        }
     }
 
     #[test]

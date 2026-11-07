@@ -1,4 +1,9 @@
 //! A numbered candidate page drawn into the existing input-panel surface.
+//!
+//! **OS-specific: drawing.** What is listed (items, selection, page) is shared
+//! (`ime_core::CandidateList`); painting it into a pixel buffer is this
+//! frontend's. The painter itself needs nothing from Wayland and another frontend
+//! could reuse it, but none does yet (`docs/platforms.md`).
 
 use crate::font::Fonts;
 use crate::indicator::Bitmap;
@@ -66,8 +71,7 @@ impl Painter {
         {
             return None;
         }
-        let start = list.selected / CandidateList::PAGE_SIZE * CandidateList::PAGE_SIZE;
-        let end = (start + CandidateList::PAGE_SIZE).min(list.items.len());
+        let (start, end) = (list.page_start(), list.page_end());
         let height = HEADER + (end - start) as u32 * ROW + FOOTER;
         let mut bitmap = Bitmap {
             width: WIDTH,
@@ -135,8 +139,7 @@ impl Painter {
                 );
             }
         }
-        let page = start / CandidateList::PAGE_SIZE + 1;
-        let pages = list.items.len().div_ceil(CandidateList::PAGE_SIZE);
+        let (page, pages) = (list.page_number(), list.page_count());
         self.text(
             &fonts,
             &mut bitmap,

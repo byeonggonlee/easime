@@ -3,6 +3,9 @@
 //! KWin starts the input method itself, so stderr is easy to lose. Messages go
 //! to `$XDG_STATE_HOME/easime/easime.log` (default `~/.local/state/easime/`),
 //! which is truncated on every start.
+//!
+//! **OS-specific: Linux.** The log path follows the XDG state directory. Windows and
+//! macOS have their own places (`docs/platforms.md`).
 
 use std::ffi::OsString;
 use std::fs::{self, File};

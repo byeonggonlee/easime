@@ -1,4 +1,7 @@
 //! Watch the settings file so changes apply without restarting.
+//!
+//! **OS-specific: Linux** (`inotify`). Windows would use `ReadDirectoryChangesW`, macOS
+//! FSEvents or kqueue (`docs/platforms.md`).
 
 use rustix::fs::inotify::{self, CreateFlags, ReadFlags, WatchFlags};
 use rustix::io::Errno;

@@ -33,6 +33,9 @@
 //!   box when the field loses focus. Text-input-v1 clients send no cursor
 //!   rectangle at all, so for them the box lands at the top-left of the
 //!   window.
+//!
+//! **OS-specific: Wayland.** The input panel surface is a KWin feature; other OSes
+//! show the box and the candidate list with their own windows.
 
 use crate::app::App;
 use crate::indicator::{BOX_SIZE, Bitmap, glyph_for, render};

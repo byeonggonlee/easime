@@ -2,6 +2,11 @@
 //!
 //! Keysym values are written out as plain numbers so this module is pure and
 //! easy to unit test. See `xkbcommon-keysyms.h` for the names.
+//!
+//! **OS-specific: X11/xkb keysyms.** Windows (virtual-key codes) and macOS (key
+//! codes) need their own tables that produce the same `ime_core::Key`s. The role a
+//! key plays for the language switch ([`toggle_role`]) is decided here too, from the
+//! keysym, because only the frontend knows its key codes.
 
 use ime_core::{Key, KeyEvent, Modifiers};
 
@@ -48,6 +53,17 @@ pub fn case_from_shift(keysym: u32, shift: bool) -> u32 {
         0x41..=0x5a if !shift => keysym + 0x20,
         0x61..=0x7a if shift => keysym - 0x20,
         _ => keysym,
+    }
+}
+
+/// What the key with this keysym is to the language switch (see
+/// `ime_session::toggle`). Right Alt only counts as itself: AltGr
+/// (`ISO_Level3_Shift`) is a different keysym and never switches language.
+pub fn toggle_role(keysym: u32) -> ime_session::KeyRole {
+    match keysym {
+        KEY_HANGUL => ime_session::KeyRole::HangulKey,
+        KEY_ALT_R => ime_session::KeyRole::RightAlt,
+        _ => ime_session::KeyRole::Other,
     }
 }
 
@@ -99,6 +115,19 @@ mod tests {
         assert_eq!(translate(0xff34, NONE).key, Key::Hanja);
         assert_eq!(translate(0xff55, NONE).key, Key::PageUp);
         assert_eq!(translate(0xff56, NONE).key, Key::PageDown);
+    }
+
+    #[test]
+    fn the_switch_keys_are_told_apart_by_keysym() {
+        use ime_session::KeyRole;
+        assert_eq!(toggle_role(KEY_HANGUL), KeyRole::HangulKey);
+        assert_eq!(toggle_role(KEY_ALT_R), KeyRole::RightAlt);
+        assert_eq!(toggle_role(0x61), KeyRole::Other);
+        assert_eq!(
+            toggle_role(0xfe03),
+            KeyRole::Other,
+            "AltGr is not right Alt"
+        );
     }
 
     #[test]

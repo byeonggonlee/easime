@@ -1,5 +1,8 @@
 //! A repeating timer backed by `timerfd`, so it can be polled together with
 //! the Wayland connection.
+//!
+//! **OS-specific: Linux** (`timerfd`, polled together with the Wayland socket). Other
+//! OSes use their own timers (`docs/platforms.md`).
 
 use rustix::io::Errno;
 use rustix::time::{

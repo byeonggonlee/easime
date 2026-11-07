@@ -44,7 +44,29 @@ pub struct CandidateList {
 }
 
 impl CandidateList {
+    /// Candidates per page. Every page is numbered 1 to `PAGE_SIZE` and the
+    /// number keys pick from the page on screen, on every OS.
     pub const PAGE_SIZE: usize = 9;
+
+    /// Index of the first candidate on the page that holds the selection.
+    pub fn page_start(&self) -> usize {
+        self.selected / Self::PAGE_SIZE * Self::PAGE_SIZE
+    }
+
+    /// One past the index of the last candidate on that page.
+    pub fn page_end(&self) -> usize {
+        (self.page_start() + Self::PAGE_SIZE).min(self.items.len())
+    }
+
+    /// Number of the page holding the selection, counted from 1.
+    pub fn page_number(&self) -> usize {
+        self.page_start() / Self::PAGE_SIZE + 1
+    }
+
+    /// How many pages there are.
+    pub fn page_count(&self) -> usize {
+        self.items.len().div_ceil(Self::PAGE_SIZE)
+    }
 }
 
 /// What an engine produced in response to one key event.
@@ -75,6 +97,36 @@ pub trait InputEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn list(items: usize, selected: usize) -> CandidateList {
+        CandidateList {
+            items: (0..items).map(|n| n.to_string()).collect(),
+            selected,
+            ..CandidateList::default()
+        }
+    }
+
+    #[test]
+    fn the_page_follows_the_selection() {
+        let first = list(11, 0);
+        assert_eq!((first.page_start(), first.page_end()), (0, 9));
+        assert_eq!((first.page_number(), first.page_count()), (1, 2));
+        let eighth = list(11, 8);
+        assert_eq!((eighth.page_start(), eighth.page_end()), (0, 9));
+        let ninth = list(11, 9);
+        assert_eq!((ninth.page_start(), ninth.page_end()), (9, 11));
+        assert_eq!((ninth.page_number(), ninth.page_count()), (2, 2));
+    }
+
+    #[test]
+    fn a_full_last_page_and_an_empty_list() {
+        let exact = list(18, 17);
+        assert_eq!((exact.page_start(), exact.page_end()), (9, 18));
+        assert_eq!(exact.page_count(), 2);
+        let empty = list(0, 0);
+        assert_eq!((empty.page_start(), empty.page_end()), (0, 0));
+        assert_eq!(empty.page_count(), 0);
+    }
 
     #[test]
     fn preedit_cursor_counts_chars_not_bytes() {

@@ -7,6 +7,10 @@
 //! regional font), and fall back to any installed font that has the glyph.
 //! If nothing has it, the caller draws an empty box. This module never panics
 //! on missing or broken fonts.
+//!
+//! **Partly portable.** `fontdb` and `ab_glyph` work on every OS, but the family names
+//! below are the ones Linux desktops have. Windows and macOS ship their own CJK
+//! fonts, so a frontend there needs its own list (`docs/platforms.md`).
 
 use ab_glyph::{Font, FontVec, VariableFont};
 use fontdb::{Database, Family, Query, Weight};

@@ -10,7 +10,7 @@ authors.workspace = true
 [dependencies]
 ime-core = { path = "../ime-core" }
 easime-config = { path = "../easime-config" }
-engine-hangul = { path = "../engine-hangul" }
+ime-session = { path = "../ime-session" }
 engine-japanese = { path = "../engine-japanese" }
 wayland-client = "0.31"
 wayland-scanner = "0.31"

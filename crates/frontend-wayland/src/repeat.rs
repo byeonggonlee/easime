@@ -1,4 +1,9 @@
 //! Key repeat timing.
+//!
+//! **OS-specific: Wayland.** An input method here gets the keys from a grab and has
+//! to repeat them itself (or let the compositor do it). On Windows and macOS the OS
+//! repeats keys before the input method sees them, so this is expected not to be
+//! needed there (not yet verified).
 
 use std::time::Duration;
 
