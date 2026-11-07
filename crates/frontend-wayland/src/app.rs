@@ -362,7 +362,6 @@ impl App {
         self.swallowed.clear();
         self.toggle.clear();
         self.stop_repeat();
-        self.show_indicator();
     }
 
     fn deactivate(&mut self) {

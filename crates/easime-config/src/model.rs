@@ -69,7 +69,7 @@ pub struct Korean {
 #[serde(default)]
 pub struct Appearance {
     /// Show a small box with the language glyph next to the text cursor when
-    /// the language is switched and when a text field gains focus.
+    /// the user switches language. Focusing a text field does not show it.
     pub indicator_box: bool,
     /// How long the box stays visible, in milliseconds.
     pub indicator_ms: u32,

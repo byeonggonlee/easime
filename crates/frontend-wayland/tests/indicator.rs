@@ -70,9 +70,29 @@ fn is_shown_commit(e: &PanelEv) -> bool {
 }
 
 #[test]
-fn activate_shows_the_box_with_the_panel_role_set_before_the_first_commit() {
+fn focusing_and_typing_do_not_show_a_language_box() {
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
+    fake.tap_all(&[KEY_G, KEY_K]);
+    let events = fake.settle_panel();
+    assert!(!events.iter().any(is_shown_commit), "{events:#?}");
+    assert!(!fake.indicator_mapped());
+
+    fake.deactivate();
+    fake.activate();
+    let events = fake.settle_panel();
+    assert!(!events.iter().any(is_shown_commit), "{events:#?}");
+    assert!(!fake.indicator_mapped());
+
+    tap(&mut fake, KEY_HANGEUL);
+    assert!(fake.wait_for_indicator_shown().visible_pixels() > 0);
+}
+
+#[test]
+fn toggling_sets_the_panel_role_before_the_first_visible_commit() {
+    let mut fake = Fake::start_with(config(LONG_MS));
+    fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     let events = fake.wait_for_indicator_events();
 
     let position = |wanted: &dyn Fn(&PanelEv) -> bool| {
@@ -121,6 +141,7 @@ fn activate_shows_the_box_with_the_panel_role_set_before_the_first_commit() {
 fn the_box_has_the_buffer_size_the_pool_and_buffer_requests_announced() {
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     let events = fake.wait_for_indicator_events();
     assert!(
         events.contains(&PanelEv::ShmPool { size: 48 * 48 * 4 }),
@@ -141,16 +162,16 @@ fn the_box_has_the_buffer_size_the_pool_and_buffer_requests_announced() {
 fn toggling_shows_the_box_of_the_new_language_and_reuses_surface_and_buffers() {
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
-    let korean = fake.wait_for_indicator_shown();
-
     tap(&mut fake, KEY_HANGEUL); // Korean -> Japanese
     let japanese = fake.wait_for_indicator_shown();
     tap(&mut fake, KEY_HANGEUL); // Japanese -> English
     let english = fake.wait_for_indicator_shown();
     tap(&mut fake, KEY_HANGEUL); // English -> Korean
-    let korean_again = fake.wait_for_indicator_shown();
+    let korean = fake.wait_for_indicator_shown();
+    tap(&mut fake, KEY_HANGEUL); // Korean -> Japanese
+    let japanese_again = fake.wait_for_indicator_shown();
 
-    for shot in [&korean, &japanese, &english, &korean_again] {
+    for shot in [&korean, &japanese, &english, &japanese_again] {
         assert_eq!((shot.width, shot.height), (48, 48));
         assert!(shot.visible_pixels() > 0);
     }
@@ -159,7 +180,7 @@ fn toggling_shows_the_box_of_the_new_language_and_reuses_surface_and_buffers() {
         assert_ne!(digests[0], digests[1], "한 and あ look the same");
         assert_ne!(digests[0], digests[2], "한 and A look the same");
         assert_ne!(digests[1], digests[2], "あ and A look the same");
-        assert_eq!(korean.digest(), korean_again.digest());
+        assert_eq!(japanese.digest(), japanese_again.digest());
     }
 
     // Everything was created once: one surface and role, one buffer per glyph.
@@ -180,6 +201,7 @@ fn toggling_shows_the_box_of_the_new_language_and_reuses_surface_and_buffers() {
 fn only_one_surface_and_one_buffer_per_glyph_are_ever_created() {
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     let mut events = fake.wait_for_indicator_events();
     for _ in 0..3 {
         tap(&mut fake, KEY_HANGEUL);
@@ -200,6 +222,7 @@ fn only_one_surface_and_one_buffer_per_glyph_are_ever_created() {
 fn the_box_disappears_after_the_configured_time() {
     let mut fake = Fake::start_with(config(50));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     fake.wait_for_indicator_shown();
     let shown_at = Instant::now();
     assert!(fake.indicator_mapped());
@@ -223,6 +246,7 @@ fn the_box_disappears_after_the_configured_time() {
 fn the_box_stays_while_the_time_has_not_passed() {
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     fake.wait_for_indicator_shown();
     std::thread::sleep(Duration::from_millis(80));
     let events = fake.settle_panel();
@@ -234,6 +258,7 @@ fn the_box_stays_while_the_time_has_not_passed() {
 fn the_box_can_be_shown_again_after_it_disappeared() {
     let mut fake = Fake::start_with(config(40));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     fake.wait_for_indicator_shown();
     fake.wait_for_indicator_hidden();
     fake.take_panel_events();
@@ -248,14 +273,19 @@ fn the_box_can_be_shown_again_after_it_disappeared() {
 fn losing_focus_hides_the_box_at_once() {
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     fake.wait_for_indicator_shown();
     fake.deactivate();
     fake.wait_for_indicator_hidden();
     assert!(!fake.indicator_mapped());
 
-    // Gaining focus again shows it again.
+    // Refocusing must not remap the box. Only a new language switch does.
     fake.take_panel_events();
     fake.activate();
+    let events = fake.settle_panel();
+    assert!(!events.iter().any(is_shown_commit), "{events:#?}");
+    assert!(!fake.indicator_mapped());
+    tap(&mut fake, KEY_HANGEUL);
     fake.wait_for_indicator_shown();
 }
 
@@ -263,7 +293,11 @@ fn losing_focus_hides_the_box_at_once() {
 fn the_box_does_not_get_in_the_way_of_typing() {
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
-    fake.wait_for_indicator_shown();
+    // Cycle back to Korean, showing the box through explicit switches.
+    for _ in 0..3 {
+        tap(&mut fake, KEY_HANGEUL);
+        fake.wait_for_indicator_shown();
+    }
     fake.take_requests();
 
     // No second keyboard grab or other input method requests came from it;
@@ -368,6 +402,7 @@ fn saving_settings_with_the_box_off_hides_it_and_stops_new_ones() {
     config.save_to(&path).unwrap();
     let mut fake = Fake::start_watching(config.clone(), Some(path.clone()));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     fake.wait_for_indicator_shown();
 
     let mut updated = config;
@@ -414,6 +449,7 @@ fn saving_a_new_duration_applies_to_the_next_box() {
     config.save_to(&path).unwrap();
     let mut fake = Fake::start_watching(config.clone(), Some(path.clone()));
     fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
     fake.wait_for_indicator_shown();
 
     let mut updated = config;
@@ -459,11 +495,12 @@ fn dump_the_boxes_as_png_when_asked() {
 
     let mut fake = Fake::start_with(config(LONG_MS));
     fake.activate();
-    let mut wire = vec![("korean", fake.wait_for_indicator_shown())];
     tap(&mut fake, KEY_HANGEUL);
-    wire.push(("japanese", fake.wait_for_indicator_shown()));
+    let mut wire = vec![("japanese", fake.wait_for_indicator_shown())];
     tap(&mut fake, KEY_HANGEUL);
     wire.push(("english", fake.wait_for_indicator_shown()));
+    tap(&mut fake, KEY_HANGEUL);
+    wire.push(("korean", fake.wait_for_indicator_shown()));
     for (name, shot) in &wire {
         write_png(&dir.join(format!("wire-{name}.png")), shot);
     }
