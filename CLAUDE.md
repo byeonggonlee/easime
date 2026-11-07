@@ -75,7 +75,8 @@ Cargo workspace. **언어 엔진은 OS 독립**, 프론트엔드와 설정 GUI�
 crates/
   ime-core/          공통 타입, InputEngine trait, LanguageSwitcher (의존성 최소, OS 독립)
   engine-hangul/     순수 Rust 한글 조합 엔진 (외부 의존성 없음)
-  engine-japanese/   로마자→가나, 나중에 Mozc 사전 기반 변환
+  engine-japanese/   로마자→가나, 사전 기반 변환(Mozc OSS 사전), 사전 로더
+  easime-dict-tool/  Mozc 사전 → easime 이진 사전 변환 도구 (OS 독립)
   engine-chinese/    (장기) 병음 → 간체/번체
   easime-config/     설정 스키마 + TOML 읽기/쓰기 + OS별 경로 (모든 프론트엔드와 GUI가 공유)
   easime-ffi/        Swift/C#용 바인딩 (UniFFI 검토) — 네이티브 설정 앱과 macOS 프론트엔드가 사용
@@ -153,7 +154,13 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 - 완료
   - `ime-core`(키 이벤트, `InputEngine`, `Language`/`LanguageSwitcher`), `easime-config`(TOML 설정, OS별 경로, 원자적 저장)
   - `engine-hangul`: 두벌식, 겹모음/겹받침, 자모/글자 단위 백스페이스
-  - `engine-japanese`: 로마자 → 히라가나/가타카나 (Enter 확정, Space 확정+공백, Esc 취소). 한자 변환은 아직 없음
+  - `engine-japanese`: 로마자 → 히라가나/가타카나, Space로 변환 시작(후보 순환 Space/↑↓, Enter 확정, Esc/Backspace 가나로 복귀, 숫자 선택).
+    사전: `Dictionary` trait, `MemoryDictionary`(TSV), `FileDictionary`(이진, 로드 약 0.1초), `LayeredDictionary`, `load_default()`.
+    **데몬에는 아직 연결하지 않았다** (연결 시 시작할 때 한 번 `engine_japanese::load_default()` 호출). 문절 분할/문맥 변환은 없다(단어 단위).
+  - `easime-dict-tool`: Mozc OSS 사전 → easime 이진 사전 변환기. `scripts/fetch-mozc-dictionary.sh`(고정 SHA, 체크섬 검증),
+    `scripts/build-dictionary.sh sample|mozc`. 라이선스(BSD-3, IPAdic, 오키나와 사전)는 `THIRD_PARTY_LICENSES.md`와 `data/mozc/`.
+  - 설정 즉시 반영: 설정 파일을 inotify로 감시해 한/영 키, 백스페이스 단위, 언어 목록을 재시작 없이 적용(깨진 파일은 무시)
+  - 패키징: `.deb`/`.rpm`(`crates/easime/Cargo.toml` 메타데이터), CI `packages` 잡(샘플 사전), 태그 `v*` 푸시 시 릴리스 워크플로(실제 Mozc 사전 포함)
   - `frontend-wayland` + `easime` 데몬: KWin `zwp_input_method_v1` 클라이언트, 키 반복(자체 타이머와 컴포지터 `repeated`),
     한/영 키와 오른쪽 Alt 탭 전환, Caps Lock 무시, 언어 순환, 설정 읽기
   - 커서 옆 상태 박스(`frontend-wayland/src/{indicator,font,panel}.rs`): 언어 전환과 포커스 진입(activate) 때 `A`/`한`/`あ`/`中`
@@ -165,7 +172,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   검증). 실제 KWin이 없어도 프로토콜 흐름을 시험할 수 있고, 이미 실제 버그(`KeyState::Repeated` 처리)를 잡았다.
 - **아직 실제 KWin에서 시험하지 않았다.** 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
   (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
-- 알려진 미구현: 트레이 아이콘, 후보창, 설정 GUI, XIM, 일본어 한자 변환, 중국어, 패키징
+- 알려진 미구현: 트레이 아이콘, 후보창(`candidate-window` 브랜치에 중간본), 설정 GUI(`settings-gui-kde` 브랜치에 중간본), XIM, 사전의 데몬 연결, 문절 변환, 중국어, GNOME/Windows/macOS
 - 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
 
 ## 중단된 작업 (이어서 할 것)
