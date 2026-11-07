@@ -20,3 +20,4 @@ rustix = { version = "1", features = ["event", "time"] }
 [dev-dependencies]
 wayland-server = "0.31"
 wayland-backend = "0.3"
+rustix = { version = "1", features = ["fs"] }
