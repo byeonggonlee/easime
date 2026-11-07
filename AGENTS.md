@@ -2,7 +2,14 @@
 
 Easy Eastern Asian IME: a Korean (then Japanese, Chinese) input method written from scratch in Rust, without ibus/fcitx.
 Platforms: Linux (KDE Plasma 6 Wayland first, then GNOME), then Windows, then macOS. License: MIT OR Apache-2.0.
-Status: early; not yet tried on a real KWin. The `docs/` files are in Korean; read them only when needed (table at the end).
+Status: early; a user confirmed basic Korean/English input on Fedora KDE. Broader testing is pending (see `docs/status.md`).
+
+## Required reading for every agent and role
+- At the start of every task, read [DESIGN.md](DESIGN.md) in full and [CLAUDE.md](CLAUDE.md). This applies to implementers, reviewers, and delegated agents, regardless of tool name.
+- Read [docs/concept.md](docs/concept.md) and [docs/decisions.md](docs/decisions.md) when making product decisions. Distinguish existing decisions, current observations, and new proposals in DESIGN.md.
+- For changes and reviews, apply the relevant guidance on text preservation, mode clarity, accessibility, language-specific typography, and recovery. Preserve the keyboard-first, native-OS experience and Korean → Japanese → Chinese scope.
+- User decisions take priority. Do not treat proposals or unverified support as approved or implemented. Update the relevant design guidance and verified scope when UX, defaults, or support status changes.
+- Include these required-reading instructions when delegating work, and preserve the links if agent instructions are reorganized.
 
 ## Working with the user
 - Talk to the user in **Korean**. Code identifiers, comments and commit messages are English.
@@ -32,7 +39,9 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `engine-h
 - Tests in portable crates must not hard-code absolute paths or path separators (this has failed the Windows CI).
 - New third-party data: check its license, keep the original LICENSE in `data/<source>/`, record it in `THIRD_PARTY_LICENSES.md`.
 - Before every commit run fmt, clippy and test, chained with `&&` so a failure aborts the commit.
-- Small commits, pushed right after committing. Stage explicit paths, never `git add -A` (agent worktrees were committed that way once).
+- Commit completed work in small, coherent units and push each commit immediately. Committing and pushing are part of completing the work unless the user explicitly asks to keep it local. Stage explicit paths or hunks, never `git add -A`.
+- If a required check cannot run on the current OS, record that limitation and run the available checks; never claim unexecuted tests passed.
+- Verify every push succeeded. Resolve a failed push without discarding work, or report the blocker. Never force-push without explicit user authorization.
 - **Until v0.1.0 is released, push straight to `main` and do not open pull requests** (decided by the user; revisit after the release).
   CI only runs after the push, so run the checks above first, and fix a red CI on `main` before any other work.
   For OS-specific code, run CI by hand on a branch first (Actions > CI > Run workflow). Do not push tags: releases are the user's call.
