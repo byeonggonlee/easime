@@ -16,6 +16,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use easime_config::Config;
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fs::{MemfdFlags, memfd_create};
 use rustix::time::Timespec;
@@ -262,6 +263,11 @@ impl Fake {
     /// Start the client on a background thread and wait until it has bound
     /// `zwp_input_method_v1`.
     pub fn start() -> Self {
+        Self::start_with(Config::default())
+    }
+
+    /// Like [`Fake::start`], with the given settings.
+    pub fn start_with(config: Config) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socketpair");
         let display = Display::<State>::new().expect("display");
         display
@@ -275,7 +281,7 @@ impl Fake {
         let (tx, client_done) = channel();
         let client = std::thread::spawn(move || {
             let result = match Connection::from_socket(client_end) {
-                Ok(connection) => frontend_wayland::run_on(&connection),
+                Ok(connection) => frontend_wayland::run_with(&connection, &config),
                 Err(e) => Err(frontend_wayland::RunError::Startup(e.to_string())),
             };
             let _ = tx.send(result);
@@ -387,6 +393,12 @@ impl Fake {
     /// wait for the client to grab the keyboard. Then deliver the keymap,
     /// `repeat_info` and an initial `modifiers` event.
     pub fn activate(&mut self) {
+        self.activate_with(25, 600);
+    }
+
+    /// Like [`Fake::activate`], with the given `repeat_info` (rate per second,
+    /// delay in ms). A rate of 0 means the compositor repeats keys itself.
+    pub fn activate_with(&mut self, rate: i32, delay: i32) {
         let input_method = self.state.input_method.clone().expect("input method bound");
         let handle = self.display.handle();
         let client = input_method.client().expect("client alive");
@@ -404,7 +416,7 @@ impl Fake {
         let (file, size) = keymap_fd(&text);
         let keyboard = self.keyboard().clone();
         keyboard.keymap(wl_keyboard::KeymapFormat::XkbV1, file.as_fd(), size);
-        keyboard.repeat_info(25, 600);
+        keyboard.repeat_info(rate, delay);
         self.mods = [0; 4];
         self.barrier();
     }
@@ -501,6 +513,18 @@ impl Fake {
         self.keyboard().modifiers(serial, d, l, k, g);
         self.wait_until("the barrier to come back", |s| {
             s.barriers_seen.contains(&serial)
+        });
+    }
+
+    /// Serve the client until at least `count` `commit_string` requests have
+    /// arrived since the requests were last taken.
+    pub fn wait_for_commits(&mut self, count: usize) {
+        self.wait_until("enough commit_string requests", |s| {
+            s.log
+                .iter()
+                .filter(|r| matches!(r, Req::CommitString { .. }))
+                .count()
+                >= count
         });
     }
 

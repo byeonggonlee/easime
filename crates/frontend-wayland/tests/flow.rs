@@ -520,3 +520,143 @@ fn key_and_modifiers_requests_carry_the_keyboard_event_serial() {
             .all(|s| *s != commit_serial)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Languages and key repeat
+// ---------------------------------------------------------------------------
+
+const KEY_ENTER: u32 = 28;
+const KEY_A: u32 = 30;
+const KEY_N: u32 = 49;
+
+/// Korean and Japanese both enabled, in that order.
+fn korean_and_japanese() -> easime_config::Config {
+    let mut config = easime_config::Config::default();
+    config.languages.enabled = vec![ime_core::Language::Korean, ime_core::Language::Japanese];
+    config
+}
+
+#[test]
+fn toggle_key_cycles_korean_japanese_english() {
+    let mut fake = Fake::start_with(korean_and_japanese());
+    fake.activate();
+
+    // Korean first. The syllable in progress is committed on every switch.
+    fake.tap_all(&[KEY_G, KEY_K]);
+    fake.tap_all(&[KEY_HANGEUL]);
+    let requests = fake.settle();
+    assert_eq!(commits(&requests), ["하"], "{requests:#?}");
+
+    // Japanese: "ka" becomes か.
+    fake.tap_all(&[KEY_K, KEY_A]);
+    let requests = fake.settle();
+    assert_eq!(last_preedit(&requests), Some("か"), "{requests:#?}");
+
+    // English: the preedit is committed and letters are only forwarded.
+    fake.tap_all(&[KEY_HANGEUL]);
+    let requests = fake.settle();
+    assert_eq!(commits(&requests), ["か"], "{requests:#?}");
+    fake.tap_all(&[KEY_G]);
+    let requests = fake.settle();
+    assert_eq!(
+        forwarded(&requests),
+        [(KEY_G, 1), (KEY_G, 0)],
+        "{requests:#?}"
+    );
+
+    // And around to Korean again.
+    fake.tap_all(&[KEY_HANGEUL]);
+    fake.press(KEY_G);
+    let requests = fake.settle();
+    assert_eq!(last_preedit(&requests), Some("ㅎ"), "{requests:#?}");
+}
+
+#[test]
+fn japanese_enter_commits_the_kana_and_is_consumed() {
+    let mut fake = Fake::start_with(korean_and_japanese());
+    fake.activate();
+    fake.tap_all(&[KEY_HANGEUL]); // Korean -> Japanese
+
+    fake.tap_all(&[KEY_K, KEY_A, KEY_N, KEY_A]);
+    fake.tap_all(&[KEY_ENTER]);
+    let requests = fake.settle();
+    assert_eq!(commits(&requests), ["かな"], "{requests:#?}");
+    assert_eq!(forwarded(&requests), [], "Enter must not reach the app");
+    assert_eq!(last_preedit(&requests), Some(""), "{requests:#?}");
+}
+
+#[test]
+fn compositor_repeat_replays_a_consumed_key() {
+    // Rate 0: KWin repeats keys itself and sends state 2 to the input method.
+    let mut fake = Fake::start();
+    fake.activate_with(0, 0);
+
+    fake.press(KEY_G);
+    fake.press(KEY_K);
+    let requests = fake.settle();
+    assert_eq!(last_preedit(&requests), Some("하"), "{requests:#?}");
+
+    // A repeat of ㅏ cannot extend 하, so 하 is committed and ㅏ starts over.
+    fake.repeat(KEY_K);
+    let requests = fake.settle();
+    assert_eq!(commits(&requests), ["하"], "{requests:#?}");
+    assert_eq!(last_preedit(&requests), Some("ㅏ"), "{requests:#?}");
+    assert_eq!(forwarded(&requests), [], "consumed keys are not forwarded");
+}
+
+#[test]
+fn own_timer_repeats_a_held_consumed_key_until_release() {
+    // Rate > 0: the input method must repeat consumed keys itself.
+    let mut fake = Fake::start();
+    fake.activate_with(200, 10);
+
+    fake.press(KEY_G);
+    fake.press(KEY_K);
+    // No further input: the timer alone produces 하, ㅏ, ㅏ, ...
+    fake.wait_for_commits(3);
+    fake.release(KEY_K);
+    let requests = fake.settle();
+    let committed = commits(&requests);
+    assert_eq!(&committed[..2], ["하", "ㅏ"], "{requests:#?}");
+    assert!(committed[2..].iter().all(|c| *c == "ㅏ"), "{requests:#?}");
+
+    // Released: the timer must stop and the release is not forwarded.
+    assert_eq!(forwarded(&requests), [], "{requests:#?}");
+    let after_release = commits(&requests).len();
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    fake.barrier();
+    let later = fake.take_requests();
+    assert!(
+        commits(&later).is_empty(),
+        "kept repeating after release (had {after_release}): {later:#?}"
+    );
+}
+
+#[test]
+fn held_backspace_deletes_jamo_then_hands_over_to_the_app() {
+    let mut fake = Fake::start();
+    fake.activate_with(200, 10);
+
+    fake.tap_all(&[KEY_G, KEY_K]); // 하
+    fake.take_requests();
+    const KEY_BACKSPACE: u32 = 14;
+    fake.press(KEY_BACKSPACE);
+    // Own repeat removes ㅏ, then ㅎ, then runs out of composition and the
+    // key is handed to the application, which repeats it natively.
+    let mut requests = fake.settle();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while forwarded(&requests).is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fake.barrier();
+        requests.extend(fake.take_requests());
+    }
+    assert_eq!(
+        forwarded(&requests),
+        [(KEY_BACKSPACE, 1)],
+        "Backspace should be forwarded once as a press: {requests:#?}"
+    );
+    // The eventual release is forwarded because the press was.
+    fake.release(KEY_BACKSPACE);
+    let requests = fake.settle();
+    assert_eq!(forwarded(&requests), [(KEY_BACKSPACE, 0)], "{requests:#?}");
+}
