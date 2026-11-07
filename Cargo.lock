@@ -86,6 +86,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "easime-dict-tool"
+version = "0.1.0"
+dependencies = [
+ "engine-japanese",
+]
+
+[[package]]
 name = "engine-hangul"
 version = "0.1.0"
 dependencies = [

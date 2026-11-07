@@ -1,0 +1,12 @@
+[package]
+name = "easime-dict-tool"
+description = "Builds the easime binary dictionary from the Mozc OSS dictionary text files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+engine-japanese = { path = "../engine-japanese" }
