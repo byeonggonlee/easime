@@ -9,6 +9,13 @@
 - [ ] `cargo test --workspace`
 - [ ] Tried on a real desktop (say which: KDE Plasma / GNOME / Windows / macOS), or not applicable
 
+## LLM assistance
+
+<!-- If an LLM wrote or substantially changed code or docs in this PR, name the tool and the
+     model (with version), and make sure the commits end with a matching
+     `Co-Authored-By: <tool> <model and version> <noreply address>` trailer.
+     Write "None" if no LLM was used. -->
+
 ## Notes
 
 <!-- Anything reviewers should know: untested parts, follow-ups, new third-party data
