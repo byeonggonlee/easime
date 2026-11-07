@@ -16,6 +16,9 @@ pub enum KanaMode {
 /// Punctuation keys that are part of the romaji table.
 const PUNCTUATION: &str = "-,./[]~?!";
 
+/// Candidates per page, the same as the candidate window draws.
+const PAGE_SIZE: usize = CandidateList::PAGE_SIZE;
+
 /// A conversion in progress: the reading and its candidates.
 #[derive(Debug)]
 struct Conversion {
@@ -34,9 +37,10 @@ impl Conversion {
 ///
 /// While composing: Enter commits the kana (and is consumed), Space starts a
 /// conversion, Escape cancels, Backspace edits. While converting: Space/Down
-/// and Up move through the candidates, Enter commits the chosen one, Escape or
-/// Backspace go back to the kana, a digit 1-9 picks a candidate, and any other
-/// key commits the chosen candidate first.
+/// and Up move through the candidates, PageDown/PageUp jump a page, Enter
+/// commits the chosen one, Escape or Backspace go back to the kana, a digit
+/// 1-9 picks that candidate of the page being shown, and any other key commits
+/// the chosen candidate first.
 ///
 /// For keys it does not consume (`handled == false`), `commit` holds finished
 /// text that the frontend must insert before forwarding the key.
@@ -157,6 +161,20 @@ impl JapaneseEngine {
         }
     }
 
+    /// Jump to the first candidate of the next or previous page (the last
+    /// candidate when there is no further page). The candidate window shows
+    /// `PAGE_SIZE` candidates at a time, numbered from 1 on every page.
+    fn move_page(&mut self, forward: bool) {
+        if let Some(conv) = &mut self.conversion {
+            let page = conv.selected / PAGE_SIZE;
+            conv.selected = if forward {
+                ((page + 1) * PAGE_SIZE).min(conv.candidates.len() - 1)
+            } else {
+                page.saturating_sub(1) * PAGE_SIZE
+            };
+        }
+    }
+
     fn process_converting(&mut self, event: KeyEvent) -> EngineOutput {
         match event.key {
             Key::Space | Key::Down => {
@@ -165,6 +183,10 @@ impl JapaneseEngine {
             }
             Key::Up => {
                 self.move_selection(false);
+                self.output(String::new(), true)
+            }
+            Key::PageDown | Key::PageUp => {
+                self.move_page(event.key == Key::PageDown);
                 self.output(String::new(), true)
             }
             Key::Left | Key::Right => self.output(String::new(), true),
@@ -177,8 +199,11 @@ impl JapaneseEngine {
                 self.output(String::new(), true)
             }
             Key::Char(c @ '1'..='9') => {
-                let index = c as usize - '1' as usize;
-                let count = self.conversion.as_ref().map_or(0, |c| c.candidates.len());
+                // The number on screen counts from 1 on the page being shown.
+                let (page_start, count) = self.conversion.as_ref().map_or((0, 0), |c| {
+                    (c.selected / PAGE_SIZE * PAGE_SIZE, c.candidates.len())
+                });
+                let index = page_start + (c as usize - '1' as usize);
                 if index < count {
                     if let Some(conv) = &mut self.conversion {
                         conv.selected = index;
@@ -508,6 +533,113 @@ mod tests {
         let out = e.process_key(KeyEvent::ch('9'));
         assert_eq!(out.commit, "日本");
         assert!(!out.handled);
+    }
+
+    /// "かな" with 20 dictionary candidates, so 22 with the two kana ones:
+    /// three pages of 9, 9 and 4.
+    fn engine_with_many_candidates() -> JapaneseEngine {
+        let words: Vec<String> = (1..=20).map(|n| format!("案{n}")).collect();
+        let (dict, _) = MemoryDictionary::parse(&format!("かな\t{}\n", words.join(",")));
+        JapaneseEngine::with_dictionary(Box::new(dict))
+    }
+
+    fn selected(out: &EngineOutput) -> usize {
+        out.candidates.as_ref().expect("candidates").selected
+    }
+
+    #[test]
+    fn page_keys_jump_a_page_and_show_that_candidate() {
+        let mut e = engine_with_many_candidates();
+        type_keys(&mut e, "kana");
+        let out = key(&mut e, Key::Space);
+        assert_eq!(out.candidates.as_ref().unwrap().items.len(), 22);
+        assert_eq!(selected(&out), 0);
+
+        let out = key(&mut e, Key::PageDown);
+        assert!(out.handled && out.commit.is_empty());
+        assert_eq!(selected(&out), 9);
+        assert_eq!(out.preedit.text, "案10");
+
+        assert_eq!(selected(&key(&mut e, Key::PageDown)), 18);
+        // No further page: stay on the last page, at its end.
+        assert_eq!(selected(&key(&mut e, Key::PageDown)), 21);
+        assert_eq!(selected(&key(&mut e, Key::PageDown)), 21);
+
+        assert_eq!(selected(&key(&mut e, Key::PageUp)), 9);
+        assert_eq!(selected(&key(&mut e, Key::PageUp)), 0);
+        assert_eq!(selected(&key(&mut e, Key::PageUp)), 0);
+    }
+
+    #[test]
+    fn page_keys_work_from_the_middle_of_a_page() {
+        let mut e = engine_with_many_candidates();
+        type_keys(&mut e, "kana");
+        key(&mut e, Key::Space);
+        for _ in 0..12 {
+            key(&mut e, Key::Down);
+        }
+        // Candidate 12 is on the second page (9..18).
+        assert_eq!(selected(&key(&mut e, Key::PageUp)), 0);
+        for _ in 0..12 {
+            key(&mut e, Key::Down);
+        }
+        assert_eq!(selected(&key(&mut e, Key::PageDown)), 18);
+    }
+
+    #[test]
+    fn a_digit_counts_from_the_first_candidate_of_the_shown_page() {
+        let mut e = engine_with_many_candidates();
+        type_keys(&mut e, "kana");
+        key(&mut e, Key::Space);
+        key(&mut e, Key::PageDown);
+        // The window shows candidates 10..18 as 1..9: "2" is the 11th.
+        let out = e.process_key(KeyEvent::ch('2'));
+        assert_eq!(out.commit, "案11");
+        assert!(out.handled && out.candidates.is_none());
+    }
+
+    #[test]
+    fn a_digit_on_the_short_last_page_stops_at_its_last_candidate() {
+        let mut e = engine_with_many_candidates();
+        type_keys(&mut e, "kana");
+        key(&mut e, Key::Space);
+        key(&mut e, Key::PageDown);
+        key(&mut e, Key::PageDown);
+        // The last page shows 4 candidates, so "4" is the last one...
+        let out = e.process_key(KeyEvent::ch('4'));
+        assert_eq!(out.commit, "カナ");
+        assert!(out.handled);
+        // ...and "5" is not on the screen at all: commit and pass it on.
+        let mut e = engine_with_many_candidates();
+        type_keys(&mut e, "kana");
+        key(&mut e, Key::Space);
+        key(&mut e, Key::PageDown);
+        key(&mut e, Key::PageDown);
+        let out = e.process_key(KeyEvent::ch('5'));
+        assert_eq!(out.commit, "案19");
+        assert!(!out.handled);
+    }
+
+    #[test]
+    fn page_keys_outside_a_conversion_go_to_the_application() {
+        let mut e = engine_with_many_candidates();
+        type_keys(&mut e, "kana");
+        // Composing but not converting: the keys are not ours.
+        let out = key(&mut e, Key::PageDown);
+        assert!(!out.handled);
+        assert_eq!(out.commit, "かな");
+        // Nothing composed: untouched.
+        let out = key(&mut e, Key::PageUp);
+        assert!(!out.handled && out.commit.is_empty());
+    }
+
+    #[test]
+    fn a_short_candidate_list_stays_on_its_only_page() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        assert_eq!(selected(&key(&mut e, Key::PageDown)), 3);
+        assert_eq!(selected(&key(&mut e, Key::PageUp)), 0);
     }
 
     #[test]
