@@ -20,6 +20,8 @@ Kirigami.ScrollablePage {
             QQC2.CheckBox {
                 id: box
 
+                objectName: "box"
+
                 Kirigami.FormData.label: qsTr("상태 표시:")
                 text: qsTr("언어를 바꿀 때 커서 옆에 상자로 알려 주기")
                 checked: EasimeSettings.indicatorBox

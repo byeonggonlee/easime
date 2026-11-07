@@ -10,6 +10,8 @@ QQC2.RadioButton {
     property string value
     property string current
 
+    objectName: "choice-" + value
+
     signal picked(string value)
 
     checked: control.current === control.value

@@ -55,6 +55,47 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    function find(item, name) {
+        if (!item) {
+            return null
+        }
+        if (item.objectName === name) {
+            return item
+        }
+        var kids = item.children
+        for (var i = 0; i < kids.length; ++i) {
+            var hit = find(kids[i], name)
+            if (hit) {
+                return hit
+            }
+        }
+        return null
+    }
+
+    // Use a page like a person would, so the CI sees the whole path from a
+    // control to the settings file. The pictures that follow show the result.
+    function interact(name, page) {
+        if (name === "languages") {
+            var japanese = find(page, "switch-japanese")
+            japanese.toggle()
+            console.info("INTERACTION japanese-on languages=" + EasimeSettings.languages
+                + " switch=" + japanese.checked + " result=" + EasimeSettings.resultKind)
+            var after = []
+            describe(page, page, 0, after)
+            console.info("STRUCTURE-AFTER languages\n" + after.join("\n"))
+        } else if (name === "shortcuts") {
+            var hangul = find(page, "choice-hangul")
+            hangul.toggle()
+            console.info("INTERACTION toggle-key=" + EasimeSettings.toggleKey
+                + " hangul=" + hangul.checked + " both=" + find(page, "choice-both").checked)
+        } else if (name === "appearance") {
+            var box = find(page, "box")
+            box.toggle()
+            console.info("INTERACTION indicator-box=" + EasimeSettings.indicatorBox
+                + " checkbox=" + box.checked)
+        }
+    }
+
     function show(index) {
         if (index === current) {
             return
@@ -126,6 +167,7 @@ Kirigami.ApplicationWindow {
                 describe(root.pageStack.currentItem, root.pageStack.currentItem, 0, lines)
                 console.info("STRUCTURE " + name + " (" + root.pageStack.currentItem.width + "x"
                     + root.pageStack.currentItem.height + ")\n" + lines.join("\n"))
+                interact(name, root.pageStack.currentItem)
                 var path = root.screenshotDir + "/" + name + ".png"
                 var requested = root.pageStack.grabToImage(function (result) {
                     console.info("SCREENSHOT " + name + " " + result.saveToFile(path))

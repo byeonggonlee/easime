@@ -51,6 +51,7 @@ Kirigami.ScrollablePage {
                 Layout.fillWidth: true
 
                 QQC2.Switch {
+                    objectName: "switch-" + row.modelData.code
                     text: row.modelData.name
                     checked: row.on
                     onToggled: {

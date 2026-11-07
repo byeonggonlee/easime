@@ -130,12 +130,18 @@ jobs:
           echo "exit code: $code"
           echo "--- output of the settings window:"
           cat settings.log
-          echo "--- installed KDE QML modules:"
-          ls /usr/lib64/qt6/qml/org/kde/ || true
-          ls /usr/lib64/qt6/qml/org/kde/desktop /usr/lib64/qt6/qml/org/kde/breeze 2>&1 | head -20 || true
+          echo "--- settings file after the clicks:"
+          cat home/.config/easime/config.toml
           test "$code" = 0
           grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
           test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 5
+          # Clicking the real controls must change the settings and the file.
+          grep -q 'INTERACTION japanese-on languages=korean,japanese switch=true result=saved' settings.log
+          grep -q 'INTERACTION toggle-key=hangul hangul=true both=false' settings.log
+          grep -q 'INTERACTION indicator-box=false checkbox=false' settings.log
+          grep -q 'enabled = \["korean", "japanese"\]' home/.config/easime/config.toml
+          grep -q 'toggle_key = "hangul"' home/.config/easime/config.toml
+          grep -q 'indicator_box = false' home/.config/easime/config.toml
           # QML warnings start with the file they come from (qrc:/...), or say
           # <Unknown File>; the window's own checkpoints start with "qml:".
           # Kirigami creates each page without a parent and puts it in the page
