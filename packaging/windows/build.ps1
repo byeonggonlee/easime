@@ -1,10 +1,12 @@
 # Builds the Windows installer: <OutDir>\easime-<version>-x64.msi (default target\)
 #
-# Needs the Rust toolchain and WiX 5 (`dotnet tool install --global wix --version 5.0.2`).
+# Needs the Rust toolchain and WiX 5 (`dotnet tool install --global wix --version 5.0.2`);
+# the WiX UI extension (the setup window) is added to WiX by this script.
 # Run from anywhere on Windows: pwsh packaging\windows\build.ps1 [-Version 0.1.0]
 #
-# This installer only contains the terminal demo and the licenses; see
-# packaging\windows\easime.wxs.
+# The installer holds the text service (the 64-bit DLL), registers it with Windows,
+# switches the chosen languages on for the installing user, and has the terminal
+# demo and the licenses; see packaging\windows\easime.wxs.
 param(
     # The MSI version. Defaults to the version of the easime-cli crate. It must
     # be numeric (major.minor.build), so a pre-release tag needs a number here.
@@ -25,18 +27,28 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "MSI versions are numeric (major.minor.build); got '$Version'"
 }
 
-cargo build --release --locked -p easime-cli
+# The terminal demo, and the text service (target\release\frontend_tsf.dll).
+cargo build --release --locked -p easime-cli -p frontend-tsf
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+if (-not (Test-Path (Join-Path $root "target\release\frontend_tsf.dll"))) { throw "frontend_tsf.dll was not built" }
 
 $wix = Join-Path $env:USERPROFILE ".dotnet\tools\wix.exe"
 if (-not (Test-Path $wix)) { $wix = "wix" }
+
+# The setup window (WixUI) is an extension of WiX, kept next to the tool.
+$uiExtension = "WixToolset.UI.wixext"
+$wixVersion = ((& $wix --version) -split '\+')[0].Trim()
+if (-not ((& $wix extension list --global) -match [regex]::Escape($uiExtension))) {
+    & $wix extension add --global "$uiExtension/$wixVersion"
+    if ($LASTEXITCODE -ne 0) { throw "could not add the WiX UI extension $uiExtension/$wixVersion" }
+}
 
 if (-not [System.IO.Path]::IsPathRooted($OutDir)) { $OutDir = Join-Path $root $OutDir }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $out = Join-Path $OutDir "easime-$Version-x64.msi"
 $binaries = Join-Path $root "target\release"
 $source = Join-Path $root "packaging\windows\easime.wxs"
-& $wix build -arch x64 -d "Version=$Version" -d "Binaries=$binaries" -d "Root=$root" -o $out $source
+& $wix build -arch x64 -ext $uiExtension -d "Version=$Version" -d "Binaries=$binaries" -d "Root=$root" -o $out $source
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 
 Write-Host "built $out"

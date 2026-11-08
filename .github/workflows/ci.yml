@@ -59,12 +59,14 @@ jobs:
     name: Linux packages
     uses: ./.github/workflows/packages.yml
 
-  # The Windows installer (MSI, WiX). It only contains the terminal demo and the
-  # licenses: there is no Windows text service (TSF) yet, so it does not add an
-  # input method to Windows. The job builds it, installs it on the runner, uses
-  # what was installed, upgrades it and removes it again.
+  # The Windows installer (MSI, WiX): the text service (TSF), registered with
+  # Windows and switched on for the installing user, the terminal demo and the
+  # licenses. The job builds it, installs it on the runner, checks what Windows
+  # and the user's language settings say, uses what was installed, upgrades it and
+  # removes it again, leaving nothing behind. The MSI is kept as an artifact for
+  # trying it on a real PC (it is not published as a release: docs/status.md).
   windows-installer:
-    name: Windows installer (MSI, terminal demo only)
+    name: Windows installer (MSI, text service)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +85,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: easime-windows-installer-terminal-demo-${{ github.sha }}
+          name: easime-windows-installer-${{ github.sha }}
           path: |
             target/easime-*-x64.msi
             msi-logs/*.log

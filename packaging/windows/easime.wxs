@@ -1,30 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  easime for Windows (MSI). Built with WiX 5:
+  easime for Windows (MSI). Built with WiX 5 and its UI extension (build.ps1 does
+  this; by hand:)
 
-    wix build -arch x64 -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d Root=<repository root> \
+    wix build -arch x64 -ext WixToolset.UI.wixext \
+      -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe and frontend_tsf.dll> -d Root=<repository root> \
       -o easime.msi packaging/windows/easime.wxs
 
-  WHAT IT INSTALLS TODAY: the terminal demo (easime-cli.exe) and the licenses.
-  There is no Windows text service (TSF) yet, so this installer does NOT add an
-  input method to Windows. When the TSF DLL exists it is added here as one more
-  component of the main feature, registered on install and unregistered on
-  uninstall (docs/architecture.md, "Windows").
+  WHAT IT INSTALLS
+    - the text service (easime_tsf.dll), registered with Windows (regsvr32) so
+      the languages it offers are listed in the language settings;
+    - for the user who installs it, the profile of each chosen language (the
+      "Input methods" features below) is switched on in their language list, so
+      nobody has to add anything by hand in Windows' settings. The features are
+      the confirmation (the setup window shows them; a silent install takes the
+      defaults) and uninstalling is the undo: it takes the profiles away again;
+    - the terminal demo (easime-cli.exe) and the licenses.
+
+  OTHER USERS of the same PC see the registered profiles under "Add a keyboard"
+  in their language settings; only the installing user gets them switched on.
+
+  The DLL is 64-bit: 32-bit programs cannot use the input method (docs/platforms.md).
+  Everything the custom actions do is in crates/frontend-tsf (registration.rs,
+  setup.rs, the exports in lib.rs).
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="easime" Manufacturer="Byeonggon Lee" Version="$(Version)"
            UpgradeCode="FEE90A7B-20AC-4B9B-8D9E-DDDAFE8C7866" Scope="perMachine">
-    <SummaryInformation Description="easime: Easy Eastern Asian IME (terminal demo only; the Windows input method is not included yet)" />
-    <Property Id="ARPCOMMENTS" Value="Terminal demo only. The Windows input method (TSF) is not included yet." />
+    <SummaryInformation Description="easime: Easy Eastern Asian IME (early test build of the Windows input method)" />
+    <Property Id="ARPCOMMENTS" Value="Early test build of the Windows input method (Korean). Added to the language settings of the user who installed it." />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/byeonggonlee/easime" />
 
-    <!-- A newer version replaces an older one; installing an older one over a
-         newer one is refused. -->
+    <!-- A newer version replaces an older one (the old one is removed first,
+         with its custom actions); installing an older one over a newer one is
+         refused. -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of easime is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- Setup window: welcome, license, the features below, then install. -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(Root)/packaging/windows/license.rtf" />
+    <ui:WixUI Id="WixUI_FeatureTree" />
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="easime">
+        <!-- The text service. The file is built as frontend_tsf.dll and installed
+             as easime_tsf.dll, the name the custom actions and the docs use. -->
+        <Component Id="TextService">
+          <File Id="EasimeTsfDll" Name="easime_tsf.dll" Source="$(Binaries)/frontend_tsf.dll" />
+        </Component>
         <Component Id="Demo">
           <File Id="EasimeCliExe" Source="$(Binaries)/easime-cli.exe" />
         </Component>
@@ -47,17 +70,66 @@
           <Environment Id="PathEasime" Name="PATH" Value="[INSTALLFOLDER]" Action="set"
                        Part="last" System="yes" Permanent="no" />
         </Component>
+        <!-- A feature needs a component to be installed or not; this one only
+             records that the user chose Korean. -->
+        <Component Id="InputKoreanMarker">
+          <RegistryKey Root="HKLM" Key="Software\easime\Input\Korean" ForceDeleteOnUninstall="yes">
+            <RegistryValue Name="Chosen" Type="integer" Value="1" KeyPath="yes" />
+          </RegistryKey>
+        </Component>
       </Directory>
     </StandardDirectory>
 
-    <Feature Id="Main" Title="easime" Level="1" AllowAdvertise="no" ConfigurableDirectory="INSTALLFOLDER">
+    <Feature Id="Main" Title="easime" Level="1" AllowAdvertise="no" ConfigurableDirectory="INSTALLFOLDER"
+             Display="expand"
+             Description="The Windows input method, the terminal demo and the licenses.">
+      <ComponentRef Id="TextService" />
       <ComponentRef Id="Demo" />
       <ComponentRef Id="LicenseMit" />
       <ComponentRef Id="LicenseApache" />
       <ComponentRef Id="ThirdParty" />
-      <Feature Id="AddToPath" Title="Add easime to the PATH" Level="2" AllowAdvertise="no">
+      <!-- The languages to switch on in the language settings of the installing
+           user. Only languages that can be typed are listed (frontend-tsf,
+           profiles::TYPEABLE); Japanese and Chinese are added when they work. -->
+      <Feature Id="InputKorean" Title="Korean input" Level="1" AllowAdvertise="no"
+               Description="Adds Korean (easime) to your language settings. English typing stays as it is; the Hangul key switches.">
+        <ComponentRef Id="InputKoreanMarker" />
+      </Feature>
+      <Feature Id="AddToPath" Title="Add easime to the PATH" Level="2" AllowAdvertise="no"
+               Description="Lets you run the terminal demo (easime-cli) from any terminal.">
         <ComponentRef Id="PathEntry" />
       </Feature>
     </Feature>
+
+    <!-- Registering the text service with Windows. Machine-wide, so as the
+         system (no impersonation); a failure stops the install, and an install
+         that fails later takes the registration back (rollback). -->
+    <CustomAction Id="RegisterTextService" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s &quot;[INSTALLFOLDER]easime_tsf.dll&quot;" />
+    <CustomAction Id="RegisterTextServiceRollback" Directory="INSTALLFOLDER" Execute="rollback" Impersonate="no" Return="ignore"
+                  ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLFOLDER]easime_tsf.dll&quot;" />
+    <!-- Removal must work even after a half-finished install, so it never fails. -->
+    <CustomAction Id="UnregisterTextService" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="ignore"
+                  ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLFOLDER]easime_tsf.dll&quot;" />
+
+    <!-- Switching a language on or off for the user who installs (as that user:
+         the language list is theirs). rundll32 always exits with 0, so a failure
+         is written to easime.log and does not stop the install; the installer's
+         CI test reads the language list afterwards. -->
+    <CustomAction Id="EnableKorean" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
+                  ExeCommand="&quot;[System64Folder]rundll32.exe&quot; &quot;[INSTALLFOLDER]easime_tsf.dll&quot;,EnableForCurrentUser korean" />
+    <CustomAction Id="DisableKorean" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
+                  ExeCommand="&quot;[System64Folder]rundll32.exe&quot; &quot;[INSTALLFOLDER]easime_tsf.dll&quot;,DisableForCurrentUser korean" />
+
+    <InstallExecuteSequence>
+      <!-- Switching on and off: &Feature is what will be, !Feature what is. -->
+      <Custom Action="RegisterTextServiceRollback" After="InstallFiles" Condition="&amp;Main=3" />
+      <Custom Action="RegisterTextService" After="RegisterTextServiceRollback" Condition="&amp;Main=3" />
+      <Custom Action="EnableKorean" After="RegisterTextService" Condition="&amp;InputKorean=3" />
+
+      <!-- Removing: the user's language first, then Windows' registration, then the files. -->
+      <Custom Action="DisableKorean" Before="UnregisterTextService" Condition="&amp;InputKorean=2 AND !InputKorean=3" />
+      <Custom Action="UnregisterTextService" Before="RemoveFiles" Condition="&amp;Main=2 AND !Main=3" />
+    </InstallExecuteSequence>
   </Package>
 </Wix>
