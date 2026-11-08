@@ -2,7 +2,7 @@
 
 ## 개발 모드로 KWin에서 시험하기 (사용자 환경을 바꾸므로 사용자가 직접 실행)
 ```sh
-./scripts/install-dev.sh     # release 빌드 + ~/.local/share/applications/easime.desktop 등록
+./scripts/install-dev.sh     # release 빌드 + ~/.local/share/applications/easime.desktop 등록 + 아이콘(~/.local/share/icons/hicolor)
 ```
 1. 시스템 설정 → 키보드 → 가상 키보드 → easime 선택 → 로그아웃/로그인
 2. 로그: `~/.local/state/easime/easime.log`

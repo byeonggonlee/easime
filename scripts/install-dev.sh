@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Build easime and register it as a KDE virtual keyboard for the current user.
+# Build easime and register it as a KDE virtual keyboard for the current user
+# (its .desktop file and icon, in the user's data folder).
 # Afterwards select it in: System Settings > Keyboard > Virtual Keyboard,
 # then log out and back in (or restart KWin) for it to take effect.
 #
-# Set EASIME_SKIP_BUILD=1 to only (re)write the .desktop file.
+# Set EASIME_SKIP_BUILD=1 to only (re)write the .desktop file and the icon.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,5 +38,15 @@ chmod 644 "$tmp"
 mv "$tmp" "$apps/easime.desktop"
 trap - EXIT
 
+# The entry names the icon "easime": put it where the icon theme looks, so the
+# virtual keyboard list in System Settings shows it (the packages install it
+# under /usr/share/icons). Only easime's own files, in the user's data folder.
+icons="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor"
+for size in 16 24 32 48 64 128 256 512; do
+    install -D -m 644 "$root/data/icons/easime-$size.png" "$icons/${size}x${size}/apps/easime.png"
+done
+install -D -m 644 "$root/data/icons/easime.svg" "$icons/scalable/apps/easime.svg"
+
 echo "Installed $apps/easime.desktop -> $bin"
+echo "Installed the icon under $icons"
 echo "Log file: ${XDG_STATE_HOME:-$HOME/.local/state}/easime/easime.log"
