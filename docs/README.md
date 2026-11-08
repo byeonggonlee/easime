@@ -27,6 +27,7 @@
 
 - [2026-11-07 한국어 한자 설계](superpowers/specs/2026-11-07-korean-hanja-design.md).
 - [2026-11-07 한국어 한자 실행 계획](superpowers/plans/2026-11-07-korean-hanja.md).
+- [2026-11-08 Windows 다음 단계 계획](windows-plan-2026-11-08.md): 등록 방식 실험, 일본어, 사전을 넣은 MSI, WinUI 3 설정 앱의 순서와 추천안.
 
 ## 에이전트·기여 양식
 
