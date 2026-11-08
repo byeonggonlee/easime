@@ -46,6 +46,7 @@ Kirigami.ScrollablePage {
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 5
                     selectByMouse: true
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    readonly property var locale: Qt.locale()
                     readonly property int value: EasimeSettings.indicatorMs
                     validator: DoubleValidator {
                         bottom: 0.1
