@@ -272,6 +272,16 @@ impl InputEngine for JapaneseEngine {
         }
     }
 
+    fn wants_key(&self, event: KeyEvent) -> bool {
+        // Anything in progress is finished or edited by whatever key comes.
+        if self.conversion.is_some() || !self.romaji.is_empty() {
+            return true;
+        }
+        // Otherwise only a key that starts a reading does anything.
+        !event.modifiers.any()
+            && matches!(event.key, Key::Char(c) if c.is_ascii_alphabetic() || PUNCTUATION.contains(c))
+    }
+
     fn reset(&mut self) {
         self.conversion = None;
         self.romaji.reset();
@@ -695,6 +705,46 @@ mod tests {
         key(&mut e, Key::Space);
         assert_eq!(e.flush(), "二本");
         assert_eq!(e.flush(), "");
+    }
+
+    #[test]
+    fn wants_key_keeps_its_promise_in_every_state() {
+        let keys = |text: &str| -> Vec<KeyEvent> { text.chars().map(KeyEvent::ch).collect() };
+        let mut converting = keys("nihon");
+        converting.push(KeyEvent::new(Key::Space));
+        let mut second = converting.clone();
+        second.push(KeyEvent::new(Key::Space));
+        ime_core::contract::check_wants_key(
+            &|| {
+                Box::new(JapaneseEngine::with_dictionary(Box::new(
+                    MemoryDictionary::parse("にほん\t日本,二本\n").0,
+                )))
+            },
+            &[
+                vec![],
+                keys("n"),
+                keys("ni"),
+                keys("nihon"),
+                keys("nihongo"),
+                converting,
+                second,
+                keys("-"),
+            ],
+        );
+    }
+
+    #[test]
+    fn idle_only_the_letters_of_a_reading_are_wanted() {
+        let e = JapaneseEngine::new();
+        assert!(e.wants_key(KeyEvent::ch('n')));
+        assert!(e.wants_key(KeyEvent::ch(',')));
+        assert!(!e.wants_key(KeyEvent::ch('1')));
+        assert!(!e.wants_key(KeyEvent::new(Key::Space)));
+        assert!(!e.wants_key(KeyEvent::new(Key::Enter)));
+        let mut composing = JapaneseEngine::new();
+        composing.process_key(KeyEvent::ch('n'));
+        assert!(composing.wants_key(KeyEvent::new(Key::Space)));
+        assert!(composing.wants_key(KeyEvent::new(Key::Enter)));
     }
 
     #[test]

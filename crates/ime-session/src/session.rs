@@ -108,6 +108,15 @@ impl Session {
         self.engines.get_mut(&language).map(|e| e.as_mut())
     }
 
+    /// Whether the active language's engine has anything to do with this key
+    /// (see [`InputEngine::wants_key`]), without changing anything. English
+    /// never does.
+    pub fn wants_key(&self, event: KeyEvent) -> bool {
+        self.engines
+            .get(&self.switcher.current())
+            .is_some_and(|engine| engine.wants_key(event))
+    }
+
     /// Give a key to the active language. `None` means English: nothing is
     /// composed and the application gets the key untouched.
     pub fn process_key(&mut self, event: KeyEvent) -> Option<EngineOutput> {
@@ -254,6 +263,29 @@ mod tests {
             last = session.process_key(KeyEvent::new(Key::Char(c)));
         }
         last
+    }
+
+    #[test]
+    fn wants_key_is_about_the_active_language_only() {
+        let (mut session, _) = start(&config(Some(vec![Language::Korean])), &[]);
+        assert_eq!(
+            session.language(),
+            Language::Korean,
+            "starts on the language"
+        );
+        assert!(session.wants_key(KeyEvent::ch('g')));
+        assert!(!session.wants_key(KeyEvent::ch('1')));
+        session.process_key(KeyEvent::ch('g'));
+        assert!(
+            session.wants_key(KeyEvent::new(Key::Space)),
+            "to finish what is composed"
+        );
+        let _ = session.switch_language();
+        assert_eq!(session.language(), Language::English);
+        assert!(
+            !session.wants_key(KeyEvent::ch('g')),
+            "English wants no key"
+        );
     }
 
     #[test]

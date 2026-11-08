@@ -138,6 +138,15 @@ impl InputEngine for HangulEngine {
         }
     }
 
+    fn wants_key(&self, event: KeyEvent) -> bool {
+        // Anything in progress is finished or edited by whatever key comes.
+        if self.conversion.is_some() || !self.composer.is_empty() {
+            return true;
+        }
+        // Otherwise only a key that starts a syllable does anything.
+        !event.modifiers.any() && matches!(event.key, Key::Char(c) if dubeolsik(c).is_some())
+    }
+
     fn reset(&mut self) {
         self.conversion = None;
         self.composer.reset();
@@ -238,6 +247,42 @@ mod tests {
         assert!(out.handled);
         assert!(out.preedit.is_empty());
         assert!(!e.process_key(KeyEvent::new(Key::Backspace)).handled);
+    }
+
+    #[test]
+    fn wants_key_keeps_its_promise_in_every_state() {
+        let keys = |text: &str| -> Vec<KeyEvent> { text.chars().map(KeyEvent::ch).collect() };
+        let mut converting = keys("gk");
+        converting.push(KeyEvent::new(Key::Hanja));
+        ime_core::contract::check_wants_key(
+            &|| Box::new(HangulEngine::new()),
+            &[
+                vec![],
+                keys("g"),
+                keys("gk"),
+                keys("gks"),
+                keys("gksr"),
+                keys("gksrmf"),
+                converting,
+                vec![KeyEvent::ch('1')],
+            ],
+        );
+    }
+
+    #[test]
+    fn idle_only_the_letters_of_the_layout_are_wanted() {
+        let e = HangulEngine::new();
+        assert!(e.wants_key(KeyEvent::ch('g')));
+        assert!(!e.wants_key(KeyEvent::ch('1')));
+        assert!(!e.wants_key(KeyEvent::new(Key::Space)));
+        assert!(!e.wants_key(KeyEvent::new(Key::Backspace)));
+        let mut composing = HangulEngine::new();
+        composing.process_key(KeyEvent::ch('g'));
+        assert!(
+            composing.wants_key(KeyEvent::new(Key::Space)),
+            "to finish the syllable first"
+        );
+        assert!(composing.wants_key(KeyEvent::new(Key::Backspace)));
     }
 
     #[test]

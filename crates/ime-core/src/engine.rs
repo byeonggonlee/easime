@@ -87,6 +87,17 @@ pub trait InputEngine {
     /// Handle one key press.
     fn process_key(&mut self, key: KeyEvent) -> EngineOutput;
 
+    /// Whether this key is the engine's business right now, answered without
+    /// changing anything. Some frontends have to say so *before* they give the
+    /// key over (Windows TSF asks "will you take this key?" first and promises
+    /// the answer has no side effects).
+    ///
+    /// `false` is a promise: `process_key` would commit nothing, leave the
+    /// composition as it is and report `handled == false`, so the application
+    /// can have the key. `true` may be generous: `process_key` can still end up
+    /// leaving the key to the application, after committing the finished text.
+    fn wants_key(&self, key: KeyEvent) -> bool;
+
     /// Drop the composition state without committing (e.g. on focus loss).
     fn reset(&mut self);
 

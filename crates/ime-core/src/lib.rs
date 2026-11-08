@@ -1,5 +1,6 @@
 //! OS-independent core types for easime.
 
+pub mod contract;
 pub mod engine;
 pub mod key;
 pub mod language;
