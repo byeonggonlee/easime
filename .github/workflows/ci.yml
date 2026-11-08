@@ -50,6 +50,15 @@ jobs:
       - run: cargo test ${{ env.PORTABLE }}
         env:
           EASIME_REQUIRE_DLL: ${{ runner.os == 'Windows' && '1' || '' }}
+      # An experiment (docs/windows-plan-2026-11-08.md, step 2): which way of
+      # registering makes Windows offer one input method under every language.
+      # It prints what Windows says (the "EXPERIMENT" lines) and fails only if it
+      # cannot clean up after itself.
+      - name: "Experiment: one input method under every language"
+        if: runner.os == 'Windows'
+        run: |
+          cmd /c ver
+          cargo test -p frontend-tsf --test languages -- --ignored --nocapture
 
   # The Linux packages (one .rpm, one .deb) are built, installed into a clean
   # Fedora or Debian, and started; each CI run keeps them for download
