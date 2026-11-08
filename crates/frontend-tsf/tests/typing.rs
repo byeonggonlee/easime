@@ -29,15 +29,16 @@ use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_DisplayAttributeMgr, CLSID_TF_InputProcessorProfiles,
     CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
     GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, GUID_PROP_ATTRIBUTE, GUID_TFCAT_TIP_KEYBOARD,
-    IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink, ITfCategoryMgr,
-    ITfCompartmentMgr, ITfContext, ITfContextComposition, ITfDisplayAttributeMgr, ITfEditSession,
-    ITfEditSession_Impl, ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfRange, ITfThreadMgr,
-    TEXT_STORE_LOCK_FLAGS, TF_ATTR_TARGET_CONVERTED, TF_CONTEXT_EDIT_CONTEXT_FLAGS,
-    TF_DISPLAYATTRIBUTE, TF_ES_READ, TF_ES_SYNC, TF_INPUTPROCESSORPROFILE,
-    TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_LS_DOT,
-    TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
-    TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS,
-    TS_TEXTCHANGE,
+    IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink,
+    ITfCandidateListUIElement, ITfCategoryMgr, ITfCompartmentMgr, ITfContext,
+    ITfContextComposition, ITfDisplayAttributeMgr, ITfEditSession, ITfEditSession_Impl,
+    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfRange, ITfSource, ITfThreadMgr,
+    ITfUIElementMgr, ITfUIElementSink, ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS,
+    TF_ATTR_TARGET_CONVERTED, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ,
+    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
+    TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_LS_DOT, TF_PROFILETYPE_INPUTPROCESSOR,
+    TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC,
+    TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS, TS_TEXTCHANGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, FindWindowW, GetWindowRect, IsWindowVisible,
@@ -499,11 +500,61 @@ impl Drop for TestProfile {
     }
 }
 
+/// What the application hears about candidate lists (TSF UI elements), and
+/// whether it draws them itself, like a full-screen game.
+#[derive(Default)]
+struct Elements {
+    draws_itself: Cell<bool>,
+    /// The list that is up, by TSF's number.
+    up: Cell<Option<u32>>,
+    updates: Cell<u32>,
+    ends: Cell<u32>,
+}
+
+#[implement(ITfUIElementSink)]
+struct ElementSink(Rc<Elements>);
+
+impl ITfUIElementSink_Impl for ElementSink_Impl {
+    fn BeginUIElement(&self, id: u32, show: *mut BOOL) -> Result<()> {
+        self.0.up.set(Some(id));
+        if !show.is_null() {
+            // SAFETY: TSF gives room for the answer.
+            unsafe { *show = (!self.0.draws_itself.get()).into() };
+        }
+        Ok(())
+    }
+
+    fn UpdateUIElement(&self, _id: u32) -> Result<()> {
+        self.0.updates.set(self.0.updates.get() + 1);
+        Ok(())
+    }
+
+    fn EndUIElement(&self, id: u32) -> Result<()> {
+        if self.0.up.get() == Some(id) {
+            self.0.up.set(None);
+        }
+        self.0.ends.set(self.0.ends.get() + 1);
+        Ok(())
+    }
+}
+
+/// A candidate list as an application that draws it reads it.
+#[derive(Debug)]
+struct Listed {
+    items: Vec<String>,
+    selection: u32,
+    /// Whether easime shows it.
+    shown_by_easime: bool,
+    page_starts: Vec<u32>,
+}
+
 /// The application, as far as the keyboard goes: it asks TSF about every key
 /// and gives the key to itself when TSF does not take it.
 struct Application {
     keystrokes: ITfKeystrokeMgr,
     field: Rc<RefCell<Field>>,
+    thread_manager: ITfThreadMgr,
+    elements: Rc<Elements>,
 }
 
 impl Application {
@@ -548,6 +599,36 @@ impl Application {
 
     fn text(&self) -> String {
         self.field.borrow().string()
+    }
+
+    /// The candidate list that is up, read through TSF the way an application
+    /// that draws it does.
+    fn candidate_list(&self) -> Option<Listed> {
+        let id = self.elements.up.get()?;
+        let manager: ITfUIElementMgr = self.thread_manager.cast().unwrap();
+        // SAFETY: the manager and the element are alive for the calls; the
+        // out values live for them.
+        unsafe {
+            let list: ITfCandidateListUIElement = manager
+                .GetUIElement(id)
+                .expect("TSF knows the list")
+                .cast()
+                .expect("it is a candidate list");
+            let count = list.GetCount().unwrap();
+            let items = (0..count)
+                .map(|i| list.GetString(i).unwrap().to_string())
+                .collect();
+            let mut pages = 0;
+            list.GetPageIndex(&mut [], &mut pages).unwrap();
+            let mut page_starts = vec![0; pages as usize];
+            list.GetPageIndex(&mut page_starts, &mut pages).unwrap();
+            Some(Listed {
+                items,
+                selection: list.GetSelection().unwrap(),
+                shown_by_easime: list.IsShown().unwrap().as_bool(),
+                page_starts,
+            })
+        }
     }
 }
 
@@ -841,6 +922,14 @@ fn type_through_tsf() {
     unsafe { thread_manager.SetFocus(&document) }.expect("focusing the document");
     pump(200);
 
+    // The application hears about candidate lists.
+    let elements = Rc::new(Elements::default());
+    let element_sink: ITfUIElementSink = ElementSink(elements.clone()).into();
+    let source: ITfSource = thread_manager.cast().unwrap();
+    // SAFETY: the sink is alive for the call.
+    let element_cookie = unsafe { source.AdviseSink(&ITfUIElementSink::IID, &element_sink) }
+        .expect("listening to UI elements");
+
     // easime's text service, activated by TSF for this process only.
     let manager: ITfInputProcessorProfileMgr =
         unsafe { CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER) }
@@ -917,6 +1006,8 @@ fn type_through_tsf() {
     let application = Application {
         keystrokes,
         field: field.clone(),
+        thread_manager: thread_manager.clone(),
+        elements,
     };
 
     // Run the scenario; whatever happens, show what TSF asked of the document.
@@ -928,7 +1019,8 @@ fn type_through_tsf() {
         eprintln!("  {call}");
     }
     eprintln!("---- final text: {:?}", application.text());
-    // SAFETY: the thread manager and the window are alive.
+    // SAFETY: the source, the thread manager and the window are alive.
+    let _ = unsafe { source.UnadviseSink(element_cookie) };
     unsafe { thread_manager.Deactivate() }.expect("thread manager deactivation");
     let _ = unsafe { DestroyWindow(window) };
     if let Some(log) = easime_config::log_path()
@@ -1055,10 +1147,22 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     assert_eq!(shown.left, CURSOR.left, "starts at the cursor");
     assert_eq!(shown.top, CURSOR.bottom + 2, "just below the cursor");
     assert_eq!(underlines(context, client), [("한".into(), CONVERTING)]);
+    // An application that lets easime draw still hears about the list.
+    let listed = app.candidate_list().expect("TSF announced the list");
+    assert!(listed.shown_by_easime, "easime draws it: {listed:?}");
+    assert!(listed.items.len() > 1, "{listed:?}");
+    assert_eq!(listed.selection, 0);
+    let ends = app.elements.ends.get();
     assert!(
         app.press(0x31, 0x02, Some("1")),
         "1 chooses, it is not typed"
     );
+    assert_eq!(
+        app.candidate_list().map(|l| l.items),
+        None,
+        "the list ended"
+    );
+    assert_eq!(app.elements.ends.get(), ends + 1);
     let text = app.text();
     let chosen = text.chars().last().unwrap();
     assert!(
@@ -1107,6 +1211,32 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     assert!(candidate_box().is_none(), "the window goes away");
     assert_eq!(compositions(context), 0);
     assert!(underlines(context, client).is_empty());
+
+    // An application that draws the candidates itself (a full-screen game)
+    // says so when the list begins: easime's window stays away, the
+    // conversion is not taken back, and the application reads the list and
+    // hears about each change.
+    app.elements.draws_itself.set(true);
+    let before = app.text();
+    app.letters("nihon");
+    assert!(app.press(VK_SPACE, 0x39, Some(" ")), "Space converts");
+    assert_eq!(app.text(), format!("{before}日本"), "the conversion stays");
+    assert!(candidate_box().is_none(), "easime's window stays away");
+    let listed = app.candidate_list().expect("the application has the list");
+    assert_eq!(listed.items, ["日本", "にほん", "ニホン"]);
+    assert_eq!(listed.selection, 0);
+    assert!(!listed.shown_by_easime);
+    assert_eq!(listed.page_starts, [0], "one page of up to nine");
+    let updates = app.elements.updates.get();
+    assert!(app.press(VK_SPACE, 0x39, Some(" ")), "the next candidate");
+    assert_eq!(app.text(), format!("{before}にほん"));
+    assert!(app.elements.updates.get() > updates, "the change is told");
+    assert_eq!(app.candidate_list().unwrap().selection, 1);
+    assert!(candidate_box().is_none());
+    assert!(app.press(VK_RETURN, 0x1C, Some("\n")), "Enter takes it");
+    assert_eq!(app.text(), format!("{before}にほん"));
+    assert!(app.candidate_list().is_none(), "the list ended");
+    app.elements.draws_itself.set(false);
 }
 
 /// What an application sets on its own context, as a number.

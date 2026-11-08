@@ -11,11 +11,11 @@
 //! [`EditSession`] is.
 //!
 //! The composition is underlined through TSF display attributes
-//! ([`crate::display`]); the service is their provider.
+//! ([`crate::display`]); the service is their provider. Candidates go to its
+//! window, or to an application that draws them itself ([`crate::element`]).
 //!
 //! **What it does not do yet:** show a persistent taskbar/language-bar
-//! indicator, and candidates for applications that draw them themselves. See
-//! `docs/platforms.md`.
+//! indicator. See `docs/platforms.md`.
 //!
 //! One service lives per thread of an application, so each has its own typist,
 //! and its mode (English or Korean) is its own. Everything here runs on that
@@ -25,9 +25,10 @@
 //! A panic must never take the application down with it: every entry point
 //! catches it, writes it to the log and says "not eaten".
 
-use crate::candidate::{self, CandidateWindow};
+use crate::candidate;
 use crate::diag;
 use crate::display;
+use crate::element::Candidates;
 use crate::indicator::{self, Indicator};
 use crate::install;
 use crate::keys::{KeyInfo, KeyboardState};
@@ -58,9 +59,9 @@ use windows::Win32::UI::TextServices::{
     ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource,
     ITfTextInputProcessor, ITfTextInputProcessor_Impl, ITfTextInputProcessorEx,
     ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl,
-    TF_AE_NONE, TF_ANCHOR_END, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION,
-    TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE, TF_ES_SYNC,
-    TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
+    ITfThreadMgrEx, ITfUIElementMgr, TF_AE_NONE, TF_ANCHOR_END, TF_CONTEXT_EDIT_CONTEXT_FLAGS,
+    TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
+    TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE, TF_TMF_UIELEMENTENABLEDONLY,
 };
 use windows::core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
@@ -170,7 +171,10 @@ pub struct TextService {
     /// The box that says which language is on, and whether and how long to show it.
     indicator: RefCell<Indicator>,
     /// The candidates while a conversion is going on.
-    candidates: RefCell<CandidateWindow>,
+    candidates: Candidates,
+    /// The application shows text service windows only as TSF UI elements
+    /// (some full-screen programs): the mode box, which is not one, stays away.
+    ui_elements_only: Cell<bool>,
     appearance: RefCell<Appearance>,
     /// Whether the log already says that no cursor position could be found.
     told_no_caret: Cell<bool>,
@@ -189,7 +193,8 @@ impl TextService {
             typist: RefCell::new(None),
             reloader: RefCell::new(None),
             indicator: RefCell::new(Indicator::default()),
-            candidates: RefCell::new(CandidateWindow::default()),
+            candidates: Candidates::default(),
+            ui_elements_only: Cell::new(false),
             appearance: RefCell::new(Appearance::default()),
             told_no_caret: Cell::new(false),
             composing: Rc::new(RefCell::new(None)),
@@ -284,6 +289,17 @@ impl TextService_Impl {
             }
         };
 
+        // SAFETY: the interface is alive for the call.
+        let flags = thread_manager
+            .cast::<ITfThreadMgrEx>()
+            .and_then(|manager| unsafe { manager.GetActiveFlags() })
+            .unwrap_or(0);
+        let elements_only = flags & TF_TMF_UIELEMENTENABLEDONLY != 0;
+        if elements_only {
+            diag::log("this program shows text service windows only as UI elements: no mode box");
+        }
+        self.ui_elements_only.set(elements_only);
+
         let (typist, reloader, appearance) = make_typist();
         *self.typist.borrow_mut() = Some(typist);
         *self.reloader.borrow_mut() = reloader;
@@ -298,6 +314,15 @@ impl TextService_Impl {
 
     fn client_id(&self) -> Option<u32> {
         self.activated.borrow().as_ref().map(|a| a.client_id)
+    }
+
+    /// TSF's manager of UI elements, to hand candidates to an application
+    /// that draws them itself.
+    fn elements(&self) -> Option<ITfUIElementMgr> {
+        self.activated
+            .borrow()
+            .as_ref()
+            .and_then(|a| a.thread_manager.cast().ok())
     }
 
     /// Make `outcome`'s edit in the document of `context`. Returns false if
@@ -327,7 +352,7 @@ impl TextService_Impl {
     /// Only a switch the user made comes here, never a focus change.
     fn show_indicator(&self, context: &ITfContext, language: ime_core::Language) {
         let appearance = self.appearance.borrow().clone();
-        if !appearance.indicator_box {
+        if !appearance.indicator_box || self.ui_elements_only.get() {
             return;
         }
         let caret = self.caret_of(context).or_else(indicator::system_caret);
@@ -346,24 +371,30 @@ impl TextService_Impl {
         diag::log_key(|| format!("mode box {language:?} at {shown:?} for {caret:?}"));
     }
 
-    /// Where the text cursor is on the screen, as the application's document says.
-    /// Show the candidates the last key left, or hide the window. If it cannot
-    /// be shown, the conversion is taken back: a candidate the user did not
-    /// see is never chosen.
+    /// Show the candidates the last key left, or end them. If they cannot be
+    /// shown, the conversion is taken back: a candidate the user did not see
+    /// is never chosen.
     fn show_candidates(&self, context: &ITfContext) {
         let wanted = self.typist.borrow().as_ref().and_then(|typist| {
             let list = typist.candidates()?;
-            Some((page::page(list, typist.shown())?, typist.language()))
+            let page = page::page(list, typist.shown())?;
+            Some((list.clone(), page, typist.language()))
         });
-        let Some((page, language)) = wanted else {
-            self.candidates.borrow_mut().hide();
+        let elements = self.elements();
+        let Some((list, page, language)) = wanted else {
+            self.candidates.end(elements.as_ref());
             return;
         };
-        let caret = self.caret_of(context).or_else(candidate::fallback_anchor);
-        let shown =
-            caret.and_then(|caret| self.candidates.borrow_mut().show(&page, language, caret));
-        if shown.is_some() {
-            diag::log_key(|| format!("candidates at {shown:?}"));
+        let shown = self.candidates.show(
+            elements.as_ref(),
+            // SAFETY: the context is alive for the call.
+            || unsafe { context.GetDocumentMgr() }.ok(),
+            &list,
+            page,
+            language,
+            || self.caret_of(context).or_else(candidate::fallback_anchor),
+        );
+        if shown {
             return;
         }
         diag::log("candidates could not be shown; the conversion is taken back");
@@ -379,9 +410,10 @@ impl TextService_Impl {
                 diag::log(&format!("could not edit the document: {e}"));
             }
         }
-        self.candidates.borrow_mut().hide();
+        self.candidates.end(elements.as_ref());
     }
 
+    /// Where the text cursor is on the screen, as the application's document says.
     fn caret_of(&self, context: &ITfContext) -> Option<Rect> {
         let client_id = self.client_id()?;
         let found = Rc::new(Cell::new(None));
@@ -404,9 +436,6 @@ impl TextService_Impl {
         found.get()
     }
 
-    /// Run `steps` in an edit session of `context`. A key wants its text now
-    /// (`sync`); a composition that ends because the focus moved does not mind
-    /// when.
     /// The underlines of a composition, with TSF's numbers for them.
     fn parts(&self, marks: &[(Range<usize>, Mark)]) -> Vec<(Range<usize>, u32)> {
         if marks.is_empty() {
@@ -428,6 +457,9 @@ impl TextService_Impl {
             .collect()
     }
 
+    /// Run `steps` in an edit session of `context`. A key wants its text now
+    /// (`sync`); a composition that ends because the focus moved does not mind
+    /// when.
     fn run(
         &self,
         context: &ITfContext,
@@ -495,7 +527,7 @@ impl TextService_Impl {
         if let Some(typist) = self.typist.borrow_mut().as_mut() {
             typist.forget();
         }
-        self.candidates.borrow_mut().hide();
+        self.candidates.end(self.elements().as_ref());
     }
 
     /// A composition left in another text field (the focus moved without
@@ -554,7 +586,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         guarded("Deactivate", Ok(()), || {
             self.end_composition();
             self.indicator.borrow_mut().destroy();
-            self.candidates.borrow_mut().destroy();
+            self.candidates.destroy(self.elements().as_ref());
             // Every step is tried even if one fails: a sink left behind would
             // keep this service alive and keep being called.
             let taken = self.activated.borrow_mut().take();
@@ -656,7 +688,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 if let Some(typist) = self.typist.borrow_mut().as_mut() {
                     typist.forget();
                 }
-                self.candidates.borrow_mut().hide();
+                self.candidates.end(self.elements().as_ref());
                 return Ok(false.into());
             }
             self.show_candidates(context);
@@ -711,9 +743,12 @@ impl ITfCompositionSink_Impl for TextService_Impl {
             {
                 typist.forget();
             }
-            if let Ok(mut candidates) = self.candidates.try_borrow_mut() {
-                candidates.hide();
-            }
+            let elements = self.activated.try_borrow().ok().and_then(|activated| {
+                activated
+                    .as_ref()
+                    .and_then(|a| a.thread_manager.cast::<ITfUIElementMgr>().ok())
+            });
+            self.candidates.end(elements.as_ref());
             Ok(())
         })
     }

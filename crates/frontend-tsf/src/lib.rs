@@ -22,11 +22,11 @@
 //! [`marks`], and the Windows side is [`display`].
 //!
 //! A conversion shows its candidates in a window next to the cursor
-//! ([`candidate`], what it shows is the portable [`page`]).
+//! ([`candidate`], what it shows is the portable [`page`]), or hands them to
+//! an application that draws them itself, such as a full-screen game
+//! ([`element`]).
 //!
-//! **Not here yet:** candidates for applications that draw them themselves
-//! (full-screen ones), and sharing the mode
-//! between programs.
+//! **Not here yet:** sharing the mode between programs.
 //! Korean and Japanese can be typed ([`profiles::TYPEABLE`]). It has been tested against
 //! a simulated TSF application in CI, not on a real PC. See `docs/platforms.md`,
 //! "Windows", and `docs/status.md`.
@@ -45,6 +45,8 @@ pub mod candidate;
 pub mod diag;
 #[cfg(windows)]
 pub mod display;
+#[cfg(windows)]
+pub mod element;
 #[cfg(windows)]
 pub mod indicator;
 #[cfg(windows)]

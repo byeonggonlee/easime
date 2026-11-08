@@ -76,9 +76,100 @@ pub fn page(list: &CandidateList, composition: &str) -> Option<Page> {
     })
 }
 
+/// Where each page of `list` starts: what an application that draws the
+/// candidates itself is told, so its pages are the ones the number keys pick
+/// from.
+pub fn page_starts(list: &CandidateList) -> Vec<u32> {
+    (0..list.items.len())
+        .step_by(CandidateList::PAGE_SIZE)
+        .map(|start| start as u32)
+        .collect()
+}
+
+/// The page holding the chosen candidate, counted from 0.
+pub fn current_page(list: &CandidateList) -> u32 {
+    (list.page_number() - 1) as u32
+}
+
+/// What changed between two lists, as an application that draws the
+/// candidates itself is told (it redraws only that).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Changes {
+    pub count: bool,
+    pub strings: bool,
+    pub selection: bool,
+    /// The page holding the chosen candidate.
+    pub page: bool,
+    /// Where the pages start.
+    pub pages: bool,
+}
+
+impl Changes {
+    /// A new list: everything is new.
+    pub const ALL: Changes = Changes {
+        count: true,
+        strings: true,
+        selection: true,
+        page: true,
+        pages: true,
+    };
+
+    pub fn any(&self) -> bool {
+        *self != Changes::default()
+    }
+}
+
+/// What changed from `before` to `after`.
+pub fn changes(before: &CandidateList, after: &CandidateList) -> Changes {
+    Changes {
+        count: before.items.len() != after.items.len(),
+        strings: before.items != after.items,
+        selection: before.selected != after.selected,
+        page: current_page(before) != current_page(after),
+        pages: page_starts(before) != page_starts(after),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn applications_get_the_same_pages_of_nine() {
+        assert_eq!(page_starts(&list(20, 0)), [0, 9, 18]);
+        assert_eq!(page_starts(&list(9, 0)), [0]);
+        assert_eq!(page_starts(&list(0, 0)), Vec::<u32>::new());
+        assert_eq!(current_page(&list(20, 8)), 0);
+        assert_eq!(current_page(&list(20, 9)), 1);
+        assert_eq!(current_page(&list(20, 19)), 2);
+    }
+
+    #[test]
+    fn only_what_changed_is_reported() {
+        let first = list(12, 0);
+        assert!(!changes(&first, &first).any());
+        assert_eq!(
+            changes(&first, &list(12, 1)),
+            Changes {
+                selection: true,
+                ..Changes::default()
+            },
+            "the next candidate on the same page"
+        );
+        assert_eq!(
+            changes(&first, &list(12, 9)),
+            Changes {
+                selection: true,
+                page: true,
+                ..Changes::default()
+            },
+            "the next page"
+        );
+        let other = changes(&first, &list(3, 0));
+        assert!(other.count && other.strings && other.pages);
+        assert!(!other.selection && !other.page);
+        assert!(Changes::ALL.any());
+    }
 
     fn list(count: usize, selected: usize) -> CandidateList {
         CandidateList {
