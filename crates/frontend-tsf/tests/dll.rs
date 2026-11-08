@@ -68,9 +68,7 @@ fn regsvr32_registers_the_dll_and_com_creates_the_service_from_it() {
         regsvr32(&dll, true),
         "regsvr32 could not unregister the DLL"
     );
+    // Not checked: whether COM can still make the service. This process loaded
+    // the DLL and COM keeps the class it got from it until the process ends.
     assert!(!registration::class_registered(), "the COM class is gone");
-    // SAFETY: as above; the class is no longer registered.
-    let gone =
-        unsafe { CoCreateInstance::<_, ITfTextInputProcessor>(&clsid, None, CLSCTX_INPROC_SERVER) };
-    assert!(gone.is_err(), "COM no longer knows the class");
 }
