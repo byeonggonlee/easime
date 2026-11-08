@@ -429,6 +429,7 @@ name = "frontend-tsf"
 version = "0.1.0"
 dependencies = [
  "easime-config",
+ "engine-japanese",
  "ime-core",
  "ime-session",
  "windows",

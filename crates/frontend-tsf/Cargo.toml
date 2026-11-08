@@ -16,6 +16,9 @@ ime-core = { path = "../ime-core" }
 ime-session = { path = "../ime-session" }
 easime-config = { path = "../easime-config" }
 
+[dev-dependencies]
+engine-japanese = { path = "../engine-japanese" }
+
 # The COM parts talk to Windows through Microsoft's own bindings.
 [target.'cfg(windows)'.dependencies]
 # The `implement` macro names this crate in the code it writes.

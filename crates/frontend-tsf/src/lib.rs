@@ -12,6 +12,7 @@
 
 pub mod keys;
 pub mod profiles;
+pub mod typing;
 
 #[cfg(windows)]
 pub mod registration;
