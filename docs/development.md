@@ -50,7 +50,7 @@ pwsh packaging\windows\test.ps1 -Msi target\easime-<버전>-x64.msi -OldMsi targ
 ```
 MSI는 텍스트 서비스 DLL(`easime_tsf.dll`)을 설치하고 Windows에 등록하며, 설치한 사용자의 언어 목록에 한국어를 켠다(`rundll32 easime_tsf.dll,EnableForCurrentUser korean`). 터미널 데모와 라이선스도 담는다. 만들려면 Rust와 WiX가 필요하고 `build.ps1`이 WiX UI 확장(설치 창)을 WiX에 더한다.
 
-**실제 Windows PC에서 시험하기** (CI의 `easime-windows-installer-<commit>` 아티팩트를 받거나 위처럼 직접 만든다):
+**실제 Windows PC에서 시험하기** (절차와 기록 양식은 [windows-testing.md](windows-testing.md)) (CI의 `easime-windows-installer-<commit>` 아티팩트를 받거나 위처럼 직접 만든다):
 ```powershell
 msiexec /i easime-<버전>-x64.msi            # 설치 창이 뜬다. "Korean input"이 기본으로 켜져 있다
 msiexec /i easime-<버전>-x64.msi /l*v install.log   # 무엇이 일어났는지 기록

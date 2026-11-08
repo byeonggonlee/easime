@@ -18,6 +18,7 @@
 - [플랫폼 경계](platforms.md): 공유 코어와 OS 의존 구현·한계.
 - [개발 방법](development.md): 의존성, 실행, 진단과 복구.
 - [KDE 실제 환경 검증](kde-testing.md): 재현 절차와 사용자 확인 기록.
+- [Windows 실제 환경 검증](windows-testing.md): 설치·입력·제거 절차와 기록 양식(결과는 아직 비어 있음).
 
 ## 특정 시점의 설계와 실행 계획
 
