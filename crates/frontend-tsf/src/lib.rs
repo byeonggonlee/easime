@@ -3,13 +3,13 @@
 //!
 //! **The part that needs no Windows API**, checked on every OS: turning what
 //! Windows reports about a key press into the OS-independent
-//! [`ime_core::KeyEvent`] and the switch-key role ([`keys`]); the list of what is
-//! registered with Windows, one profile per language ([`profiles`]); and what
-//! happens to a key, which keys the service takes, what text and composition
-//! result, when the language switches ([`typing`]).
+//! [`ime_core::KeyEvent`] and the switch-key role ([`keys`]); the single TSF
+//! profile registered with Windows and the default language cycle ([`profiles`]);
+//! and what happens to a key, which keys the service takes, what text and
+//! composition result, when the language switches ([`typing`]).
 //!
 //! **The part that talks to Windows** (Windows only): registering the COM class
-//! and the profiles ([`registration`], run by `regsvr32` and the installer),
+//! and the profile ([`registration`], run by `regsvr32` and the installer),
 //! switching a language on for the installing user ([`setup`]), and the text
 //! service itself, which writes what [`typing`] decides into TSF compositions
 //! ([`service`]).

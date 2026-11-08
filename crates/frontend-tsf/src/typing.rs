@@ -145,7 +145,16 @@ impl Typist {
 
     /// `OnKeyDown`: take the key (or not) and say what to do with the document.
     pub fn key_down(&mut self, key: KeyInfo, state: &KeyboardState) -> Outcome {
-        let role = keys::toggle_role(key);
+        let role = match keys::toggle_role(key) {
+            KeyRole::RightAlt
+                if keys::shift_held(state)
+                    || keys::modifiers(state).ctrl
+                    || keys::modifiers(state).meta =>
+            {
+                KeyRole::Other
+            }
+            role => role,
+        };
         if key.repeat && role == KeyRole::HangulKey && self.toggle_key.uses_hangul_key() {
             // Held down: one press switched, the repeats are not more presses.
             return Outcome::eaten();
@@ -256,7 +265,7 @@ impl Typist {
     pub fn apply_config(&mut self, config: &easime_config::Config) -> Option<Edit> {
         let leftover = self.session.apply_config(config);
         self.toggle_key = config.shortcuts.toggle_key;
-        self.toggle = ToggleTracker::with_setting(self.toggle_key);
+        self.toggle.set_setting(self.toggle_key);
         self.finished(leftover)
     }
 }
@@ -579,6 +588,16 @@ mod tests {
         let release = typist.key_up(alt);
         assert!(!release.eaten && release.switched_to.is_none());
         assert_eq!(typist.language(), Language::Korean);
+
+        // AltGr (Ctrl already down when right Alt is pressed) or Shift+RightAlt
+        // must not arm the switch either.
+        for modifier in [VK_CONTROL, VK_SHIFT] {
+            typist.key_down(alt, &held(&[modifier]));
+            assert!(!typist.test_key_up(alt));
+            let release = typist.key_up(alt);
+            assert!(!release.eaten && release.switched_to.is_none());
+            assert_eq!(typist.language(), Language::Korean);
+        }
     }
 
     #[test]

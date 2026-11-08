@@ -202,6 +202,18 @@ impl Indicator {
         }
     }
 
+    /// Destroy the window on the thread that created it (called on TSF
+    /// `Deactivate` as well as `Drop`).
+    pub fn destroy(&mut self) {
+        if let Some(window) = self.window.take() {
+            // SAFETY: our own window, on the thread that made it.
+            unsafe {
+                let _ = KillTimer(Some(window), TIMER);
+                let _ = DestroyWindow(window);
+            }
+        }
+    }
+
     fn window(&mut self) -> Option<HWND> {
         if self.window.is_none() {
             self.window = create_window();
@@ -212,13 +224,7 @@ impl Indicator {
 
 impl Drop for Indicator {
     fn drop(&mut self) {
-        if let Some(window) = self.window.take() {
-            // SAFETY: our own window, on the thread that made it (the service
-            // is released on its thread).
-            unsafe {
-                let _ = DestroyWindow(window);
-            }
-        }
+        self.destroy();
         // The class points into this DLL, which may be unloaded after the last
         // service goes: take it away. It fails while another thread's window
         // still uses it, and that thread's drop takes it then.

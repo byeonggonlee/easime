@@ -2,7 +2,7 @@
 //!
 //! Two things make an input method known to Windows: the COM class (a registry
 //! key under `HKLM\SOFTWARE\Classes\CLSID` that says which DLL implements it)
-//! and its TSF profiles (what the language settings list, one per language, see
+//! and its TSF profile (what the language settings list, see
 //! [`crate::profiles`]). Both are written by `DllRegisterServer`, which the
 //! installer runs (`regsvr32`), and removed by `DllUnregisterServer`.
 //!
@@ -11,7 +11,7 @@
 
 use crate::profiles::{self, CLSID};
 use std::path::Path;
-use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, FreeLibrary};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
@@ -85,7 +85,7 @@ fn set_default(key: HKEY, value: &str) -> Result<()> {
 
 fn set_named(key: HKEY, name: &str, value: &str) -> Result<()> {
     let (name, data) = (wide(name), wide(value));
-    // SAFETY: both are NUL-terminated UTF-16 strings that outlive the call.
+    // SAFETY: both are NUL-terminated UTF-16 strings that outlives the call.
     unsafe {
         RegSetValueExW(
             key,
@@ -280,18 +280,25 @@ const ILOT_UNINSTALL: u32 = 0x0000_0001;
 fn install_layout_or_tip(spec: &str, flags: u32) -> Result<()> {
     // SAFETY: loading a system DLL by name.
     let library = unsafe { LoadLibraryW(w!("input.dll")) }?;
-    // SAFETY: the name is a NUL-terminated string; the function has this signature.
-    let function = unsafe { GetProcAddress(library, s!("InstallLayoutOrTip")) }
-        .ok_or_else(Error::from_thread)?;
-    // SAFETY: input.dll exports `BOOL InstallLayoutOrTip(LPCWSTR, DWORD)`.
-    let function: InstallLayoutOrTip = unsafe { std::mem::transmute(function) };
-    let spec = wide(spec);
-    // SAFETY: `spec` is NUL-terminated and lives for the call.
-    if unsafe { function(spec.as_ptr(), flags) }.as_bool() {
-        Ok(())
-    } else {
-        Err(Error::from_thread())
+    let result = (|| {
+        // SAFETY: the name is a NUL-terminated string; the function has this signature.
+        let function = unsafe { GetProcAddress(library, s!("InstallLayoutOrTip")) }
+            .ok_or_else(Error::from_thread)?;
+        // SAFETY: input.dll exports `BOOL InstallLayoutOrTip(LPCWSTR, DWORD)`.
+        let function: InstallLayoutOrTip = unsafe { std::mem::transmute(function) };
+        let spec = wide(spec);
+        // SAFETY: `spec` is NUL-terminated and lives for the call.
+        if unsafe { function(spec.as_ptr(), flags) }.as_bool() {
+            Ok(())
+        } else {
+            Err(Error::from_thread())
+        }
+    })();
+    // SAFETY: balances the successful LoadLibraryW above.
+    unsafe {
+        let _ = FreeLibrary(library);
     }
+    result
 }
 
 /// Add easime's profile for `language` to the current user's input methods

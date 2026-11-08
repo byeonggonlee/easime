@@ -468,8 +468,7 @@ impl ITextStoreACP_Impl for TextStore_Impl {
 /// A profile that exists only for this test, under US English: a CI runner has
 /// no Korean language set up, and TSF refuses to activate a profile of a
 /// language the machine does not have. The service behind it is easime's, and
-/// with a profile that is none of easime's it types Korean (the first language
-/// it can type).
+/// its default language cycle starts in Korean.
 const TEST_PROFILE: &str = "{3C7E2D91-5B4A-4F08-A6D3-9E1B7C5A2F64}";
 const ENGLISH_US: u16 = 0x0409;
 

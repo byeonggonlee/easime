@@ -10,9 +10,9 @@
 //! *edit session* that TSF grants (`RequestEditSession`), which is what
 //! [`EditSession`] is.
 //!
-//! **What it does not do yet:** show which mode (English or the language) is
-//! on, underline the composition (no display attributes), and candidates for
-//! conversion. See `docs/platforms.md`.
+//! **What it does not do yet:** show a persistent taskbar/language-bar
+//! indicator, underline the composition (no display attributes), and
+//! candidates for conversion. See `docs/platforms.md`.
 //!
 //! One service lives per thread of an application, so each has its own typist,
 //! and its mode (English or Korean) is its own. Everything here runs on that
@@ -209,6 +209,9 @@ impl TextService_Impl {
     /// Start serving: take the key sink and the thread sink, and remember what
     /// TSF gave us.
     fn activate(&self, thread_manager: &ITfThreadMgr, client_id: u32) -> Result<()> {
+        if self.activated.borrow().is_some() {
+            return Ok(());
+        }
         let sink: ITfKeyEventSink = self.to_interface();
         let keystrokes: ITfKeystrokeMgr = thread_manager.cast()?;
         // SAFETY: both interfaces are alive for the call.
@@ -437,7 +440,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
     fn Deactivate(&self) -> Result<()> {
         guarded("Deactivate", Ok(()), || {
             self.end_composition();
-            self.indicator.borrow_mut().hide();
+            self.indicator.borrow_mut().destroy();
             // Every step is tried even if one fails: a sink left behind would
             // keep this service alive and keep being called.
             let taken = self.activated.borrow_mut().take();
@@ -753,6 +756,9 @@ impl ITfEditSession_Impl for CaretQuery_Impl {
                 let mut clipped = BOOL::default();
                 // SAFETY: the range, the rectangle and the flag live for the call.
                 unsafe { view.GetTextExt(cookie, &range, &mut area, &mut clipped) }?;
+                if area.left == 0 && area.top == 0 && area.right == 0 && area.bottom == 0 {
+                    return Ok(());
+                }
                 self.found.set(Some(Rect {
                     left: area.left,
                     top: area.top,
