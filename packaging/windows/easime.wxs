@@ -29,6 +29,8 @@
   <Package Name="easime" Manufacturer="Byeonggon Lee" Version="$(Version)"
            UpgradeCode="FEE90A7B-20AC-4B9B-8D9E-DDDAFE8C7866" Scope="perMachine">
     <SummaryInformation Description="easime: Easy Eastern Asian IME (early test build of the Windows input method)" />
+    <Icon Id="EasimeIcon" SourceFile="$(Root)/data/icons/easime.ico" />
+    <Property Id="ARPPRODUCTICON" Value="EasimeIcon" />
     <Property Id="ARPCOMMENTS" Value="Early test build of the Windows input method (Korean). Added to the language settings of the user who installed it." />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/byeonggonlee/easime" />
 
@@ -55,6 +57,9 @@
         </Component>
         <!-- One file per component: a component with an automatic GUID may only
              hold several files if one of them is versioned. -->
+        <Component Id="AppIcon">
+          <File Id="EasimeIco" Source="$(Root)/data/icons/easime.ico" />
+        </Component>
         <Component Id="LicenseMit">
           <File Id="LicenseMit" Source="$(Root)/LICENSE-MIT" />
         </Component>
@@ -87,6 +92,7 @@
              Description="The Windows input method, the terminal demo and the licenses.">
       <ComponentRef Id="TextService" />
       <ComponentRef Id="Demo" />
+      <ComponentRef Id="AppIcon" />
       <ComponentRef Id="LicenseMit" />
       <ComponentRef Id="LicenseApache" />
       <ComponentRef Id="ThirdParty" />

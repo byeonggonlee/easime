@@ -15,8 +15,10 @@
 use ab_glyph::{Font, FontVec, VariableFont};
 use fontdb::{Database, Family, Query, Weight};
 
-/// Weight requested from variable fonts.
+/// Weight requested from variable fonts for the cursor-adjacent box.
 const INDICATOR_WEIGHT: f32 = 600.0;
+/// Weight requested for small task bar icons so strokes stay crisp at 16-32 px.
+const TRAY_WEIGHT: f32 = 700.0;
 
 const KOREAN: &[&str] = &[
     "Noto Sans CJK KR",
@@ -85,14 +87,24 @@ impl Fonts {
 
     /// A font that has a real (not ".notdef") glyph for `ch`, if any.
     pub fn font_for(&self, ch: char) -> Option<FontVec> {
+        self.font_with_weight(ch, Weight::NORMAL, INDICATOR_WEIGHT)
+    }
+
+    /// A bolder font for small task bar icons (16–32 px), so the letter stays
+    /// crisp and legible next to other tray icons.
+    pub fn font_for_tray(&self, ch: char) -> Option<FontVec> {
+        self.font_with_weight(ch, Weight::BOLD, TRAY_WEIGHT)
+    }
+
+    fn font_with_weight(&self, ch: char, weight: Weight, var_weight: f32) -> Option<FontVec> {
         for name in preferred_families(ch) {
             let query = Query {
                 families: &[Family::Name(name)],
-                weight: Weight::NORMAL,
+                weight,
                 ..Query::default()
             };
             if let Some(id) = self.db.query(&query)
-                && let Some(font) = self.load(id, ch)
+                && let Some(font) = self.load(id, ch, var_weight)
             {
                 return Some(font);
             }
@@ -102,10 +114,10 @@ impl Fonts {
         self.db
             .faces()
             .filter(|face| !face.post_script_name.is_empty() || !face.families.is_empty())
-            .find_map(|face| self.load(face.id, ch))
+            .find_map(|face| self.load(face.id, ch, var_weight))
     }
 
-    fn load(&self, id: fontdb::ID, ch: char) -> Option<FontVec> {
+    fn load(&self, id: fontdb::ID, ch: char, var_weight: f32) -> Option<FontVec> {
         let mut font = self
             .db
             .with_face_data(id, |data, index| {
@@ -116,7 +128,7 @@ impl Fonts {
         // default instance, which can be hair-thin at this size. Light text on
         // a dark box wants a heavier weight; static fonts have no such axis
         // and ignore the request.
-        let _ = font.set_variation(b"wght", INDICATOR_WEIGHT);
+        let _ = font.set_variation(b"wght", var_weight);
         (font.glyph_id(ch).0 != 0).then_some(font)
     }
 }

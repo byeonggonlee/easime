@@ -13,7 +13,7 @@
 //! worker thread talks to D-Bus, so a slow desktop shell can never delay typing.
 
 use frontend_wayland::font::Fonts;
-use frontend_wayland::indicator::{Bitmap, render};
+use frontend_wayland::indicator::{Bitmap, render_tray};
 use ime_core::Language;
 use ime_session::indicator::{language_glyph, language_native_name};
 use ksni::menu::{RadioGroup, RadioItem, StandardItem};
@@ -21,8 +21,9 @@ use ksni::{Category, Icon, MenuItem, Status, ToolTip, Tray};
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
 
-/// Sizes the icon is offered in; the shell picks the one that fits.
-const ICON_SIZES: [u32; 4] = [16, 24, 32, 48];
+/// Sizes the icon is offered in; the shell picks the one that fits (Plasma's
+/// default system tray cell is 22 px, or 44/64 px on HiDPI).
+const ICON_SIZES: [u32; 6] = [16, 22, 24, 32, 48, 64];
 
 /// Every glyph the tray can show, drawn at every size.
 const GLYPHS: [Language; 3] = [Language::English, Language::Korean, Language::Japanese];
@@ -64,10 +65,10 @@ impl Icons {
         let mut by_glyph = HashMap::new();
         for language in GLYPHS {
             let glyph = language_glyph(language);
-            let font = fonts.font_for(glyph);
+            let font = fonts.font_for_tray(glyph);
             let icons = ICON_SIZES
                 .iter()
-                .map(|&size| icon_from_bitmap(&render(glyph, font.as_ref(), size)))
+                .map(|&size| icon_from_bitmap(&render_tray(glyph, font.as_ref(), size)))
                 .collect();
             by_glyph.insert(glyph, icons);
         }

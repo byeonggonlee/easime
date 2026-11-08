@@ -185,13 +185,13 @@ fn the_icon_registers_shows_the_language_and_follows_it() {
     });
     let korean: Vec<(i32, i32, Vec<u8>)> = property(&item, "IconPixmap");
     let sizes: Vec<i32> = korean.iter().map(|icon| icon.0).collect();
-    assert_eq!(sizes, [16, 24, 32, 48]);
+    assert_eq!(sizes, [16, 22, 24, 32, 48, 64]);
     for (width, height, data) in &korean {
         assert_eq!(width, height);
         assert_eq!(data.len() as i32, width * height * 4, "ARGB32 pixels");
     }
     // Opaque and translucent pixels both occur: a box with rounded corners.
-    let biggest = &korean[3].2;
+    let biggest = &korean.last().unwrap().2;
     assert!(biggest.chunks(4).any(|px| px[0] == 0), "clear corners");
     assert!(biggest.chunks(4).any(|px| px[0] > 0), "drawn box");
 
@@ -215,7 +215,11 @@ fn the_icon_registers_shows_the_language_and_follows_it() {
     // may have no CJK font; the box is then drawn empty for every language).
     let fonts = frontend_wayland::font::Fonts::load_system();
     if fonts.font_for('한').is_some() && fonts.font_for('あ').is_some() {
-        assert_ne!(japanese[3].2, korean[3].2, "the letter changed");
+        assert_ne!(
+            japanese.last().unwrap().2,
+            korean.last().unwrap().2,
+            "the letter changed"
+        );
     } else {
         eprintln!("note: no installed font has both 한 and あ; the letter change is not compared");
     }

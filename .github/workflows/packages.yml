@@ -168,6 +168,8 @@ jobs:
           test -x /usr/bin/easime-settings
           desktop-file-validate /usr/share/applications/easime.desktop
           desktop-file-validate /usr/share/applications/easime-settings.desktop
+          test -f /usr/share/icons/hicolor/512x512/apps/easime.png
+          test -f /usr/share/icons/hicolor/scalable/apps/easime.svg
           size="$(stat -c %s /usr/share/easime/dictionary/mozc.bin)"
           echo "installed dictionary: $size bytes"
           test "$size" -gt 10000000
@@ -231,6 +233,8 @@ jobs:
           test -x /usr/bin/easime-settings
           desktop-file-validate /usr/share/applications/easime.desktop
           desktop-file-validate /usr/share/applications/easime-settings.desktop
+          test -f /usr/share/icons/hicolor/512x512/apps/easime.png
+          test -f /usr/share/icons/hicolor/scalable/apps/easime.svg
           size="$(stat -c %s /usr/share/easime/dictionary/mozc.bin)"
           echo "installed dictionary: $size bytes"
           test "$size" -gt 10000000

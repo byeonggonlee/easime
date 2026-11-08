@@ -16,12 +16,24 @@ pub const BOX_SIZE: u32 = 48;
 
 /// Background: dark and translucent (straight, not premultiplied, RGBA).
 const BACKGROUND: [u8; 4] = [0x20, 0x22, 0x26, 0xE0];
+/// Background for the task bar icon: dark and nearly opaque for crisp contrast.
+const TRAY_BACKGROUND: [u8; 4] = [0x20, 0x24, 0x2C, 0xF8];
+/// Subtle border on the task bar icon so the badge stands out on dark panels.
+const TRAY_BORDER: [u8; 4] = [0x60, 0x68, 0x78, 0x90];
 /// Glyph colour: light.
 const FOREGROUND: [u8; 3] = [0xF2, 0xF2, 0xF2];
+/// Glyph colour in the task bar: pure white for maximum legibility at 16–24 px.
+const TRAY_FOREGROUND: [u8; 3] = [0xFF, 0xFF, 0xFF];
 /// Corner radius as a fraction of the box size.
 const RADIUS: f32 = 0.22;
+/// Corner radius for the task bar badge.
+const TRAY_RADIUS: f32 = 0.20;
 /// Glyph height (font size) as a fraction of the box size.
 const GLYPH_SIZE: f32 = 0.64;
+/// Target ink size as a fraction of the task bar icon size (leaves ~12% margin
+/// on each side so the letter fills ~76% of the icon's actual pixel height/width,
+/// matching the visual weight of neighbouring 16–24 px system tray icons).
+const TRAY_INK_FRACTION: f32 = 0.76;
 
 /// The glyph shown for a language (shared by every frontend).
 pub use ime_session::indicator::language_glyph as glyph_for;
@@ -86,15 +98,20 @@ impl Bitmap {
     }
 }
 
-/// Coverage (0..=1) of the pixel centred at (px, py) by a rounded square of
-/// edge `size`, from a signed distance estimate.
-fn box_coverage(px: f32, py: f32, size: f32, radius: f32) -> f32 {
+/// Signed distance from (px, py) to a rounded square of edge `size` and corner
+/// `radius` (negative inside, positive outside).
+fn box_sdf(px: f32, py: f32, size: f32, radius: f32) -> f32 {
     let half = size / 2.0;
     let qx = (px - half).abs() - (half - radius);
     let qy = (py - half).abs() - (half - radius);
     let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
-    let distance = outside + qx.max(qy).min(0.0) - radius;
-    (0.5 - distance).clamp(0.0, 1.0)
+    outside + qx.max(qy).min(0.0) - radius
+}
+
+/// Coverage (0..=1) of the pixel centred at (px, py) by a rounded square of
+/// edge `size`, from a signed distance estimate.
+fn box_coverage(px: f32, py: f32, size: f32, radius: f32) -> f32 {
+    (0.5 - box_sdf(px, py, size, radius)).clamp(0.0, 1.0)
 }
 
 /// Draw the box with `glyph` in it. `font` may be `None`, or lack the glyph;
@@ -119,7 +136,8 @@ pub fn render<F: Font>(glyph: char, font: Option<&F>, size: u32) -> Bitmap {
     }
 
     if let Some(font) = font {
-        draw_glyph(&mut data, size, glyph, font);
+        let scale = PxScale::from(size as f32 * GLYPH_SIZE);
+        draw_glyph(&mut data, size, glyph, font, scale, FOREGROUND);
     }
     Bitmap {
         width: size,
@@ -129,14 +147,86 @@ pub fn render<F: Font>(glyph: char, font: Option<&F>, size: u32) -> Bitmap {
     }
 }
 
+/// Draw the task bar badge with `glyph` in it.
+///
+/// Unlike the 48×48 cursor-adjacent popup (`render`), the task bar icon is
+/// shown at 16–24 px alongside full-bleed system tray icons. It therefore
+/// scales the glyph so its actual ink bounding box fills [`TRAY_INK_FRACTION`]
+/// of the badge, uses pure white ink, and adds a subtle 1 px border so the
+/// badge remains distinct on dark panels.
+pub fn render_tray<F: Font>(glyph: char, font: Option<&F>, size: u32) -> Bitmap {
+    let size = size.max(8);
+    let stride = size * 4;
+    let mut data = vec![0u8; (stride * size) as usize];
+
+    let radius = size as f32 * TRAY_RADIUS;
+    for y in 0..size {
+        for x in 0..size {
+            let sdf = box_sdf(x as f32 + 0.5, y as f32 + 0.5, size as f32, radius);
+            let outer = (0.5 - sdf).clamp(0.0, 1.0);
+            let inner = (0.5 - (sdf + 1.0)).clamp(0.0, 1.0);
+            let border = (outer - inner).clamp(0.0, 1.0);
+
+            let bg_a = TRAY_BACKGROUND[3] as f32 / 255.0 * inner;
+            let bd_a = TRAY_BORDER[3] as f32 / 255.0 * border;
+            let a = bg_a + bd_a;
+            let r = TRAY_BACKGROUND[0] as f32 * bg_a + TRAY_BORDER[0] as f32 * bd_a;
+            let g = TRAY_BACKGROUND[1] as f32 * bg_a + TRAY_BORDER[1] as f32 * bd_a;
+            let b = TRAY_BACKGROUND[2] as f32 * bg_a + TRAY_BORDER[2] as f32 * bd_a;
+
+            let i = (y * stride + x * 4) as usize;
+            data[i] = b.round().clamp(0.0, 255.0) as u8;
+            data[i + 1] = g.round().clamp(0.0, 255.0) as u8;
+            data[i + 2] = r.round().clamp(0.0, 255.0) as u8;
+            data[i + 3] = (a * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+
+    if let Some(font) = font {
+        let scale = tray_glyph_scale(glyph, font, size);
+        draw_glyph(&mut data, size, glyph, font, scale, TRAY_FOREGROUND);
+    }
+    Bitmap {
+        width: size,
+        height: size,
+        stride,
+        data,
+    }
+}
+
+/// Choose a `PxScale` so the glyph's actual ink bounding box fills
+/// [`TRAY_INK_FRACTION`] of `size` (clamped so neither width nor height
+/// overflows the badge).
+fn tray_glyph_scale<F: Font>(glyph: char, font: &F, size: u32) -> PxScale {
+    let id = font.glyph_id(glyph);
+    let ref_px = size as f32;
+    let probe = id.with_scale_and_position(PxScale::from(ref_px), point(0.0, 0.0));
+    if let Some(outlined) = font.outline_glyph(probe) {
+        let bounds = outlined.px_bounds();
+        let max_dim = bounds.width().max(bounds.height());
+        if max_dim.is_finite() && max_dim > 0.0 {
+            let target = size as f32 * TRAY_INK_FRACTION;
+            let scaled = (ref_px * target / max_dim).clamp(ref_px * 0.64, ref_px * 1.35);
+            return PxScale::from(scaled);
+        }
+    }
+    PxScale::from(size as f32 * 0.85)
+}
+
 /// Composite the glyph, centred on its ink bounds, over the background.
-fn draw_glyph<F: Font>(data: &mut [u8], size: u32, glyph: char, font: &F) {
+fn draw_glyph<F: Font>(
+    data: &mut [u8],
+    size: u32,
+    glyph: char,
+    font: &F,
+    scale: PxScale,
+    foreground: [u8; 3],
+) {
     let id = font.glyph_id(glyph);
     // Glyph 0 is ".notdef" (the "tofu" box): better to show nothing.
     if id.0 == 0 {
         return;
     }
-    let scale = PxScale::from(size as f32 * GLYPH_SIZE);
     // First pass at the origin only to measure the ink.
     let probe = id.with_scale_and_position(scale, point(0.0, 0.0));
     let Some(outlined) = font.outline_glyph(probe) else {
@@ -168,7 +258,7 @@ fn draw_glyph<F: Font>(data: &mut [u8], size: u32, glyph: char, font: &F) {
         // Source-over with a premultiplied destination; the glyph is opaque.
         let a = data[i + 3] as f32 / 255.0;
         let out_a = c + a * (1.0 - c);
-        for (k, fg) in [FOREGROUND[2], FOREGROUND[1], FOREGROUND[0]]
+        for (k, fg) in [foreground[2], foreground[1], foreground[0]]
             .into_iter()
             .enumerate()
         {
@@ -317,6 +407,24 @@ mod tests {
         // A plane-16 private-use codepoint that no real font maps.
         let b = render('\u{10FFFD}', Some(&font), BOX_SIZE);
         assert_eq!(b.glyph_pixels(), 0);
+    }
+
+    #[test]
+    fn tray_badge_draws_a_larger_letter_than_the_cursor_box_at_taskbar_sizes() {
+        let Some(font) = any_system_font('A') else {
+            return;
+        };
+        for size in [16, 22, 24, 32] {
+            let popup = render('A', Some(&font), size);
+            let tray = render_tray('A', Some(&font), size);
+            assert!(
+                tray.glyph_pixels() > popup.glyph_pixels(),
+                "size {size}: tray={} popup={}",
+                tray.glyph_pixels(),
+                popup.glyph_pixels()
+            );
+            assert_ink_centred(&tray);
+        }
     }
 
     /// The bright pixels' centre of mass is near the middle of the box.

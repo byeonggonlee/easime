@@ -98,13 +98,13 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 
 ## 패키징과 배포
 - **Linux**: GitHub Actions에서 빌드해 **GitHub Releases에 .deb / .rpm** 업로드(`cargo-deb`, `cargo-generate-rpm`).
-  **배포판당 패키지는 하나다**(사용자 요청, 2026-11-07: 키보드와 설정을 따로 설치하게 하지 않는다). 데몬(`easime`), 설정 창(`easime-settings`), 가상 키보드 등록용 `easime.desktop`(메뉴에는 안 보임), 앱 메뉴의 "easime 설정"(`easime-settings.desktop`, 이름은 한·일·번체·간체로 현지화), 일본어 사전이 한 파일에 들어 있다. 패키지 메타데이터는 `crates/easime/Cargo.toml`에 있다.
+  **배포판당 패키지는 하나다**(사용자 요청, 2026-11-07: 키보드와 설정을 따로 설치하게 하지 않는다). 데몬(`easime`), 설정 창(`easime-settings`), 가상 키보드 등록용 `easime.desktop`(메뉴에는 안 보임), 앱 메뉴의 "easime 설정"(`easime-settings.desktop`, 이름은 한·일·번체·간체로 현지화), 다국어 키캡 정체성을 담은 앱 아이콘(`data/icons/`, 512×512~16×16 PNG 및 SVG가 `/usr/share/icons/hicolor/`에 설치), 일본어 사전이 한 파일에 들어 있다. 패키지 메타데이터는 `crates/easime/Cargo.toml`에 있다.
   - Qt 6와 Kirigami가 있는 환경에서 만든다: `.rpm`은 Fedora 컨테이너에서, `.deb`는 Debian 13(trixie) 컨테이너에서 그 배포판의 라이브러리로 만든다. 그러므로 `.deb`는 Debian 13 이상, Ubuntu는 Plasma 6와 Qt가 충분히 새로운 25.04 이상을 대상으로 한다. 시험한 것은 clean `debian:trixie`와 `fedora:latest` 컨테이너뿐이다.
   - 데몬이 Qt 6·Kirigami에 의존하게 되므로 KDE가 아닌 데스크톱(GNOME 등)에 설치하면 Qt가 함께 설치된다. GNOME 지원이 생기면 다시 나눌지 따진다.
   - 빌드와 검증은 `.github/workflows/packages.yml`(재사용 워크플로) 하나다. CI와 릴리스(`release.yml`)가 같은 흐름과 **같은 실제 Mozc 사전**을 쓴다. 사전은 먼저 한 번 만들어 おおさか→大阪 같은 조회를 확인한 뒤 두 패키지가 쓴다. 각 패키지는 clean 컨테이너(Fedora, Debian)에 배포판의 의존성만으로 설치하고, 설치된 데몬이 시작되어 이유를 말하며 멈추는지(컴포지터가 없으므로)와 설치된 설정 창이 모든 페이지를 여는지 확인한 뒤에야 두 파일이 한 아티팩트(`easime-linux-packages-<commit>`)로 묶인다.
   - 패키지를 설치해도 easime가 입력기로 **자동 선택되지는 않는다**: 사용자의 데스크톱 설정을 설치 스크립트가 몰래 바꾸지 않기 때문이다(AGENTS.md). 설정 창(`easime-settings`) 일반 화면의 활성화 카드(바꿀 설정 확인과 되돌리기 제공)에서 켜거나 시스템 설정 → 키보드 → 가상 키보드에서 고른 뒤 다시 로그인해야 한다.
 - **Windows**: **MSI(WiX 5)**, `packaging/windows/easime.wxs`. `build.ps1`이 만들고 `test.ps1`이 CI의 Windows 러너에 실제로 설치·사용·업그레이드·제거를 시험한다.
-  담는 것: 텍스트 서비스 DLL(`easime_tsf.dll`, 64비트), 터미널 데모(`easime-cli.exe`), 라이선스.
+  담는 것: 텍스트 서비스 DLL(`easime_tsf.dll`, 64비트), 터미널 데모(`easime-cli.exe`), 앱 아이콘(`easime.ico`), 라이선스.
   - **설치 때** DLL을 Windows에 등록하고(`regsvr32`, 실패하면 설치가 멈추고 뒤에서 실패하면 등록을 되돌린다), **설치한 사용자의** 언어 목록에 easime 프로필(한국어 아래 등록된 단일 프로필)을 켠다(DLL의 `rundll32` 내보내기 `EnableForCurrentUser`가 `InstallLayoutOrTip`을 부른다. 한국어가 목록에 없으면 언어도 함께 추가된다). 설치 창(WiX UI의 기능 트리)에서 기능("easime keyboard (listed under Korean)")을 고르게 하므로 그 화면이 확인이고, 무인 설치(`/qn`)는 기본값(켜짐)을 따른다. 기본 설치 폴더는 `C:\Program Files\easime`.
   - **제거 때** 그 사용자의 켠 프로필을 끄고(`DisableForCurrentUser`; 설치가 언어까지 더했다면 그 언어도 목록에서 사라지는 것을 CI에서 확인했다. 설치 전에 이미 있던 언어는 남을 것으로 예상하며 확인하지 않았다) Windows 등록을 푼 다음 파일을 지운다. 되돌리기는 제거다. 업그레이드는 옛 버전을 먼저 제거하고 새 버전을 설치하되, 이때는 사용자 언어 목록에서 빼거나 등록을 푸는 단계를 건너뛴다(`UPGRADINGPRODUCTCODE`): 뺐다가 다시 넣으면 한국어가 사용자 언어 목록 끝으로 밀릴 수 있기 때문이다. CI가 업그레이드 뒤 언어 목록 순서가 그대로인 것을 확인한다. 로그(`easime.log`)는 1MB를 넘으면 `easime.log.old`로 옮겨 계속 커지지 않게 한다.
   - **같은 PC의 다른 사용자**는 등록된 프로필을 Windows 설정의 "키보드 추가"에서 직접 켠다(등록은 기계 전체, 켜기는 설치한 사용자만).
