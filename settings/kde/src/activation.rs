@@ -248,17 +248,26 @@ fn read_or_empty(path: &Path) -> Result<String, Failure> {
     }
 }
 
-/// Write the whole file at once, so KWin never reads half of it.
+/// Write the whole file at once, so KWin never reads half of it. A file that is
+/// a symbolic link (a dotfiles folder) is written where the link points, so the
+/// link stays; the file keeps its permissions.
 fn write_atomic(path: &Path, text: &str) -> Result<(), Failure> {
     let write = || -> io::Result<()> {
-        if let Some(dir) = path.parent() {
+        let target = match fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => fs::canonicalize(path)?,
+            _ => path.to_path_buf(),
+        };
+        if let Some(dir) = target.parent() {
             fs::create_dir_all(dir)?;
         }
-        let mut tmp = path.as_os_str().to_owned();
+        let mut tmp = target.as_os_str().to_owned();
         tmp.push(".tmp");
         let tmp = PathBuf::from(tmp);
         fs::write(&tmp, text)?;
-        fs::rename(&tmp, path)
+        if let Ok(meta) = fs::metadata(&target) {
+            fs::set_permissions(&tmp, meta.permissions())?;
+        }
+        fs::rename(&tmp, &target)
     };
     write().map_err(|e| Failure::Io(e.to_string()))
 }
@@ -353,7 +362,14 @@ pub fn ini_set(text: &str, group: &str, key: &str, value: Option<&str>) -> Strin
         }
     }
     match (at, new_line, group_end) {
-        (Some(i), Some(line), _) => lines[i] = line,
+        (Some(i), Some(_), _) => {
+            // Keep the key as it was written, markers included.
+            let name = lines[i]
+                .split_once('=')
+                .map(|(name, _)| name.trim().to_owned())
+                .unwrap_or_else(|| key.to_owned());
+            lines[i] = format!("{name}={}", value.unwrap_or_default());
+        }
         (Some(i), None, _) => {
             lines.remove(i);
         }
@@ -380,10 +396,23 @@ fn group_header(line: &str) -> Option<&str> {
     (!inner.contains('[') && !inner.contains(']')).then_some(inner)
 }
 
-/// `key=value` → `value`, for exactly this key.
+/// `key=value` → `value`, for exactly this key. KDE may add option markers to
+/// the key (`InputMethod[$e]=...`: `$e` expands variables such as `$HOME` in
+/// the value; System Settings writes the input method this way), which are part
+/// of the line but not of the key's name.
 fn key_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let (name, value) = line.split_once('=')?;
-    (name.trim() == key).then_some(value.trim())
+    (key_name(name.trim()) == key).then_some(value.trim())
+}
+
+/// The key's name without its option markers: `InputMethod[$e]` → `InputMethod`.
+/// (A localized key, `Name[de]`, is another key and keeps its suffix; only `$`
+/// markers are options.)
+fn key_name(name: &str) -> &str {
+    match name.find("[$") {
+        Some(at) if name.ends_with(']') => &name[..at],
+        _ => name,
+    }
 }
 
 #[cfg(test)]
@@ -675,6 +704,88 @@ mod tests {
         activation.desktop_file = None;
         assert_eq!(activation.state(), State::NotInstalled);
         assert_eq!(activation.activate(), Err(Failure::NotPossible));
+    }
+
+    #[test]
+    fn a_choice_made_in_system_settings_with_a_marker_is_understood() {
+        // System Settings writes the key with the `$e` option marker.
+        let dir = Dir::new();
+        let other = format!("[Wayland]\nInputMethod[$e]={OTHER}\n");
+        let activation = setup(&dir, Some(&other));
+        assert_eq!(
+            activation.state(),
+            State::Other {
+                current: Some("org.kde.plasma.keyboard".into())
+            },
+            "the input method chosen there is seen"
+        );
+        activation.activate().unwrap();
+        let after = kwinrc_text(&dir);
+        assert_eq!(
+            after.matches("InputMethod").count(),
+            1,
+            "the line is changed, not doubled: {after}"
+        );
+        assert!(
+            after.contains("InputMethod[$e]="),
+            "the marker stays: {after}"
+        );
+        assert!(matches!(activation.state(), State::Selected { .. }));
+        activation.undo().unwrap();
+        assert_eq!(
+            kwinrc_text(&dir),
+            other,
+            "undo gives back exactly the old file"
+        );
+
+        // easime chosen in System Settings: already selected, nothing to offer.
+        let dir = Dir::new();
+        let activation = setup(&dir, None);
+        let mine = format!(
+            "[Wayland]\nInputMethod[$e]={}\n",
+            dir.path("easime.desktop").display()
+        );
+        fs::write(dir.path("kwinrc"), mine).unwrap();
+        assert!(matches!(activation.state(), State::Selected { .. }));
+        assert_eq!(activation.plan(), None);
+    }
+
+    #[test]
+    fn a_localized_key_is_not_the_key() {
+        let text = "[Wayland]\nInputMethod[de]=x\n";
+        assert_eq!(ini_get(text, "Wayland", "InputMethod"), None);
+        assert_eq!(key_name("InputMethod[$e]"), "InputMethod");
+        assert_eq!(key_name("InputMethod[$i]"), "InputMethod");
+        assert_eq!(key_name("Name[de]"), "Name[de]");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_kwinrc_stays_a_link_and_keeps_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = Dir::new();
+        let real = dir.path("dotfiles-kwinrc");
+        fs::write(&real, format!("[Wayland]\nInputMethod={OTHER}\n")).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o600)).unwrap();
+        let activation = setup(&dir, None);
+        std::os::unix::fs::symlink(&real, dir.path("kwinrc")).unwrap();
+        activation.activate().unwrap();
+        assert!(
+            fs::symlink_metadata(dir.path("kwinrc"))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "still a link"
+        );
+        assert!(
+            fs::read_to_string(&real)
+                .unwrap()
+                .contains("easime.desktop")
+        );
+        assert_eq!(
+            fs::metadata(&real).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]
