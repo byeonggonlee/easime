@@ -14,6 +14,7 @@ publish = false
 [dependencies]
 easime-config = { path = "../../crates/easime-config" }
 ime-core = { path = "../../crates/ime-core" }
+engine-japanese = { path = "../../crates/engine-japanese" }
 cxx = "1"
 cxx-qt = "0.10"
 cxx-qt-lib = { version = "0.10", features = ["qt_full"] }

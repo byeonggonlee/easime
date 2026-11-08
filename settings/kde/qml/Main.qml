@@ -127,6 +127,11 @@ Kirigami.ApplicationWindow {
         pageStack.push(Qt.resolvedUrl(entries[index].file))
     }
 
+    // For a page that leads to the Languages page (index 1).
+    function openLanguages() {
+        show(1)
+    }
+
     globalDrawer: Kirigami.GlobalDrawer {
         modal: false
         collapsible: false

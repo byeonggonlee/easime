@@ -3,6 +3,7 @@
 
 mod activation;
 mod backend;
+mod dictionary;
 mod model;
 mod view;
 

@@ -53,11 +53,11 @@ var table = {
     "zh-Hant": "尚未選用 easime 作為輸入法。選用後，下次登入起即可使用 easime 輸入。",
     "zh-Hans": "尚未选用 easime 作为输入法。选用后，下次登录起即可使用 easime 输入。"
   },
-  "easime를 입력기로 사용하고 있습니다.": {
-    "en": "You are using easime as your input method.",
-    "ja": "easime を入力メソッドとして使っています。",
-    "zh-Hant": "目前正使用 easime 作為輸入法。",
-    "zh-Hans": "当前正使用 easime 作为输入法。"
+  "easime가 입력기로 선택되어 실행 중입니다. 글을 쓰는 곳에서 입력해 보세요. 입력되지 않으면 로그 파일을 확인하세요.": {
+    "en": "easime is selected as the input method and running. Try typing where you write. If nothing is typed, check the log file.",
+    "ja": "easime が入力メソッドとして選ばれ、動作中です。文章を書く場所で入力してみてください。入力できない場合はログファイルを確認してください。",
+    "zh-Hant": "easime 已選為輸入法並正在執行。請在要寫字的地方試著輸入。若無法輸入，請查看記錄檔。",
+    "zh-Hans": "easime 已选为输入法并正在运行。请在要写字的地方试着输入。若无法输入，请查看日志文件。"
   },
   "easime를 입력기로 사용할까요?": {
     "en": "Use easime as your input method?",
@@ -269,6 +269,12 @@ var table = {
     "zh-Hant": "語言切換鍵：",
     "zh-Hans": "语言切换键："
   },
+  "언어 화면 열기": {
+    "en": "Open the Languages page",
+    "ja": "言語ページを開く",
+    "zh-Hant": "開啟語言頁面",
+    "zh-Hans": "打开语言页面"
+  },
   "언어를 바꿀 때 커서 옆에 상자로 알려 주기": {
     "en": "Show a box next to the cursor when the language changes",
     "ja": "言語を切り替えるときにカーソルの横に四角で知らせる",
@@ -317,6 +323,18 @@ var table = {
     "zh-Hant": "一般",
     "zh-Hans": "常规"
   },
+  "일본어 사전:": {
+    "en": "Japanese dictionary:",
+    "ja": "日本語辞書:",
+    "zh-Hant": "日文詞典：",
+    "zh-Hans": "日文词典："
+  },
+  "읽지 못한 사전 파일이 %1개 있습니다. 나머지로 변환하며, 자세한 이유는 로그 파일에 있습니다.": {
+    "en": "%1 dictionary file(s) could not be read. Conversion uses the rest; the log file says why.",
+    "ja": "読み込めない辞書ファイルが %1 個あります。残りで変換します。詳しい理由はログファイルにあります。",
+    "zh-Hant": "有 %1 個詞典檔案無法讀取。將使用其餘檔案轉換，原因請見記錄檔。",
+    "zh-Hans": "有 %1 个词典文件无法读取。将使用其余文件转换，原因请见日志文件。"
+  },
   "입력기로 사용하기…": {
     "en": "Use as input method…",
     "ja": "入力メソッドとして使う…",
@@ -328,6 +346,12 @@ var table = {
     "ja": "入力欄をクリックしたりウィンドウを移動したりしたときは表示せず、言語を切り替えたときだけ短く表示されます。",
     "zh-Hant": "點選輸入欄或切換視窗時不會顯示，只有在使用者切換語言時才會短暫出現。",
     "zh-Hans": "点击输入框或切换窗口时不会显示，只有在用户切换语言时才会短暂出现。"
+  },
+  "있음 (파일 %1개). 단어 단위로 한자를 고를 수 있습니다.": {
+    "en": "Found (%1 files). You can pick kanji word by word.",
+    "ja": "見つかりました（ファイル %1 個）。単語ごとに漢字を選べます。",
+    "zh-Hant": "已找到（%1 個檔案）。可逐詞選擇漢字。",
+    "zh-Hans": "已找到（%1 个文件）。可逐词选择汉字。"
   },
   "자모 단위 (한 → 하 → ㅎ)": {
     "en": "One jamo at a time (한 → 하 → ㅎ)",
@@ -359,6 +383,12 @@ var table = {
     "zh-Hant": "準備中",
     "zh-Hans": "准备中"
   },
+  "지금은 영어로만 입력됩니다. 한국어나 日本語로도 입력하려면 언어 화면에서 켜 주세요.": {
+    "en": "easime currently types English only. To type Korean or Japanese too, turn them on in the Languages page.",
+    "ja": "現在は英語のみ入力できます。韓国語や日本語も入力するには、「言語」ページでオンにしてください。",
+    "zh-Hant": "目前只能輸入英文。若要同時輸入韓文或日文，請到「語言」頁面開啟。",
+    "zh-Hans": "当前只能输入英文。若要同时输入韩文或日文，请到“语言”页面开启。"
+  },
   "지원 상태": {
     "en": "Support status",
     "ja": "対応状況",
@@ -370,6 +400,12 @@ var table = {
     "ja": "直接編集した場合:",
     "zh-Hant": "若自行修改過：",
     "zh-Hans": "如果自行修改过："
+  },
+  "찾지 못했습니다. 일본어를 켜도 가나만 후보로 나옵니다. easime 패키지를 다시 설치하거나 사전 파일을 아래 폴더 중 한 곳에 두세요:\n%1": {
+    "en": "Not found. Even with Japanese on, only kana are offered as candidates. Reinstall the easime package, or put a dictionary file in one of these folders:\n%1",
+    "ja": "見つかりません。日本語をオンにしても候補は仮名だけです。easime パッケージを再インストールするか、辞書ファイルを次のいずれかのフォルダーに置いてください:\n%1",
+    "zh-Hant": "找不到。即使開啟日文，候選也只有假名。請重新安裝 easime 套件，或將詞典檔案放在下列其中一個資料夾：\n%1",
+    "zh-Hans": "找不到。即使开启日文，候选也只有假名。请重新安装 easime 软件包，或将词典文件放在下列文件夹之一：\n%1"
   },
   "처음부터 다시": {
     "en": "Start over",

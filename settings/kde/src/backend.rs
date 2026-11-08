@@ -37,6 +37,8 @@ pub mod qobject {
         #[qproperty(QString, problem_detail, cxx_name = "problemDetail")]
         #[qproperty(QString, result_kind, cxx_name = "resultKind")]
         #[qproperty(QString, result_detail, cxx_name = "resultDetail")]
+        #[qproperty(QString, dictionary_state, cxx_name = "dictionaryState")]
+        #[qproperty(QString, dictionary_detail, cxx_name = "dictionaryDetail")]
         #[qproperty(QString, config_path, cxx_name = "configPath")]
         #[qproperty(QString, log_path, cxx_name = "logPath")]
         type EasimeSettings = super::EasimeSettingsRust;
@@ -80,6 +82,11 @@ pub mod qobject {
         #[qinvokable]
         fn reload(self: Pin<&mut EasimeSettings>);
 
+        /// Look for the Japanese dictionary now (not at start: it opens the files).
+        #[qinvokable]
+        #[cxx_name = "refreshDictionary"]
+        fn refresh_dictionary(self: Pin<&mut EasimeSettings>);
+
         #[qinvokable]
         #[cxx_name = "resetToDefaults"]
         fn reset_to_defaults(self: Pin<&mut EasimeSettings>);
@@ -102,6 +109,8 @@ pub struct EasimeSettingsRust {
     problem_detail: QString,
     result_kind: QString,
     result_detail: QString,
+    dictionary_state: QString,
+    dictionary_detail: QString,
     config_path: QString,
     log_path: QString,
     model: Model,
@@ -134,6 +143,8 @@ impl Default for EasimeSettingsRust {
             problem_detail: QString::from(view.problem_detail.as_str()),
             result_kind: QString::default(),
             result_detail: QString::default(),
+            dictionary_state: QString::from("unknown"),
+            dictionary_detail: QString::default(),
             config_path: path_text(model.path()),
             log_path: path_text(easime_config::log_path().as_deref()),
             model,
@@ -294,6 +305,14 @@ impl qobject::EasimeSettings {
     fn clear_result(mut self: Pin<&mut Self>) {
         self.as_mut().set_result_kind(QString::default());
         self.as_mut().set_result_detail(QString::default());
+    }
+
+    fn refresh_dictionary(mut self: Pin<&mut Self>) {
+        let state = crate::dictionary::inspect_installed();
+        self.as_mut()
+            .set_dictionary_detail(QString::from(state.detail().as_str()));
+        self.as_mut()
+            .set_dictionary_state(QString::from(state.code()));
     }
 
     fn reload(self: Pin<&mut Self>) {

@@ -261,8 +261,16 @@ dependencies = [
  "cxx-qt-build",
  "cxx-qt-lib",
  "easime-config",
+ "engine-japanese",
  "ime-core",
  "toml_edit",
+]
+
+[[package]]
+name = "engine-japanese"
+version = "0.1.0"
+dependencies = [
+ "ime-core",
 ]
 
 [[package]]

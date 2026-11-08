@@ -10,6 +10,14 @@ Kirigami.ScrollablePage {
 
     title: Tr.t("일반")
 
+    // The Window attached property only works on an Item, so not inside the action.
+    function openLanguages() {
+        var window = Window.window
+        if (window) {
+            window.openLanguages()
+        }
+    }
+
     function folderOf(path) {
         return path.replace(/[\/\\][^\/\\]*$/, "")
     }
@@ -25,6 +33,9 @@ Kirigami.ScrollablePage {
         ? EasimeSettings.activationCurrent : Tr.t("(없음)")
     readonly property string undoInputMethod: EasimeSettings.activationUndoName !== ""
         ? EasimeSettings.activationUndoName : Tr.t("(없음)")
+
+    // Opening the page is when the dictionary is looked for: it opens the files.
+    Component.onCompleted: EasimeSettings.refreshDictionary()
 
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
@@ -56,7 +67,7 @@ Kirigami.ScrollablePage {
                 case "selected":
                     return Tr.t("easime를 입력기로 선택했습니다. 다시 로그인하면 사용할 수 있습니다.")
                 case "running":
-                    return Tr.t("easime를 입력기로 사용하고 있습니다.")
+                    return Tr.t("easime가 입력기로 선택되어 실행 중입니다. 글을 쓰는 곳에서 입력해 보세요. 입력되지 않으면 로그 파일을 확인하세요.")
                 case "not_installed":
                     return Tr.t("easime의 입력기 파일(easime.desktop)을 찾지 못해 입력기로 선택할 수 없습니다. easime가 제대로 설치되었는지 확인해 주세요.")
                 }
@@ -76,6 +87,25 @@ Kirigami.ScrollablePage {
                     icon.name: "edit-undo"
                     visible: EasimeSettings.activationCanUndo
                     onTriggered: page.openUndoDialog()
+                }
+            ]
+        }
+
+        // Every input language off is a valid choice, but someone who installed
+        // easime on a system whose language is not Korean or Japanese would take
+        // English-only typing for a fault: say so and lead to the page.
+        Kirigami.InlineMessage {
+            objectName: "no-language-card"
+            Layout.fillWidth: true
+            visible: EasimeSettings.languages === ""
+            type: Kirigami.MessageType.Information
+            text: Tr.t("지금은 영어로만 입력됩니다. 한국어나 日本語로도 입력하려면 언어 화면에서 켜 주세요.")
+            actions: [
+                Kirigami.Action {
+                    objectName: "open-languages"
+                    text: Tr.t("언어 화면 열기")
+                    icon.name: "preferences-desktop-locale"
+                    onTriggered: page.openLanguages()
                 }
             ]
         }
@@ -153,6 +183,24 @@ Kirigami.ScrollablePage {
             QQC2.Label {
                 Kirigami.FormData.label: Tr.t("中文:")
                 text: Tr.t("준비 중")
+            }
+            QQC2.Label {
+                objectName: "dictionary-status"
+                Kirigami.FormData.label: Tr.t("일본어 사전:")
+                visible: EasimeSettings.dictionaryState !== "unknown"
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+                wrapMode: Text.WordWrap
+                text: {
+                    switch (EasimeSettings.dictionaryState) {
+                    case "found":
+                        return Tr.t("있음 (파일 %1개). 단어 단위로 한자를 고를 수 있습니다.").arg(EasimeSettings.dictionaryDetail)
+                    case "missing":
+                        return Tr.t("찾지 못했습니다. 일본어를 켜도 가나만 후보로 나옵니다. easime 패키지를 다시 설치하거나 사전 파일을 아래 폴더 중 한 곳에 두세요:\n%1").arg(EasimeSettings.dictionaryDetail)
+                    case "unreadable":
+                        return Tr.t("읽지 못한 사전 파일이 %1개 있습니다. 나머지로 변환하며, 자세한 이유는 로그 파일에 있습니다.").arg(EasimeSettings.dictionaryDetail)
+                    }
+                    return ""
+                }
             }
 
             Kirigami.Separator {
