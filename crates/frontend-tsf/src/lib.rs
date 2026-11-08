@@ -126,8 +126,8 @@ mod exports {
     }
 
     /// `rundll32 easime_tsf.dll,EnableForCurrentUser`: switch easime on in
-    /// the input methods of the current user, under their first language (no
-    /// language is added to their list).
+    /// the input methods of the current user, under Korean (added to their
+    /// languages if they do not have it).
     ///
     /// # Safety
     /// Called by `rundll32`, which passes a NUL-terminated command line.

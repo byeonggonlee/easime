@@ -4,10 +4,8 @@
 //!
 //! The installer calls them through `rundll32 easime_tsf.dll,EnableForCurrentUser`
 //! and `...,DisableForCurrentUser` (the exports are in `lib.rs`). easime is
-//! registered for every language and switched on under the user's first
-//! language, so no language is added to their list
-//! ([`crate::profiles::language_to_switch_on_under`]). `rundll32` always exits
-//! with 0, so what happened is written to the log file (`easime.log`, see
+//! switched on under Korean, which Windows adds to the user's languages if they
+//! do not have it ([`crate::profiles`]). `rundll32` always exits with 0, so what happened is written to the log file (`easime.log`, see
 //! [`easime_config::log_path`]), and the installer's own checks read the user's
 //! language list afterwards. Anyone can run the same commands by hand.
 

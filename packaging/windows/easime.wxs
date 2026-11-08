@@ -10,19 +10,19 @@
 
   WHAT IT INSTALLS
     - the text service (easime_tsf.dll), registered with Windows (regsvr32)
-      with one profile listed under every language;
+      with one profile listed under Korean;
     - for the user who installs it, easime is switched on in their input methods
-      under their first language (the "easime keyboard" feature below), so
-      nobody has to add anything by hand in Windows' settings and no language
-      is added to their list. The features are the confirmation (the setup
+      under Korean (the "easime keyboard" feature below; Windows adds Korean to
+      their languages if they do not have it), so nobody has to add anything by
+      hand in Windows' settings. The features are the confirmation (the setup
       window shows them; a silent install takes the defaults) and uninstalling
       is the undo: it takes easime away again;
     - the Japanese dictionary (Mozc) with its license files, in "dictionary"
       next to the DLL (a feature that can be left out);
     - the terminal demo (easime-cli.exe) and the licenses.
 
-  OTHER USERS of the same PC find easime under "Add a keyboard" of any of their
-  languages; only the installing user gets it switched on.
+  OTHER USERS of the same PC find easime under "Add a keyboard" of Korean;
+  only the installing user gets it switched on.
 
   The DLL is 64-bit: 32-bit programs cannot use the input method (docs/platforms.md).
   Everything the custom actions do is in crates/frontend-tsf (registration.rs,
@@ -34,7 +34,7 @@
     <SummaryInformation Description="easime: Easy Eastern Asian IME (early test build of the Windows input method)" />
     <Icon Id="EasimeIcon" SourceFile="$(Root)/data/icons/easime.ico" />
     <Property Id="ARPPRODUCTICON" Value="EasimeIcon" />
-    <Property Id="ARPCOMMENTS" Value="Early test build of the Windows input method (Korean). Switched on for the user who installed it, under their first language." />
+    <Property Id="ARPCOMMENTS" Value="Early test build of the Windows input method (Korean). Switched on for the user who installed it, under Korean." />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/byeonggonlee/easime" />
 
     <!-- A newer version replaces an older one (the old one is removed first,
@@ -115,10 +115,10 @@
       <ComponentRef Id="LicenseApache" />
       <ComponentRef Id="ThirdParty" />
       <!-- Switching easime on in the installing user's input methods, under
-           their first language (frontend-tsf, setup.rs). Only languages it can
-           type are in its cycle (profiles::TYPEABLE). -->
+           Korean (frontend-tsf, setup.rs). Only languages it can type are in
+           its cycle (profiles::TYPEABLE). -->
       <Feature Id="Keyboard" Title="easime keyboard" Level="1" AllowAdvertise="no"
-               Description="Adds the easime keyboard to your Windows input methods, under your first language (no language is added). One key switches between English and the languages you turn on in the easime settings.">
+               Description="Adds the easime keyboard to your Windows input methods, under Korean (Korean is added to your languages if needed). One key switches between English and the languages you turn on in the easime settings.">
         <ComponentRef Id="KeyboardMarker" />
       </Feature>
       <!-- On by default; about 36 MB. Typing Japanese on Windows needs the

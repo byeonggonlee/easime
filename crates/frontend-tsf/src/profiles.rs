@@ -1,16 +1,20 @@
 //! What easime registers with Windows: one text service with **one profile**,
-//! listed under **every language** (decisions of 2026-11-08, `docs/decisions.md`:
-//! one profile instead of one per language, then every language instead of
-//! Korean only, after the experiment in `docs/windows-plan-2026-11-08.md`).
+//! listed under **Korean** (decision of 2026-11-08, `docs/decisions.md`; it
+//! replaced "one profile per language" the same day).
 //!
 //! Inside the one profile easime cycles through the languages the user chose
 //! with the one switch key, English, Korean, Japanese, English, ... like the
-//! Linux version, so nobody has to add Windows languages by hand and the cycle
-//! and the settings are the same everywhere. Being listed under every language,
-//! it is switched on under a language the user already has (the installer takes
-//! their first one, [`language_to_switch_on_under`]); the Windows language
-//! indicator shows that language whichever one is typed, and the box next to
-//! the cursor says which one is on.
+//! Linux version, so the cycle and the settings are the same everywhere. The
+//! Windows language indicator keeps showing Korean whichever one is typed; the
+//! box next to the cursor says which one is on.
+//!
+//! **Not for every language.** The user decided to try registering it for every
+//! language (`RegisterProfile` with `0xFFFF`) so it could be switched on under
+//! a language they already have. The CI showed such a profile listed under
+//! every language, but also started in programs where nobody chose it (the
+//! user's other programs had it running right after it was switched on), and
+//! uninstalling then had Windows close those programs. So it is listed under
+//! Korean again (`docs/windows-plan-2026-11-08.md`, step 2).
 //!
 //! Only languages the text service can really type are in the cycle
 //! ([`TYPEABLE`]), so Windows never offers an input method that does nothing
@@ -23,15 +27,7 @@ use ime_core::Language;
 /// The class id of the easime text service.
 pub const CLSID: &str = "{CFC09673-DDBA-4C84-B57F-CF0B0DDC262C}";
 
-/// "Every language" as `ITfInputProcessorProfileMgr::RegisterProfile` takes it.
-/// Not documented there (the documented `-1` of the older `AddLanguageProfile`
-/// is listed under no language at all): the CI's experiment showed TSF lists
-/// such a profile under every language, lets users switch it on under any, and
-/// activates it (`crates/frontend-tsf/tests/languages.rs`).
-pub const EVERY_LANGUAGE: u16 = 0xFFFF;
-
-/// Korean, where earlier builds listed easime, and the language to switch it on
-/// under when Windows says nothing about the user's languages.
+/// Korean (ko-KR), the language easime is listed under.
 pub const KOREAN: u16 = 0x0412;
 
 /// One input method in Windows' language list.
@@ -50,15 +46,15 @@ impl Profile {
     }
 }
 
-/// The profile easime registers: one, for every language.
+/// The profile easime registers: one, under Korean.
 pub const REGISTERED: Profile = Profile {
-    lang_id: EVERY_LANGUAGE,
+    lang_id: KOREAN,
     guid: "{05C63458-0689-4061-8D1B-D8C77D6A613C}",
 };
 
 /// Profiles earlier test builds registered (one per language, then the Korean
-/// one only). Registering and removing take them away too, so an upgrade
-/// leaves only [`REGISTERED`].
+/// one with another id). Registering and removing take them away too, so an
+/// upgrade leaves only [`REGISTERED`].
 pub const EARLIER: [Profile; 4] = [
     Profile {
         lang_id: KOREAN,
@@ -91,20 +87,6 @@ pub fn tip_spec(lang_id: u16, profile: &Profile) -> String {
 /// easime's, from this build or an earlier one.
 pub fn is_ours(entry: &str) -> bool {
     entry.to_ascii_uppercase().contains(CLSID)
-}
-
-/// The language to switch easime on under for a user: the first of their
-/// languages Windows has a number for (`user_languages`, in the order of their
-/// language settings), else their display language, else Korean. A language
-/// the user already has, so that switching easime on adds none.
-pub fn language_to_switch_on_under(user_languages: &[Option<u16>], display: Option<u16>) -> u16 {
-    user_languages
-        .iter()
-        .flatten()
-        .copied()
-        .chain(display)
-        .find(|&id| id != 0)
-        .unwrap_or(KOREAN)
 }
 
 /// The language the cycle falls back to (see [`effective_config`]).
@@ -175,8 +157,8 @@ mod tests {
     }
 
     #[test]
-    fn one_profile_is_registered_for_every_language() {
-        assert_eq!(REGISTERED.lang_id, 0xFFFF);
+    fn one_profile_is_registered_under_korean() {
+        assert_eq!(REGISTERED.lang_id, 0x0412);
         assert_eq!(REGISTERED.name(), "easime");
         assert!(!EARLIER.contains(&REGISTERED));
         for language in TYPEABLE {
@@ -190,36 +172,19 @@ mod tests {
     #[test]
     fn the_tip_spec_is_what_windows_setup_writes() {
         assert_eq!(
-            tip_spec(0x0409, &REGISTERED),
-            "0409:{CFC09673-DDBA-4C84-B57F-CF0B0DDC262C}{05C63458-0689-4061-8D1B-D8C77D6A613C}"
+            tip_spec(KOREAN, &REGISTERED),
+            "0412:{CFC09673-DDBA-4C84-B57F-CF0B0DDC262C}{05C63458-0689-4061-8D1B-D8C77D6A613C}"
         );
         assert!(tip_spec(0x0412, &EARLIER[0]).starts_with("0412:{CFC09673"));
     }
 
     #[test]
     fn our_entries_in_the_users_settings_are_recognised() {
-        assert!(is_ours(&tip_spec(0x0409, &REGISTERED)));
+        assert!(is_ours(&tip_spec(KOREAN, &REGISTERED)));
         assert!(is_ours(&tip_spec(0x0412, &EARLIER[0]).to_ascii_lowercase()));
         assert!(!is_ours(
             "0412:{A028AE76-01B1-46C2-99C4-ACD9858AE02F}{B5FE1F02-D5F2-4445-9C03-C568F23C99A1}"
         ));
-    }
-
-    #[test]
-    fn easime_is_switched_on_under_a_language_the_user_has() {
-        // The first of the user's languages that Windows knows.
-        assert_eq!(
-            language_to_switch_on_under(&[Some(0x0409), Some(0x0412)], Some(0x0412)),
-            0x0409
-        );
-        assert_eq!(
-            language_to_switch_on_under(&[None, Some(0x0411)], Some(0x0409)),
-            0x0411
-        );
-        // Nothing known about the list: the display language, then Korean.
-        assert_eq!(language_to_switch_on_under(&[], Some(0x0407)), 0x0407);
-        assert_eq!(language_to_switch_on_under(&[None], None), KOREAN);
-        assert_eq!(language_to_switch_on_under(&[Some(0)], Some(0)), KOREAN);
     }
 
     fn chosen(languages: Option<Vec<Language>>) -> Config {

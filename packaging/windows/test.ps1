@@ -19,23 +19,19 @@ $logs = Join-Path (Get-Location) "msi-logs"
 New-Item -ItemType Directory -Force $logs | Out-Null
 
 # What the text service is called in Windows (crates/frontend-tsf/src/profiles.rs;
-# a unit test there pins the same text): one profile for every language (0xFFFF),
-# and the per-language ones earlier builds registered, which must be gone.
+# a unit test there pins the same text): one profile under Korean, and the
+# per-language ones earlier builds registered, which must be gone.
 $clsid = "{CFC09673-DDBA-4C84-B57F-CF0B0DDC262C}"
-$profile = @{ Lang = "ffff"; Profile = "{05C63458-0689-4061-8D1B-D8C77D6A613C}" }
+$profile = @{ Lang = "0412"; Profile = "{05C63458-0689-4061-8D1B-D8C77D6A613C}" }
 $earlier = @(
     @{ Lang = "0412"; Profile = "{42FBAB7A-5B91-4A6A-868A-3CC5C8153492}" },
     @{ Lang = "0411"; Profile = "{C059F0B3-8110-4CA5-AF4F-B2C79C3BE921}" }
 )
 $userProfiles = "HKCU:\Control Panel\International\User Profile"
 
-# easime is switched on under the user's first language, so no language is added
-# to their list: the entry the install must make, from the list as it is now.
+# easime is switched on under Korean (added to the user's languages if needed).
 function User-Languages { @((Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages) }
-# @(...): a function hands back a one-language list as a plain string.
-$firstLanguage = @(User-Languages)[0]
-$firstLangId = "{0:X4}" -f ([System.Globalization.CultureInfo]::GetCultureInfo($firstLanguage).LCID -band 0xFFFF)
-$tip = "$($firstLangId):$clsid$($profile.Profile)"
+$tip = "0412:$clsid$($profile.Profile)"
 
 function Invoke-Msi([string]$what, [string[]]$arguments) {
     $log = Join-Path $logs ("$what.log" -replace '[^\w.-]', '_')
@@ -85,7 +81,7 @@ function Setup-Lines([string]$step) {
 function Show-State([string]$when) {
     Write-Host "---- state $when"
     Write-Host "class DLL: $(Class-Dll)"
-    Write-Host "profile for every language registered: $(Profile-Registered $profile); earlier profiles: $(Earlier-Registered)"
+    Write-Host "profile registered: $(Profile-Registered $profile); earlier profiles: $(Earlier-Registered)"
     Write-Host "easime tips of this user: $((User-Tips) -join ', ')"
     Get-ChildItem $userProfiles -ErrorAction SilentlyContinue | ForEach-Object {
         Write-Host "  language $($_.PSChildName): $($_.GetValueNames() -join ', ')"
@@ -99,7 +95,7 @@ function Show-State([string]$when) {
 # Everything an install leaves in Windows, and nothing of it afterwards.
 function Assert-Registered([string]$what) {
     Assert ((Class-Dll) -eq (Join-Path $dir "easime_tsf.dll")) "$what`: Windows knows the text service, pointing at the installed DLL"
-    Assert (Profile-Registered $profile) "$what`: the profile for every language is registered"
+    Assert (Profile-Registered $profile) "$what`: the profile is registered under Korean"
     Assert (-not (Earlier-Registered)) "$what`: no per-language profile of an earlier build is left"
 }
 function Assert-Unregistered([string]$what) {
@@ -110,8 +106,7 @@ function Assert-Unregistered([string]$what) {
 Assert (-not (Test-Path $dir)) "nothing is installed before the test"
 Assert ($null -eq (Class-Dll)) "the text service is not registered before the test"
 Assert ((User-Tips).Count -eq 0) "no easime input method is switched on for this user before the test"
-$languagesAtStart = (User-Languages) -join ","
-Write-Host "the user's languages: $languagesAtStart; easime goes under $firstLanguage ($tip)"
+Write-Host "the user's languages: $((User-Languages) -join ","); easime goes under Korean ($tip)"
 
 # 1. A plain install: the program, the text service, and easime switched on for this user.
 Assert ((Invoke-Msi "install" @("/i", "`"$Msi`"")) -eq 0) "the MSI installs"
@@ -130,9 +125,8 @@ Assert ((Entries).Count -eq 1) "Apps & features lists easime once"
 Assert (-not ((Machine-Path) -contains $dir)) "the PATH is left alone by default"
 Show-State "after the install"
 Assert-Registered "after the install"
-Assert ((User-Tips) -contains $tip) "easime is switched on under the user's first language ($tip)"
+Assert ((User-Tips) -contains $tip) "easime is switched on under Korean ($tip)"
 Assert ((User-Tips).Count -eq 1) "and nowhere else"
-Assert (((User-Languages) -join ",") -eq $languagesAtStart) "no language was added to the user's list ($languagesAtStart)"
 
 # What it installed works: the Hangul demo.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)

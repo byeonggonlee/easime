@@ -5,7 +5,7 @@
 ## 설치
 
 1. CI 실행의 아티팩트 `easime-windows-installer-<commit>`을 받아 압축을 풀고 `easime-<버전>-x64.msi`를 설치한다. 코드 서명이 없어 SmartScreen 경고가 뜰 수 있다.
-2. 설치 창에서 "easime keyboard"가 켜져 있는지 본다. 설치가 끝나면 설정 → 시간 및 언어 → 언어 및 지역의 **첫 번째 언어**의 키보드에 `easime`가 있어야 하고, 언어 목록에 언어가 새로 생기지 않아야 한다. 다른 언어의 "키보드 추가" 목록에도 `easime`가 보이는지, 작업 표시줄에 어떤 언어로 표시되는지 적는다(easime는 모든 언어 아래 등록된다. 이 모습은 실제 PC에서만 확인할 수 있다). 없으면 그 사실과 `%LOCALAPPDATA%\easime\easime.log`를 기록한다.
+2. 설치 창에서 "easime keyboard"가 켜져 있는지 본다. 설치가 끝나면 설정 → 시간 및 언어 → 언어 및 지역에 한국어와 키보드 `easime`가 있어야 한다(프로필은 하나이고 한국어 아래에 있다). 없으면 그 사실과 `%LOCALAPPDATA%\easime\easime.log`를 기록한다.
 3. 작업 표시줄의 언어 표시 또는 Win+Space로 `easime`를 고른다.
 
 ## 입력 시험 (앱마다 한 번씩)

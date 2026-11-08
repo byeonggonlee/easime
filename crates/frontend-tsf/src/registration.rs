@@ -12,7 +12,6 @@
 use crate::profiles::{self, CLSID};
 use std::path::Path;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, FreeLibrary};
-use windows::Win32::Globalization::{GetUserDefaultUILanguage, LocaleNameToLCID};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
@@ -20,8 +19,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE,
-    REG_SZ, RRF_RT_REG_MULTI_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegEnumKeyExW,
-    RegEnumValueW, RegGetValueW, RegOpenKeyExW, RegSetValueExW,
+    REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegEnumKeyExW, RegEnumValueW,
+    RegOpenKeyExW, RegSetValueExW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
@@ -235,8 +234,8 @@ fn profile_manager() -> Result<ITfInputProcessorProfileMgr> {
     unsafe { CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER) }
 }
 
-/// Add the profile to the language settings (for every language), and the
-/// text service to its categories. What an earlier build registered goes first,
+/// Add the profile to the language settings (under Korean), and the text
+/// service to its categories. What an earlier build registered goes first,
 /// so an upgrade leaves one easime.
 pub fn register_profiles(dll: &Path) -> Result<()> {
     let clsid = guid(CLSID);
@@ -404,44 +403,6 @@ fn user_names(path: &str, values: bool) -> Vec<String> {
     names
 }
 
-/// The current user's languages, in the order of their language settings
-/// (`Languages`, a list of language tags such as `en-US`, `ko`).
-fn user_language_tags() -> Vec<String> {
-    let (key, value) = (wide(USER_PROFILE), wide("Languages"));
-    let mut buffer = vec![0u16; 4096];
-    let mut bytes = (buffer.len() * 2) as u32;
-    // SAFETY: the buffer holds `bytes` bytes; the names are NUL-terminated.
-    let read = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            PCWSTR(key.as_ptr()),
-            PCWSTR(value.as_ptr()),
-            RRF_RT_REG_MULTI_SZ,
-            None,
-            Some(buffer.as_mut_ptr().cast()),
-            Some(&mut bytes),
-        )
-    };
-    if read.is_err() {
-        return Vec::new();
-    }
-    buffer.truncate(bytes as usize / 2);
-    buffer
-        .split(|&unit| unit == 0)
-        .filter(|tag| !tag.is_empty())
-        .map(String::from_utf16_lossy)
-        .collect()
-}
-
-/// The language id Windows has for a language tag, if any.
-fn lang_id_of(tag: &str) -> Option<u16> {
-    let tag = wide(tag);
-    // SAFETY: `tag` is NUL-terminated.
-    let lcid = unsafe { LocaleNameToLCID(PCWSTR(tag.as_ptr()), 0) };
-    // The low word of a locale id is its language id.
-    Some((lcid & 0xFFFF) as u16).filter(|&id| id != 0)
-}
-
 /// easime's entries in the current user's input methods, as specs
 /// (`0409:{class}{profile}`), whichever language they are under.
 fn user_entries() -> Vec<String> {
@@ -452,25 +413,21 @@ fn user_entries() -> Vec<String> {
         .collect()
 }
 
-/// Switch easime on in the current user's input methods, under the first of
-/// their languages ([`profiles::language_to_switch_on_under`]), so no language
-/// is added to their list. Entries an earlier build made (under Korean) are
-/// taken away first. Returns the language it is switched on under. Needs no
-/// administrator rights; the machine-wide registration must have happened.
+/// Switch easime on in the current user's input methods, under Korean (which
+/// Windows adds to their languages if they do not have it). Entries an earlier
+/// build made are taken away first. Returns the language it is switched on
+/// under. Needs no administrator rights; the machine-wide registration must
+/// have happened.
 pub fn enable_for_current_user() -> Result<u16> {
     let _com = Com::start();
-    let languages: Vec<Option<u16>> = user_language_tags().iter().map(|t| lang_id_of(t)).collect();
-    // SAFETY: a plain query.
-    let display = Some(unsafe { GetUserDefaultUILanguage() });
-    let language = profiles::language_to_switch_on_under(&languages, display);
-    let wanted = profiles::tip_spec(language, &profiles::REGISTERED);
+    let wanted = profiles::tip_spec(profiles::KOREAN, &profiles::REGISTERED);
     for entry in user_entries() {
         if !entry.eq_ignore_ascii_case(&wanted) {
             let _ = install_layout_or_tip(&entry, ILOT_UNINSTALL);
         }
     }
     install_layout_or_tip(&wanted, 0)?;
-    Ok(language)
+    Ok(profiles::KOREAN)
 }
 
 /// Take easime away from the current user's input methods, under whichever

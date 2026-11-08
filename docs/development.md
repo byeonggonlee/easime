@@ -55,7 +55,7 @@ MSI는 텍스트 서비스 DLL(`easime_tsf.dll`)을 설치하고 Windows에 등�
 msiexec /i easime-<버전>-x64.msi            # 설치 창이 뜬다. "easime keyboard"가 기본으로 켜져 있다
 msiexec /i easime-<버전>-x64.msi /l*v install.log   # 무엇이 일어났는지 기록
 ```
-- 설치가 끝나면 설정 → 시간 및 언어 → 언어 및 지역의 **첫 번째 언어**의 키보드에 `easime`가 있어야 한다(프로필은 모든 언어 아래 하나이고, 설치는 언어를 더하지 않는다). 작업 표시줄의 언어 표시(또는 Win+Space)로 고른다. 쳐 보면 한글이 나와야 한다(한/영 키 또는 오른쪽 Alt를 눌렀다 떼면 영어와 한국어가 바뀐다. 전환하면 커서 아래에 `A`/`한` 상자가 잠깐 뜬다. 커서 위치를 알려 주지 않는 프로그램에서는 뜨지 않는다).
+- 설치가 끝나면 설정 → 시간 및 언어 → 언어 및 지역에 한국어가 생기고 키보드에 `easime`가 있어야 한다(프로필은 하나이고 한국어 아래에 있다). 작업 표시줄의 언어 표시(또는 Win+Space)로 고른다. 쳐 보면 한글이 나와야 한다(한/영 키 또는 오른쪽 Alt를 눌렀다 떼면 영어와 한국어가 바뀐다. 전환하면 커서 아래에 `A`/`한` 상자가 잠깐 뜬다. 커서 위치를 알려 주지 않는 프로그램에서는 뜨지 않는다).
 - 문제가 생기면 `%LOCALAPPDATA%\easime\easime.log`(설치가 언어를 켠 결과: `setup: enable korean: done` 또는 `FAILED: 이유`)와 `install.log`를 본다.
 - 언어를 손으로 켜고 끄기(관리자 권한 없이, 현재 사용자만): `rundll32 "C:\Program Files\easime\easime_tsf.dll",EnableForCurrentUser korean` / `...,DisableForCurrentUser korean`.
 - 제거: 설정 → 앱에서 easime를 지우거나 `msiexec /x easime-<버전>-x64.msi`. 켜 둔 언어와 Windows 등록이 함께 사라진다.

@@ -470,15 +470,15 @@ impl ITextStoreACP_Impl for TextStore_Impl {
     }
 }
 
-/// A profile that exists only for this test, registered like easime's own: for
-/// every language (`profiles::EVERY_LANGUAGE`). It is activated under US
-/// English, the language a CI runner has. The service behind it is easime's,
-/// and its default language cycle starts in Korean.
+/// A profile that exists only for this test, under US English: a CI runner has
+/// no Korean language set up, and TSF refuses to activate a profile of a
+/// language the machine does not have. The service behind it is easime's, and
+/// its default language cycle starts in Korean.
 const TEST_PROFILE: &str = "{3C7E2D91-5B4A-4F08-A6D3-9E1B7C5A2F64}";
 const ENGLISH_US: u16 = 0x0409;
-/// The language the test profile is registered under: every language, as easime's.
+/// The language the test profile is registered under.
 fn profile_language() -> u16 {
-    profiles::EVERY_LANGUAGE
+    ENGLISH_US
 }
 
 /// Removes the test profile again, whatever happens.
@@ -849,27 +849,23 @@ fn type_through_tsf() {
     }
     .expect("registering the test profile");
     let _cleanup = TestProfile(manager.clone());
-    // The user's language first; a profile for every language is listed with
-    // the language 0, so that is tried too.
-    let activated = [ENGLISH_US, 0x0000, profiles::EVERY_LANGUAGE]
-        .into_iter()
-        .find_map(|langid| {
-            // SAFETY: the GUID pointers live for the call.
-            let result = unsafe {
-                manager.ActivateProfile(
-                    TF_PROFILETYPE_INPUTPROCESSOR,
-                    langid,
-                    &clsid,
-                    &test_profile,
-                    HKL::default(),
-                    TF_IPPMF_FORPROCESS
-                        | TF_IPPMF_ENABLEPROFILE
-                        | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
-                )
-            };
-            eprintln!("ActivateProfile under 0x{langid:04X}: {result:?}");
-            result.ok().map(|()| langid)
-        });
+    let activated = [ENGLISH_US].into_iter().find_map(|langid| {
+        // SAFETY: the GUID pointers live for the call.
+        let result = unsafe {
+            manager.ActivateProfile(
+                TF_PROFILETYPE_INPUTPROCESSOR,
+                langid,
+                &clsid,
+                &test_profile,
+                HKL::default(),
+                TF_IPPMF_FORPROCESS
+                    | TF_IPPMF_ENABLEPROFILE
+                    | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
+            )
+        };
+        eprintln!("ActivateProfile under 0x{langid:04X}: {result:?}");
+        result.ok().map(|()| langid)
+    });
     assert!(
         activated.is_some(),
         "TSF could not activate easime's service (profile language 0x{:04X})",
