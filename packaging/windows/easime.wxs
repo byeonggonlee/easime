@@ -129,9 +129,13 @@
       <Custom Action="RegisterTextService" After="RegisterTextServiceRollback" Condition="&amp;Main=3" />
       <Custom Action="EnableKorean" After="RegisterTextService" Condition="&amp;InputKorean=3" />
 
-      <!-- Removing: the user's language first, then Windows' registration, then the files. -->
-      <Custom Action="DisableKorean" Before="UnregisterTextService" Condition="&amp;InputKorean=2 AND !InputKorean=3" />
-      <Custom Action="UnregisterTextService" Before="RemoveFiles" Condition="&amp;Main=2 AND !Main=3" />
+      <!-- Removing: the user's language first, then Windows' registration, then the files.
+           Not when a newer version is replacing this one (UPGRADINGPRODUCTCODE): it
+           registers and switches on the same profile again, and taking the user's
+           entry away in between would move Korean to the end of their language
+           list. -->
+      <Custom Action="DisableKorean" Before="UnregisterTextService" Condition="&amp;InputKorean=2 AND !InputKorean=3 AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="UnregisterTextService" Before="RemoveFiles" Condition="&amp;Main=2 AND !Main=3 AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

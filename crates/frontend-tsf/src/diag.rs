@@ -10,6 +10,9 @@
 use std::io::Write;
 use std::sync::OnceLock;
 
+/// The log is moved to `easime.log.old` when it grows past this.
+const MAX_LOG: u64 = 1024 * 1024;
+
 /// Append a line to the log (the temporary folder if the process has no home,
 /// as an installer's helper process may not). A log that cannot be written is
 /// not a reason to fail anything.
@@ -18,6 +21,12 @@ pub fn log(line: &str) {
         easime_config::log_path().unwrap_or_else(|| std::env::temp_dir().join("easime-setup.log"));
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
+    }
+    // Every program the user types in adds to this one file and nothing ever
+    // starts it afresh (unlike the Linux daemon, which truncates it on start):
+    // keep it bounded by moving a full log aside, which replaces the previous one.
+    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > MAX_LOG) {
+        let _ = std::fs::rename(&path, path.with_extension("log.old"));
     }
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)

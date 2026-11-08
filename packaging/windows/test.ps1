@@ -60,6 +60,12 @@ function User-Tips {
     })
 }
 
+# How many times the installer's helper logged a step ("enable"/"disable").
+function Setup-Lines([string]$step) {
+    $log = Join-Path $env:LOCALAPPDATA "easime\easime.log"
+    if (Test-Path $log) { @(Get-Content $log | Where-Object { $_ -like "*setup: $step *" }).Count } else { 0 }
+}
+
 # What to read when a check fails: the user's language list and easime's own log.
 function Show-State([string]$when) {
     Write-Host "---- state $when"
@@ -144,7 +150,11 @@ Assert ((User-Tips).Count -eq 0) "Korean is switched off again"
 # 5. A newer version replaces an older one, and an older one does not replace a newer one.
 Assert ((Invoke-Msi "install-old" @("/i", "`"$OldMsi`"")) -eq 0) "the older MSI installs"
 $old = (Entries)[0].DisplayVersion
+$languagesBefore = (Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages -join ","
+$disablesBefore = Setup-Lines "disable"
 Assert ((Invoke-Msi "upgrade" @("/i", "`"$Msi`"")) -eq 0) "the newer MSI installs over it"
+Assert ((Setup-Lines "disable") -eq $disablesBefore) "the upgrade does not take the user's input method away in between"
+Assert (((Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages -join ",") -eq $languagesBefore) "the user's language list keeps its order ($languagesBefore)"
 $entries = Entries
 Assert ($entries.Count -eq 1) "still one entry after the upgrade"
 Assert ($entries[0].DisplayVersion -ne $old) "the version changed from $old to $($entries[0].DisplayVersion)"
