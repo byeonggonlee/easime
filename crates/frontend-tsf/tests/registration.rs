@@ -22,11 +22,9 @@ fn the_service_registers_is_listed_and_unregisters() {
     let wanted = profiles::registered();
     assert!(!wanted.is_empty());
     for profile in &wanted {
-        assert!(
-            registration::profile_registered(profile),
-            "Windows lists {}",
-            profile.name()
-        );
+        if let Err(e) = registration::profile_lookup(profile) {
+            panic!("Windows does not list {}: {e}", profile.name());
+        }
     }
     // Profiles without an engine are not offered.
     for profile in profiles::ALL.iter().filter(|p| !wanted.contains(p)) {

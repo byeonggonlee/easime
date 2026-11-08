@@ -233,25 +233,28 @@ pub fn unregister_profiles() -> Result<()> {
     Ok(())
 }
 
-/// Whether Windows lists this profile of the text service.
-pub fn profile_registered(profile: &profiles::Profile) -> bool {
-    let Ok(manager) = profile_manager() else {
-        return false;
-    };
+/// Ask Windows for this profile of the text service. The error says why it is
+/// not listed.
+pub fn profile_lookup(profile: &profiles::Profile) -> Result<()> {
+    let _com = Com::start();
+    let manager = profile_manager()?;
     let mut found = TF_INPUTPROCESSORPROFILE::default();
     // SAFETY: the GUID pointers and `found` live for the call.
     unsafe {
-        manager
-            .GetProfile(
-                TF_PROFILETYPE_INPUTPROCESSOR,
-                profile.lang_id,
-                &guid(CLSID),
-                &guid(profile.guid),
-                HKL::default(),
-                &mut found,
-            )
-            .is_ok()
+        manager.GetProfile(
+            TF_PROFILETYPE_INPUTPROCESSOR,
+            profile.lang_id,
+            &guid(CLSID),
+            &guid(profile.guid),
+            HKL::default(),
+            &mut found,
+        )
     }
+}
+
+/// Whether Windows lists this profile of the text service.
+pub fn profile_registered(profile: &profiles::Profile) -> bool {
+    profile_lookup(profile).is_ok()
 }
 
 /// Everything `DllRegisterServer` does, for the DLL at `dll`.
