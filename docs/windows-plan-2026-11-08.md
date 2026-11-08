@@ -38,6 +38,20 @@
 6. 일본어 후보창(UI 요소 포함), 순환에 일본어 넣기(`profiles::TYPEABLE`).
 7. WinUI 3 설정 앱(시작 메뉴, 일반·언어·단축키·한국어·일본어·모양; 일본어 페이지는 실제 옵션이 있을 때만, [DESIGN.md](../DESIGN.md) 5.5).
 
+## 2단계 실험 결과 (2026-11-08, CI의 Windows 러너, Windows 빌드 26100)
+
+일회용 클래스로 등록해 Windows가 말하는 것을 기록했다(`frontend-tsf/tests/languages.rs`, CI 단계 "Experiment").
+
+| 방식 | 등록 | 영어·일본어·한국어·독일어 목록 | 사용자별 켜기(`InstallLayoutOrTip`) |
+|---|---|---|---|
+| 옛 API `AddLanguageProfile(-1)` (문서에 있음) | 됨 (`0x0000ffff`) | **어디에도 없음**, `GetProfile` 실패 | 레지스트리에는 써지지만 TSF가 그 프로필을 모른다 |
+| 새 API `RegisterProfile(0xFFFF)` (문서에 없음) | 됨 (`0x0000ffff`) | **네 언어 모두에 나옴**(언어 0, 켜짐) | 영어(0409)·일본어(0411) 아래 모두 됨 |
+| 비교: `RegisterProfile`로 일본어 하나 | 됨 | 일본어에만 | 0411만 됨, 0409는 조용히 무시 |
+
+이어서 `RegisterProfile(0xFFFF)`로 등록한 프로필을 영어(0x0409)로 활성화했다. 그러자 가짜 응용 프로그램에서 한글 타자 시나리오 전체(조합, 확정, 백스페이스, 전환, 비밀번호 칸, 밑줄)가 통과했다(CI 단계 "Experiment: typing through a profile for every language"). 활성화 뒤 `GetActiveProfile`(키보드 범주)은 easime가 아닌 프로필(언어 0x0409)을 돌려주었는데, 이 값이 무엇을 뜻하는지는 확인하지 않았다.
+
+**결론**: 문서에 있는 방법(`-1`)은 지금 Windows에서 쓸 수 없다. 문서에 없는 `RegisterProfile(0xFFFF)`는 API 수준에서 목록, 사용자별 켜기·끄기, 활성화, 타자, 제거가 모두 된다. 실제 PC에서만 볼 수 있는 것이 남아 있다. Windows 설정의 언어 화면에서 각 언어 아래에 보이는지, 작업 표시줄에 어떤 언어로 표시되는지다. **적용 여부는 사용자 결정을 기다린다.** 적용하면 설치 프로그램은 한국어를 더하지 않고 사용자의 언어 목록 첫 언어 아래에 켜는 안을 함께 정해야 한다.
+
 ## 실제 PC에서만 확인할 수 있는 것
 
 - Windows 설정의 언어 화면에 easime가 각 언어 아래 보이는지(2단계의 CI는 레지스트리와 TSF 목록까지만 본다).
