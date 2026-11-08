@@ -19,12 +19,22 @@ $logs = Join-Path (Get-Location) "msi-logs"
 New-Item -ItemType Directory -Force $logs | Out-Null
 
 # What the text service is called in Windows (crates/frontend-tsf/src/profiles.rs;
-# a unit test there pins the Korean one to the same text).
+# a unit test there pins the same text): one profile for every language (0xFFFF),
+# and the per-language ones earlier builds registered, which must be gone.
 $clsid = "{CFC09673-DDBA-4C84-B57F-CF0B0DDC262C}"
-$korean = @{ Lang = "0412"; Profile = "{42FBAB7A-5B91-4A6A-868A-3CC5C8153492}" }
-$japanese = @{ Lang = "0411"; Profile = "{C059F0B3-8110-4CA5-AF4F-B2C79C3BE921}" }
-$koreanTip = "0412:$clsid$($korean.Profile)"
+$profile = @{ Lang = "ffff"; Profile = "{05C63458-0689-4061-8D1B-D8C77D6A613C}" }
+$earlier = @(
+    @{ Lang = "0412"; Profile = "{42FBAB7A-5B91-4A6A-868A-3CC5C8153492}" },
+    @{ Lang = "0411"; Profile = "{C059F0B3-8110-4CA5-AF4F-B2C79C3BE921}" }
+)
 $userProfiles = "HKCU:\Control Panel\International\User Profile"
+
+# easime is switched on under the user's first language, so no language is added
+# to their list: the entry the install must make, from the list as it is now.
+function User-Languages { @((Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages) }
+$firstLanguage = (User-Languages)[0]
+$firstLangId = "{0:X4}" -f ([System.Globalization.CultureInfo]::GetCultureInfo($firstLanguage).LCID -band 0xFFFF)
+$tip = "$($firstLangId):$clsid$($profile.Profile)"
 
 function Invoke-Msi([string]$what, [string[]]$arguments) {
     $log = Join-Path $logs ("$what.log" -replace '[^\w.-]', '_')
@@ -54,9 +64,10 @@ function Class-Dll {
 function Profile-Registered($language) {
     Test-Path "HKLM:\SOFTWARE\Microsoft\CTF\TIP\$clsid\LanguageProfile\0x0000$($language.Lang)\$($language.Profile)"
 }
+function Earlier-Registered { @($earlier | Where-Object { Profile-Registered $_ }).Count -gt 0 }
 
 # The input methods of easime that the current user has switched on, as the language
-# settings keep them (`0412:{class}{profile}` below the language's tag).
+# settings keep them (`0409:{class}{profile}` below the language's tag).
 function User-Tips {
     @(Get-ChildItem $userProfiles -ErrorAction SilentlyContinue | ForEach-Object {
         $_.GetValueNames() | Where-Object { $_ -like "*$clsid*" }
@@ -73,7 +84,7 @@ function Setup-Lines([string]$step) {
 function Show-State([string]$when) {
     Write-Host "---- state $when"
     Write-Host "class DLL: $(Class-Dll)"
-    Write-Host "korean profile registered: $(Profile-Registered $korean); japanese: $(Profile-Registered $japanese)"
+    Write-Host "profile for every language registered: $(Profile-Registered $profile); earlier profiles: $(Earlier-Registered)"
     Write-Host "easime tips of this user: $((User-Tips) -join ', ')"
     Get-ChildItem $userProfiles -ErrorAction SilentlyContinue | ForEach-Object {
         Write-Host "  language $($_.PSChildName): $($_.GetValueNames() -join ', ')"
@@ -87,19 +98,21 @@ function Show-State([string]$when) {
 # Everything an install leaves in Windows, and nothing of it afterwards.
 function Assert-Registered([string]$what) {
     Assert ((Class-Dll) -eq (Join-Path $dir "easime_tsf.dll")) "$what`: Windows knows the text service, pointing at the installed DLL"
-    Assert (Profile-Registered $korean) "$what`: the Korean profile is in the language settings' list"
-    Assert (-not (Profile-Registered $japanese)) "$what`: Japanese is not offered (it cannot be typed yet)"
+    Assert (Profile-Registered $profile) "$what`: the profile for every language is registered"
+    Assert (-not (Earlier-Registered)) "$what`: no per-language profile of an earlier build is left"
 }
 function Assert-Unregistered([string]$what) {
     Assert ($null -eq (Class-Dll)) "$what`: Windows no longer knows the text service"
-    Assert (-not (Profile-Registered $korean)) "$what`: the Korean profile is gone from the list"
+    Assert (-not (Profile-Registered $profile)) "$what`: the profile is gone from the list"
 }
 
 Assert (-not (Test-Path $dir)) "nothing is installed before the test"
 Assert ($null -eq (Class-Dll)) "the text service is not registered before the test"
 Assert ((User-Tips).Count -eq 0) "no easime input method is switched on for this user before the test"
+$languagesAtStart = (User-Languages) -join ","
+Write-Host "the user's languages: $languagesAtStart; easime goes under $firstLanguage ($tip)"
 
-# 1. A plain install: the program, the text service, and Korean switched on for this user.
+# 1. A plain install: the program, the text service, and easime switched on for this user.
 Assert ((Invoke-Msi "install" @("/i", "`"$Msi`"")) -eq 0) "the MSI installs"
 foreach ($file in "easime-cli.exe", "easime_tsf.dll", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.md") {
     Assert (Test-Path (Join-Path $dir $file)) "$file is installed"
@@ -116,7 +129,9 @@ Assert ((Entries).Count -eq 1) "Apps & features lists easime once"
 Assert (-not ((Machine-Path) -contains $dir)) "the PATH is left alone by default"
 Show-State "after the install"
 Assert-Registered "after the install"
-Assert ((User-Tips) -contains $koreanTip) "Korean is switched on in this user's language settings ($koreanTip)"
+Assert ((User-Tips) -contains $tip) "easime is switched on under the user's first language ($tip)"
+Assert ((User-Tips).Count -eq 1) "and nowhere else"
+Assert (((User-Languages) -join ",") -eq $languagesAtStart) "no language was added to the user's list ($languagesAtStart)"
 
 # What it installed works: the Hangul demo.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -137,27 +152,27 @@ Show-State "after the uninstall"
 Assert (-not (Test-Path $dir)) "the install folder is gone"
 Assert ((Entries).Count -eq 0) "Apps & features no longer lists easime"
 Assert-Unregistered "after the uninstall"
-Assert ((User-Tips).Count -eq 0) "Korean is switched off again in this user's language settings"
-Assert (-not (Test-Path "HKLM:\SOFTWARE\easime\Input\Korean")) "the record of the chosen language is gone"
+Assert ((User-Tips).Count -eq 0) "easime is switched off again in this user's language settings"
+Assert (-not (Test-Path "HKLM:\SOFTWARE\easime\Keyboard")) "the record of the chosen feature is gone"
 
-# 3. Without the Korean feature the text service is still registered (other
+# 3. Without the keyboard feature the text service is still registered (other
 # users can add it), but nothing is switched on for this user.
-Assert ((Invoke-Msi "install-no-input" @("/i", "`"$Msi`"", "ADDLOCAL=Main")) -eq 0) "the MSI installs without the Korean feature"
-Assert-Registered "without the Korean feature"
+Assert ((Invoke-Msi "install-no-input" @("/i", "`"$Msi`"", "ADDLOCAL=Main")) -eq 0) "the MSI installs without the keyboard feature"
+Assert-Registered "without the keyboard feature"
 Assert ((User-Tips).Count -eq 0) "nothing is switched on for this user"
 Assert (-not (Test-Path (Join-Path $dir "dictionary"))) "without its feature the dictionary is not installed"
 Assert ((Invoke-Msi "uninstall-no-input" @("/x", "`"$Msi`"")) -eq 0) "the MSI uninstalls"
-Assert-Unregistered "after removing the install without the Korean feature"
+Assert-Unregistered "after removing the install without the keyboard feature"
 
 # 4. The PATH entry is opt in, and goes away with the program.
 Assert ((Invoke-Msi "install-with-path" @("/i", "`"$Msi`"", "ADDLOCAL=ALL")) -eq 0) "the MSI installs with ADDLOCAL=ALL"
 Assert ((Machine-Path) -contains $dir) "the folder is on the system PATH"
-Assert ((User-Tips) -contains $koreanTip) "Korean is switched on with ADDLOCAL=ALL too"
+Assert ((User-Tips) -contains $tip) "easime is switched on with ADDLOCAL=ALL too"
 Assert ((Invoke-Msi "uninstall-with-path" @("/x", "`"$Msi`"")) -eq 0) "the MSI uninstalls again"
 Assert (-not ((Machine-Path) -contains $dir)) "the PATH entry is removed"
 Assert (-not (Test-Path $dir)) "the install folder is gone"
 Assert-Unregistered "after the uninstall with the PATH entry"
-Assert ((User-Tips).Count -eq 0) "Korean is switched off again"
+Assert ((User-Tips).Count -eq 0) "easime is switched off again"
 
 # 5. A newer version replaces an older one, and an older one does not replace a newer one.
 Assert ((Invoke-Msi "install-old" @("/i", "`"$OldMsi`"")) -eq 0) "the older MSI installs"
@@ -173,12 +188,12 @@ Assert ($entries[0].DisplayVersion -ne $old) "the version changed from $old to $
 Assert ((Test-Path (Join-Path $dir "easime-cli.exe"))) "the program is still there"
 Show-State "after the upgrade"
 Assert-Registered "after the upgrade"
-Assert ((User-Tips) -contains $koreanTip) "Korean is still switched on after the upgrade"
+Assert ((User-Tips) -contains $tip) "easime is still switched on after the upgrade"
 Assert ((Invoke-Msi "downgrade" @("/i", "`"$OldMsi`"")) -ne 0) "the older MSI is refused"
 Assert ((Entries)[0].DisplayVersion -eq $entries[0].DisplayVersion) "the newer version is still installed"
 Assert-Registered "after the refused downgrade"
 Assert ((Invoke-Msi "final-uninstall" @("/x", "`"$Msi`"")) -eq 0) "the MSI uninstalls"
 Assert (-not (Test-Path $dir)) "the install folder is gone"
 Assert-Unregistered "after the final uninstall"
-Assert ((User-Tips).Count -eq 0) "Korean is switched off again at the end"
+Assert ((User-Tips).Count -eq 0) "easime is switched off again at the end"
 Write-Host "all installer checks passed"

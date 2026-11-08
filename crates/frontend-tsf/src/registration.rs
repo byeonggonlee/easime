@@ -12,14 +12,16 @@
 use crate::profiles::{self, CLSID};
 use std::path::Path;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, FreeLibrary};
+use windows::Win32::Globalization::{GetUserDefaultUILanguage, LocaleNameToLCID};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
 };
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
-    RegCreateKeyExW, RegDeleteTreeW, RegOpenKeyExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE,
+    REG_SZ, RRF_RT_REG_MULTI_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegEnumKeyExW,
+    RegEnumValueW, RegGetValueW, RegOpenKeyExW, RegSetValueExW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
@@ -27,7 +29,7 @@ use windows::Win32::UI::TextServices::{
     GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, ITfCategoryMgr,
     ITfInputProcessorProfileMgr, TF_INPUTPROCESSORPROFILE, TF_PROFILETYPE_INPUTPROCESSOR,
 };
-use windows::core::{BOOL, Error, GUID, PCWSTR, Result, s, w};
+use windows::core::{BOOL, Error, GUID, PCWSTR, PWSTR, Result, s, w};
 
 /// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}` as a GUID. The ids in
 /// [`crate::profiles`] are constants checked by tests, so a bad one is a bug.
@@ -233,29 +235,34 @@ fn profile_manager() -> Result<ITfInputProcessorProfileMgr> {
     unsafe { CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER) }
 }
 
-/// Add the profiles to the language settings, and the text service to the
-/// keyboard category.
+/// Add the profile to the language settings (for every language), and the
+/// text service to its categories. What an earlier build registered goes first,
+/// so an upgrade leaves one easime.
 pub fn register_profiles(dll: &Path) -> Result<()> {
     let clsid = guid(CLSID);
     let manager = profile_manager()?;
+    for earlier in &profiles::EARLIER {
+        // SAFETY: GUID pointers live for the call; "not there" is fine.
+        let _ =
+            unsafe { manager.UnregisterProfile(&clsid, earlier.lang_id, &guid(earlier.guid), 0) };
+    }
     let icon: Vec<u16> = dll.to_string_lossy().encode_utf16().collect();
-    for profile in profiles::registered() {
-        let name: Vec<u16> = profile.name().encode_utf16().collect();
-        // SAFETY: the slices and GUID pointers live for the call.
-        unsafe {
-            manager.RegisterProfile(
-                &clsid,
-                profile.lang_id,
-                &guid(profile.guid),
-                &name,
-                &icon,
-                0,
-                HKL::default(),
-                0,
-                true,
-                0,
-            )?;
-        }
+    let profile = profiles::REGISTERED;
+    let name: Vec<u16> = profile.name().encode_utf16().collect();
+    // SAFETY: the slices and GUID pointers live for the call.
+    unsafe {
+        manager.RegisterProfile(
+            &clsid,
+            profile.lang_id,
+            &guid(profile.guid),
+            &name,
+            &icon,
+            0,
+            HKL::default(),
+            0,
+            true,
+            0,
+        )?;
     }
     let categories = category_manager()?;
     for category in &CATEGORIES {
@@ -270,7 +277,7 @@ pub fn register_profiles(dll: &Path) -> Result<()> {
 pub fn unregister_profiles() -> Result<()> {
     let clsid = guid(CLSID);
     let manager = profile_manager()?;
-    for profile in profiles::ALL {
+    for profile in profiles::EARLIER.iter().chain([&profiles::REGISTERED]) {
         // SAFETY: GUID pointers live for the call. An error means "was not
         // registered", which is what removal wants anyway.
         let _ =
@@ -346,23 +353,136 @@ fn install_layout_or_tip(spec: &str, flags: u32) -> Result<()> {
     result
 }
 
-/// Add easime's profile for `language` to the current user's input methods
-/// (this also adds the language to the user's list if it is not there). Needs
-/// no administrator rights; the machine-wide registration must have happened.
-pub fn enable_for_current_user(language: ime_core::Language) -> Result<()> {
-    let profile = profiles::profile_of(language)
-        .ok_or_else(|| Error::from(windows::Win32::Foundation::E_INVALIDARG))?;
-    let _com = Com::start();
-    install_layout_or_tip(&profiles::tip_spec(profile), 0)
+const USER_PROFILE: &str = "Control Panel\\International\\User Profile";
+
+/// UTF-16 without the closing NUL, as a string.
+fn text_of(units: &[u16]) -> String {
+    let end = units.iter().position(|&u| u == 0).unwrap_or(units.len());
+    String::from_utf16_lossy(&units[..end])
 }
 
-/// Take it away again from the current user's input methods. (The language
-/// itself stays in the user's list.)
-pub fn disable_for_current_user(language: ime_core::Language) -> Result<()> {
-    let profile = profiles::profile_of(language)
-        .ok_or_else(|| Error::from(windows::Win32::Foundation::E_INVALIDARG))?;
+/// The names of the keys (`values: false`) or values (`true`) of the current
+/// user's key at `path`.
+fn user_names(path: &str, values: bool) -> Vec<String> {
+    let path = wide(path);
+    let mut key = HKEY::default();
+    // SAFETY: `path` is NUL-terminated; `key` receives the opened key.
+    let opened = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(path.as_ptr()),
+            None,
+            KEY_READ,
+            &mut key,
+        )
+    };
+    if opened.is_err() {
+        return Vec::new();
+    }
+    let mut names = Vec::new();
+    for index in 0.. {
+        let mut buffer = [0u16; 512];
+        let mut length = buffer.len() as u32;
+        let name = Some(PWSTR(buffer.as_mut_ptr()));
+        // SAFETY: the buffer and its length live for the call.
+        let next = unsafe {
+            if values {
+                RegEnumValueW(key, index, name, &mut length, None, None, None, None)
+            } else {
+                RegEnumKeyExW(key, index, name, &mut length, None, None, None, None)
+            }
+        };
+        if next.is_err() {
+            break;
+        }
+        names.push(text_of(&buffer[..length as usize]));
+    }
+    // SAFETY: closing the key opened above.
+    unsafe {
+        let _ = RegCloseKey(key);
+    }
+    names
+}
+
+/// The current user's languages, in the order of their language settings
+/// (`Languages`, a list of language tags such as `en-US`, `ko`).
+fn user_language_tags() -> Vec<String> {
+    let (key, value) = (wide(USER_PROFILE), wide("Languages"));
+    let mut buffer = vec![0u16; 4096];
+    let mut bytes = (buffer.len() * 2) as u32;
+    // SAFETY: the buffer holds `bytes` bytes; the names are NUL-terminated.
+    let read = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_MULTI_SZ,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+    };
+    if read.is_err() {
+        return Vec::new();
+    }
+    buffer.truncate(bytes as usize / 2);
+    buffer
+        .split(|&unit| unit == 0)
+        .filter(|tag| !tag.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect()
+}
+
+/// The language id Windows has for a language tag, if any.
+fn lang_id_of(tag: &str) -> Option<u16> {
+    let tag = wide(tag);
+    // SAFETY: `tag` is NUL-terminated.
+    let lcid = unsafe { LocaleNameToLCID(PCWSTR(tag.as_ptr()), 0) };
+    // The low word of a locale id is its language id.
+    Some((lcid & 0xFFFF) as u16).filter(|&id| id != 0)
+}
+
+/// easime's entries in the current user's input methods, as specs
+/// (`0409:{class}{profile}`), whichever language they are under.
+fn user_entries() -> Vec<String> {
+    user_names(USER_PROFILE, false)
+        .into_iter()
+        .flat_map(|language| user_names(&format!("{USER_PROFILE}\\{language}"), true))
+        .filter(|entry| profiles::is_ours(entry))
+        .collect()
+}
+
+/// Switch easime on in the current user's input methods, under the first of
+/// their languages ([`profiles::language_to_switch_on_under`]), so no language
+/// is added to their list. Entries an earlier build made (under Korean) are
+/// taken away first. Returns the language it is switched on under. Needs no
+/// administrator rights; the machine-wide registration must have happened.
+pub fn enable_for_current_user() -> Result<u16> {
     let _com = Com::start();
-    install_layout_or_tip(&profiles::tip_spec(profile), ILOT_UNINSTALL)
+    let languages: Vec<Option<u16>> = user_language_tags().iter().map(|t| lang_id_of(t)).collect();
+    // SAFETY: a plain query.
+    let display = Some(unsafe { GetUserDefaultUILanguage() });
+    let language = profiles::language_to_switch_on_under(&languages, display);
+    let wanted = profiles::tip_spec(language, &profiles::REGISTERED);
+    for entry in user_entries() {
+        if !entry.eq_ignore_ascii_case(&wanted) {
+            let _ = install_layout_or_tip(&entry, ILOT_UNINSTALL);
+        }
+    }
+    install_layout_or_tip(&wanted, 0)?;
+    Ok(language)
+}
+
+/// Take easime away from the current user's input methods, under whichever
+/// languages it is (the languages themselves stay). Returns how many entries
+/// were taken away.
+pub fn disable_for_current_user() -> Result<usize> {
+    let _com = Com::start();
+    let entries = user_entries();
+    for entry in &entries {
+        install_layout_or_tip(entry, ILOT_UNINSTALL)?;
+    }
+    Ok(entries.len())
 }
 
 /// Everything `DllRegisterServer` does, for the DLL at `dll`.

@@ -11,7 +11,7 @@
 //!
 //! **The part that talks to Windows** (Windows only): registering the COM class
 //! and the profile ([`registration`], run by `regsvr32` and the installer),
-//! switching a language on for the installing user ([`setup`]), and the text
+//! switching easime on for the installing user ([`setup`]), and the text
 //! service itself, which writes what [`typing`] decides into TSF compositions
 //! ([`service`]).
 //!
@@ -118,9 +118,9 @@ mod exports {
             .into_owned()
     }
 
-    /// `rundll32 easime_tsf.dll,EnableForCurrentUser korean`: add the Korean
-    /// profile to the input methods of the current user (and so the language
-    /// too, if the user does not have it yet).
+    /// `rundll32 easime_tsf.dll,EnableForCurrentUser`: switch easime on in
+    /// the input methods of the current user, under their first language (no
+    /// language is added to their list).
     ///
     /// # Safety
     /// Called by `rundll32`, which passes a NUL-terminated command line.
@@ -135,7 +135,8 @@ mod exports {
         setup::run(Step::Enable, &unsafe { command_line_text(command_line) });
     }
 
-    /// `rundll32 easime_tsf.dll,DisableForCurrentUser korean`: the reverse.
+    /// `rundll32 easime_tsf.dll,DisableForCurrentUser`: the reverse, under
+    /// whichever languages easime is.
     ///
     /// # Safety
     /// Called by `rundll32`, which passes a NUL-terminated command line.
