@@ -84,10 +84,30 @@ fn regsvr32_registers_the_dll_and_com_creates_the_service_from_it() {
     assert!(!registration::class_registered(), "the COM class is gone");
 }
 
-/// Have TSF activate easime's first profile in this process, and look at what
-/// the thread manager says.
+/// A profile that exists only for this test, under US English: a CI runner has
+/// no Korean language set up, and TSF refuses to activate a profile of a
+/// language the machine does not have. The service behind it is easime's.
+const TEST_PROFILE: &str = "{8D5C3F7A-1E2B-4C6D-9A8B-7F6E5D4C3B2A}";
+const ENGLISH_US: u16 = 0x0409;
+
+/// Removes the test profile again, whatever happens.
+struct TestProfile(ITfInputProcessorProfileMgr);
+
+impl Drop for TestProfile {
+    fn drop(&mut self) {
+        let clsid = registration::guid(profiles::CLSID);
+        // SAFETY: GUID pointers live for the call; an error means "not there".
+        let _ = unsafe {
+            self.0
+                .UnregisterProfile(&clsid, ENGLISH_US, &registration::guid(TEST_PROFILE), 0)
+        };
+    }
+}
+
+/// Have TSF activate easime's service in this process, and look at what the
+/// thread manager says: TSF loads the registered DLL, creates the service and
+/// activates it, and the service hands over its key event sink.
 fn activates_through_tsf(clsid: &windows::core::GUID) {
-    let profile = &profiles::registered()[0];
     // SAFETY: Windows' own in-process COM classes.
     let thread_manager: ITfThreadMgr =
         unsafe { CoCreateInstance(&CLSID_TF_ThreadMgr, None, CLSCTX_INPROC_SERVER) }.unwrap();
@@ -95,18 +115,38 @@ fn activates_through_tsf(clsid: &windows::core::GUID) {
     let manager: ITfInputProcessorProfileMgr =
         unsafe { CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER) }
             .unwrap();
+    let test_profile = registration::guid(TEST_PROFILE);
+    let name: Vec<u16> = "easime test".encode_utf16().collect();
+    // SAFETY: the slices and GUID pointers live for the call.
+    unsafe {
+        manager.RegisterProfile(
+            clsid,
+            ENGLISH_US,
+            &test_profile,
+            &name,
+            &[],
+            0,
+            HKL::default(),
+            0,
+            true,
+            0,
+        )
+    }
+    .expect("registering the test profile");
+    let _cleanup = TestProfile(manager.clone());
+
     // For this process only: nothing is changed in the user's settings.
     unsafe {
         manager.ActivateProfile(
             TF_PROFILETYPE_INPUTPROCESSOR,
-            profile.lang_id,
+            ENGLISH_US,
             clsid,
-            &registration::guid(profile.guid),
+            &test_profile,
             HKL::default(),
             TF_IPPMF_FORPROCESS | TF_IPPMF_ENABLEPROFILE | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
         )
     }
-    .unwrap_or_else(|e| panic!("TSF could not activate {}: {e}", profile.name()));
+    .unwrap_or_else(|e| panic!("TSF could not activate easime's service: {e}"));
     let keystrokes: ITfKeystrokeMgr = thread_manager.cast().unwrap();
     assert_eq!(
         unsafe { keystrokes.GetForeground() }.unwrap(),
