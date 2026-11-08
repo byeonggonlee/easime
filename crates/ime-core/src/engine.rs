@@ -50,7 +50,11 @@ impl CandidateList {
 
     /// Index of the first candidate on the page that holds the selection.
     pub fn page_start(&self) -> usize {
-        self.selected / Self::PAGE_SIZE * Self::PAGE_SIZE
+        if self.items.is_empty() {
+            return 0;
+        }
+        let selected = self.selected.min(self.items.len() - 1);
+        selected / Self::PAGE_SIZE * Self::PAGE_SIZE
     }
 
     /// One past the index of the last candidate on that page.

@@ -1,4 +1,4 @@
-//! The Japanese engine (kana input only for now).
+//! The Japanese engine: romaji to kana and dictionary conversion.
 
 use crate::dictionary::{Dictionary, EmptyDictionary};
 use crate::kana::to_katakana;
@@ -23,6 +23,7 @@ const PAGE_SIZE: usize = CandidateList::PAGE_SIZE;
 #[derive(Debug)]
 struct Conversion {
     reading: String,
+    saved_romaji: Romaji,
     candidates: Vec<String>,
     selected: usize,
 }
@@ -129,16 +130,28 @@ impl JapaneseEngine {
 
     /// Begin converting the kana typed so far.
     fn start_conversion(&mut self) {
+        let mut saved_romaji = self.romaji.clone();
         let reading = self.romaji.flush();
+        // A trailing lone 'n' became 'ん' when starting conversion; if the user
+        // cancels back to the reading, keep that 'ん' as kana rather than a
+        // waiting 'n', while preserving any other incomplete romaji prefix.
+        if saved_romaji.preedit().ends_with('n') && reading.ends_with('ん') {
+            saved_romaji.restore(&reading);
+        }
         let mut candidates = self.dictionary.lookup(&reading);
         // Kana is always an option, after what the dictionary suggests.
-        for fallback in [reading.clone(), to_katakana(&reading)] {
+        let fallbacks = match self.mode {
+            KanaMode::Hiragana => [reading.clone(), to_katakana(&reading)],
+            KanaMode::Katakana => [to_katakana(&reading), reading.clone()],
+        };
+        for fallback in fallbacks {
             if !candidates.contains(&fallback) {
                 candidates.push(fallback);
             }
         }
         self.conversion = Some(Conversion {
             reading,
+            saved_romaji,
             candidates,
             selected: 0,
         });
@@ -147,7 +160,7 @@ impl JapaneseEngine {
     /// Give up the conversion and return to editing the kana.
     fn cancel_conversion(&mut self) {
         if let Some(conv) = self.conversion.take() {
-            self.romaji.restore(&conv.reading);
+            self.romaji = conv.saved_romaji;
         }
     }
 
@@ -201,6 +214,8 @@ impl JapaneseEngine {
             }
             Key::Char(c @ '1'..='9') => {
                 // The number on screen counts from 1 on the page being shown.
+                // A number beyond the candidates on this page is ignored (same
+                // as Korean Hanja), never committing a different candidate.
                 let (page_start, count) = self.conversion.as_ref().map_or((0, 0), |c| {
                     (c.selected / PAGE_SIZE * PAGE_SIZE, c.candidates.len())
                 });
@@ -212,13 +227,11 @@ impl JapaneseEngine {
                     let commit = self.finish();
                     self.output(commit, true)
                 } else {
-                    // No such candidate: treat it like any other key.
-                    let commit = self.finish();
-                    self.output(commit, false)
+                    self.output(String::new(), true)
                 }
             }
-            Key::Char(c) if c.is_ascii_alphabetic() => {
-                // Typing on: commit the choice and start the next word.
+            Key::Char(c) if c.is_ascii_alphabetic() || PUNCTUATION.contains(c) => {
+                // Typing on: commit the choice and start the next word or mark.
                 let commit = self.finish();
                 self.romaji.push(c);
                 self.output(commit, true)
@@ -543,6 +556,39 @@ mod tests {
     }
 
     #[test]
+    fn typing_punctuation_while_converting_commits_the_choice_and_composes_japanese_mark() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihon");
+        key(&mut e, Key::Space);
+        let out = e.process_key(KeyEvent::ch('.'));
+        assert_eq!(out.commit, "日本");
+        assert!(out.handled);
+        assert_eq!(out.preedit.text, "。");
+        assert!(out.candidates.is_none());
+    }
+
+    #[test]
+    fn escape_restores_incomplete_romaji_prefix_for_continued_typing() {
+        let mut e = engine_with_dictionary();
+        type_keys(&mut e, "nihok");
+        key(&mut e, Key::Space);
+        let out = key(&mut e, Key::Escape);
+        assert!(out.handled && out.candidates.is_none());
+        assert_eq!(out.preedit.text, "にほk");
+        let out = e.process_key(KeyEvent::ch('a'));
+        assert_eq!(out.preedit.text, "にほか");
+    }
+
+    #[test]
+    fn katakana_mode_offers_katakana_before_hiragana_on_conversion() {
+        let mut e = JapaneseEngine::with_mode(KanaMode::Katakana);
+        type_keys(&mut e, "kuruma");
+        let out = key(&mut e, Key::Space);
+        assert_eq!(out.preedit.text, "クルマ");
+        assert_eq!(out.candidates.unwrap().items, ["クルマ", "くるま"]);
+    }
+
+    #[test]
     fn a_digit_picks_that_candidate() {
         let mut e = engine_with_dictionary();
         type_keys(&mut e, "nihon");
@@ -553,13 +599,15 @@ mod tests {
     }
 
     #[test]
-    fn a_digit_without_such_a_candidate_commits_and_passes_through() {
+    fn a_digit_without_such_a_candidate_is_ignored_without_committing() {
         let mut e = engine_with_dictionary();
         type_keys(&mut e, "nihon");
         key(&mut e, Key::Space);
         let out = e.process_key(KeyEvent::ch('9'));
-        assert_eq!(out.commit, "日本");
-        assert!(!out.handled);
+        assert!(out.commit.is_empty());
+        assert!(out.handled);
+        assert_eq!(out.preedit.text, "日本");
+        assert!(out.candidates.is_some());
     }
 
     /// "かな" with 20 dictionary candidates, so 22 with the two kana ones:
@@ -636,15 +684,17 @@ mod tests {
         let out = e.process_key(KeyEvent::ch('4'));
         assert_eq!(out.commit, "カナ");
         assert!(out.handled);
-        // ...and "5" is not on the screen at all: commit and pass it on.
+        // ...and "5" is not on the screen at all: keep the candidate window open.
         let mut e = engine_with_many_candidates();
         type_keys(&mut e, "kana");
         key(&mut e, Key::Space);
         key(&mut e, Key::PageDown);
         key(&mut e, Key::PageDown);
         let out = e.process_key(KeyEvent::ch('5'));
-        assert_eq!(out.commit, "案19");
-        assert!(!out.handled);
+        assert!(out.commit.is_empty());
+        assert!(out.handled);
+        assert_eq!(out.preedit.text, "案19");
+        assert!(out.candidates.is_some());
     }
 
     #[test]

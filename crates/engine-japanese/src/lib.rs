@@ -1,4 +1,4 @@
-//! Japanese input engine: romaji to kana (conversion to kanji comes later).
+//! Japanese input engine: romaji to kana and dictionary-based conversion.
 
 pub mod dictionary;
 pub mod engine;

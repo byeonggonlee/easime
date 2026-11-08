@@ -10,9 +10,6 @@ use crate::table::{has_longer, lookup};
 pub struct Romaji {
     kana: String,
     pending: String,
-    /// The last kana came from `nn`. A following vowel or `y` reuses the second
-    /// `n` for the next syllable, so `onna` gives おんな instead of おんあ.
-    after_nn: bool,
 }
 
 fn is_vowel(c: char) -> bool {
@@ -36,10 +33,6 @@ impl Romaji {
     /// Feed one character (letters are case-insensitive).
     pub fn push(&mut self, c: char) {
         let c = c.to_ascii_lowercase();
-        let after_nn = std::mem::take(&mut self.after_nn);
-        if after_nn && self.pending.is_empty() && (is_vowel(c) || c == 'y') {
-            self.pending.push('n'); // the second n starts the next syllable
-        }
         self.pending.push(c);
         self.resolve();
     }
@@ -52,7 +45,6 @@ impl Romaji {
                     return; // wait: a longer entry may still match
                 }
                 self.kana.push_str(kana);
-                self.after_nn = self.pending == "nn";
                 self.pending.clear();
                 return;
             }
@@ -88,7 +80,6 @@ impl Romaji {
 
     /// Remove the last typed unit. Returns false if there was nothing.
     pub fn backspace(&mut self) -> bool {
-        self.after_nn = false;
         if self.pending.pop().is_some() {
             return true;
         }
@@ -108,7 +99,6 @@ impl Romaji {
             self.kana.push_str(&self.pending);
         }
         self.pending.clear();
-        self.after_nn = false;
         std::mem::take(&mut self.kana)
     }
 
@@ -117,7 +107,6 @@ impl Romaji {
     pub fn restore(&mut self, kana: &str) {
         self.kana = kana.to_string();
         self.pending.clear();
-        self.after_nn = false;
     }
 
     pub fn reset(&mut self) {
@@ -151,11 +140,14 @@ mod tests {
         assert_eq!(kana("nihongo"), "にほんご");
         assert_eq!(kana("sayonara"), "さよなら");
         assert_eq!(kana("arigatou"), "ありがとう");
-        assert_eq!(kana("konnichiha"), "こんにちは");
         assert_eq!(kana("konnnichiha"), "こんにちは");
+        assert_eq!(kana("kon'nichiha"), "こんにちは");
         assert_eq!(kana("tokyo"), "ときょ");
         assert_eq!(kana("kyouto"), "きょうと");
         assert_eq!(kana("shinbun"), "しんぶん");
+        assert_eq!(kana("tanni"), "たんい");
+        assert_eq!(kana("gennin"), "げんいん");
+        assert_eq!(kana("shinnyou"), "しんよう");
     }
 
     #[test]
@@ -169,11 +161,15 @@ mod tests {
 
     #[test]
     fn n_handling() {
-        assert_eq!(kana("onna"), "おんな");
+        assert_eq!(kana("onnna"), "おんな");
+        assert_eq!(kana("on'na"), "おんな");
         assert_eq!(kana("kanji"), "かんじ");
         assert_eq!(kana("kenya"), "けにゃ");
+        assert_eq!(kana("kennya"), "けんや");
         assert_eq!(kana("ken'ya"), "けんや");
         assert_eq!(kana("nya"), "にゃ");
+        assert_eq!(kana("nna"), "んあ");
+        assert_eq!(kana("nnna"), "んな");
         assert_eq!(kana("n'a"), "んあ");
         assert_eq!(kana("han"), "はん"); // trailing n becomes ん on flush
         assert_eq!(kana("nn"), "ん");
@@ -236,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn nn_reuse_does_not_survive_backspace() {
+    fn nn_then_backspace_removes_finished_n() {
         let mut r = Romaji::new();
         for c in "nn".chars() {
             r.push(c);
