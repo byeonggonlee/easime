@@ -311,6 +311,7 @@ name = "engine-japanese"
 version = "0.1.0"
 dependencies = [
  "ime-core",
+ "memmap2",
 ]
 
 [[package]]

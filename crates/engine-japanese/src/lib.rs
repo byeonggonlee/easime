@@ -11,4 +11,6 @@ pub mod table;
 pub use dictionary::Dictionary;
 pub use engine::{JapaneseEngine, KanaMode};
 pub use file_dict::FileDictionary;
-pub use loader::{LayeredDictionary, load_default, load_dictionaries};
+pub use loader::{
+    Access, LayeredDictionary, load_default, load_dictionaries, load_dictionaries_with,
+};

@@ -166,9 +166,27 @@ pub struct LoadReport {
     pub skipped_lines: usize,
 }
 
+/// How binary (`.bin`) dictionaries are opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Access {
+    /// Read into the process's memory (one process uses the dictionary: the
+    /// Linux daemon).
+    #[default]
+    Read,
+    /// Mapped from the file, so every process that opens it shares the same
+    /// memory (the Windows text service runs inside every application). See
+    /// [`FileDictionary::map`].
+    Map,
+}
+
 /// Load every `.tsv` and `.bin` dictionary in `dirs`, directories in the
 /// order given (put the user directory first), files by name.
 pub fn load_dictionaries(dirs: &[PathBuf]) -> LoadReport {
+    load_dictionaries_with(dirs, Access::Read)
+}
+
+/// [`load_dictionaries`], opening `.bin` files as `access` says.
+pub fn load_dictionaries_with(dirs: &[PathBuf], access: Access) -> LoadReport {
     let mut report = LoadReport::default();
     for dir in dirs {
         let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
@@ -187,9 +205,12 @@ pub fn load_dictionaries(dirs: &[PathBuf]) -> LoadReport {
                 .map(str::to_ascii_lowercase);
             let layer: Result<Box<dyn Dictionary>, String> = match extension.as_deref() {
                 Some("tsv") => load_text(&path, &mut report.skipped_lines),
-                Some("bin") => FileDictionary::open(&path)
-                    .map(|d| Box::new(d) as Box<dyn Dictionary>)
-                    .map_err(|e| e.to_string()),
+                Some("bin") => match access {
+                    Access::Read => FileDictionary::open(&path),
+                    Access::Map => FileDictionary::map(&path),
+                }
+                .map(|d| Box::new(d) as Box<dyn Dictionary>)
+                .map_err(|e| e.to_string()),
                 _ => continue,
             };
             match layer {
@@ -435,6 +456,23 @@ mod tests {
         assert!(report.failed.is_empty(), "{:?}", report.failed);
         assert_eq!(report.loaded.len(), 3);
         assert_eq!(report.dictionary.lookup("かみ"), ["神", "紙", "髪"]);
+    }
+
+    #[test]
+    fn mapped_binary_files_give_the_same_words() {
+        let t = TempDir::new();
+        t.write("b.bin", bin(&[("かみ", &["紙"])]));
+        t.write("a.tsv", "かみ\t神\n");
+        t.write("broken.bin", "not a dictionary");
+        let read = load_dictionaries(std::slice::from_ref(&t.0));
+        let mapped = load_dictionaries_with(std::slice::from_ref(&t.0), Access::Map);
+        assert_eq!(mapped.loaded, read.loaded);
+        assert_eq!(mapped.failed.len(), 1, "{:?}", mapped.failed);
+        assert_eq!(mapped.dictionary.lookup("かみ"), ["神", "紙"]);
+        assert_eq!(
+            mapped.dictionary.lookup("かみ"),
+            read.dictionary.lookup("かみ")
+        );
     }
 
     #[test]

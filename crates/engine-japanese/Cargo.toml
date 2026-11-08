@@ -9,3 +9,5 @@ authors.workspace = true
 
 [dependencies]
 ime-core = { path = "../ime-core" }
+# Mapping the dictionary file, so the processes that use it share its memory.
+memmap2 = "0.9"

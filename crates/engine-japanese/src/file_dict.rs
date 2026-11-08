@@ -35,6 +35,7 @@
 use std::fmt;
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::dictionary::Dictionary;
 
@@ -189,10 +190,28 @@ where
     Ok(out)
 }
 
-/// A validated binary dictionary held in memory.
+/// The bytes of a dictionary file: read into memory, or mapped from the file.
+#[derive(Clone)]
+enum Bytes {
+    Owned(Vec<u8>),
+    Mapped(Arc<memmap2::Mmap>),
+}
+
+impl std::ops::Deref for Bytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Owned(data) => data,
+            Self::Mapped(map) => map,
+        }
+    }
+}
+
+/// A validated binary dictionary, read into memory or mapped from its file.
 #[derive(Clone)]
 pub struct FileDictionary {
-    data: Vec<u8>,
+    data: Bytes,
     count: usize,
     meta: (usize, usize),
     key_offsets: usize,
@@ -216,8 +235,28 @@ impl FileDictionary {
         Self::from_bytes(std::fs::read(path)?)
     }
 
+    /// Map the file at `path` into memory and validate it. Processes that map
+    /// the same file share its pages, where reading it would give each its own
+    /// copy (the Windows text service is loaded into every application).
+    ///
+    /// The file must not be shortened while it is mapped: Windows refuses
+    /// that, other systems end the process. Replacing it (a new file renamed
+    /// over it, as installers and packages do) is fine.
+    pub fn map(path: impl AsRef<Path>) -> Result<Self, DictionaryError> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: a read-only mapping. Another program changing the file in
+        // place can only make lookups (all bounds-checked) find wrong words;
+        // shortening it is what the documentation above rules out.
+        let map = unsafe { memmap2::Mmap::map(&file) }?;
+        Self::from_data(Bytes::Mapped(Arc::new(map)))
+    }
+
     /// Validate `data` as a dictionary file and take ownership of it.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, DictionaryError> {
+        Self::from_data(Bytes::Owned(data))
+    }
+
+    fn from_data(data: Bytes) -> Result<Self, DictionaryError> {
         if data.len() < HEADER_LEN {
             // A file that is not even a header can still be recognised as
             // foreign rather than truncated.
@@ -397,7 +436,12 @@ impl FileDictionary {
         self.count == 0
     }
 
-    /// Size of the file data held in memory, in bytes.
+    /// Whether the file is mapped ([`FileDictionary::map`]) rather than read.
+    pub fn is_mapped(&self) -> bool {
+        matches!(self.data, Bytes::Mapped(_))
+    }
+
+    /// Size of the file data, in bytes.
     pub fn byte_len(&self) -> usize {
         self.data.len()
     }
@@ -524,6 +568,68 @@ mod tests {
             FileDictionary::open(&path),
             Err(DictionaryError::Io(_))
         ));
+    }
+
+    #[test]
+    fn a_mapped_file_finds_the_same_words_as_a_read_one() {
+        let path =
+            std::env::temp_dir().join(format!("easime-file-dict-map-{}.bin", std::process::id()));
+        std::fs::write(&path, sample()).unwrap();
+        {
+            let mapped = FileDictionary::map(&path).unwrap();
+            let read = FileDictionary::open(&path).unwrap();
+            assert!(mapped.is_mapped() && !read.is_mapped());
+            assert_eq!(mapped.len(), read.len());
+            assert_eq!(mapped.byte_len(), read.byte_len());
+            assert_eq!(mapped.meta(), read.meta());
+            for index in 0..read.len() {
+                let reading = read.reading_at(index).unwrap();
+                assert_eq!(mapped.lookup(reading), read.lookup(reading), "{reading}");
+            }
+            assert!(mapped.lookup("ない").is_empty());
+            // A clone shares the mapping.
+            let copy = mapped.clone();
+            drop(mapped);
+            assert_eq!(copy.lookup("にほん"), ["日本", "二本"]);
+        }
+        // Windows does not delete a file that is still mapped: the dictionaries
+        // are gone by now.
+        std::fs::remove_file(&path).unwrap();
+        assert!(matches!(
+            FileDictionary::map(&path),
+            Err(DictionaryError::Io(_))
+        ));
+    }
+
+    #[test]
+    fn a_mapped_file_is_checked_like_a_read_one() {
+        let dir = std::env::temp_dir();
+        let pid = std::process::id();
+        let foreign = dir.join(format!("easime-file-dict-foreign-{pid}.bin"));
+        std::fs::write(&foreign, b"hello, this is not a dictionary at all").unwrap();
+        assert!(matches!(
+            FileDictionary::map(&foreign),
+            Err(DictionaryError::BadMagic)
+        ));
+        std::fs::remove_file(&foreign).unwrap();
+
+        let empty = dir.join(format!("easime-file-dict-empty-{pid}.bin"));
+        std::fs::write(&empty, b"").unwrap();
+        assert!(
+            FileDictionary::map(&empty).is_err(),
+            "an empty file is refused"
+        );
+        std::fs::remove_file(&empty).unwrap();
+
+        let truncated = dir.join(format!("easime-file-dict-short-{pid}.bin"));
+        let mut bytes = sample();
+        bytes.truncate(bytes.len() - 3);
+        std::fs::write(&truncated, bytes).unwrap();
+        assert!(matches!(
+            FileDictionary::map(&truncated),
+            Err(DictionaryError::Truncated)
+        ));
+        std::fs::remove_file(&truncated).unwrap();
     }
 
     #[test]
