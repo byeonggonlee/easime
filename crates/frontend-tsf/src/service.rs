@@ -10,9 +10,11 @@
 //! *edit session* that TSF grants (`RequestEditSession`), which is what
 //! [`EditSession`] is.
 //!
+//! The composition is underlined through TSF display attributes
+//! ([`crate::display`]); the service is their provider.
+//!
 //! **What it does not do yet:** show a persistent taskbar/language-bar
-//! indicator, underline the composition (no display attributes), and
-//! candidates for conversion. See `docs/platforms.md`.
+//! indicator, and candidates for conversion. See `docs/platforms.md`.
 //!
 //! One service lives per thread of an application, so each has its own typist,
 //! and its mode (English or Korean) is its own. Everything here runs on that
@@ -23,9 +25,11 @@
 //! catches it, writes it to the log and says "not eaten".
 
 use crate::diag;
+use crate::display;
 use crate::indicator::{self, Indicator};
 use crate::install;
 use crate::keys::{KeyInfo, KeyboardState};
+use crate::marks::Mark;
 use crate::placement::Rect;
 use crate::profiles;
 use crate::typing::{Outcome, Step, Typist, plan};
@@ -35,6 +39,7 @@ use ime_session::{ConfigReloader, JapaneseDictionary, Session};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
+use std::ops::Range;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -43,14 +48,16 @@ use windows::Win32::Foundation::{CLASS_E_NOAGGREGATION, E_INVALIDARG, E_POINTER,
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardState;
 use windows::Win32::UI::TextServices::{
-    GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED, ITfCompartmentMgr,
-    ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext, ITfContextComposition,
-    ITfContextView, ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection,
-    ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource, ITfTextInputProcessor,
-    ITfTextInputProcessor_Impl, ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl,
-    ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl, TF_AE_NONE, TF_ANCHOR_END,
-    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE,
-    TF_ES_READ, TF_ES_READWRITE, TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
+    GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED, IEnumTfDisplayAttributeInfo,
+    ITfCompartmentMgr, ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext,
+    ITfContextComposition, ITfContextView, ITfDisplayAttributeInfo, ITfDisplayAttributeProvider,
+    ITfDisplayAttributeProvider_Impl, ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl,
+    ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource,
+    ITfTextInputProcessor, ITfTextInputProcessor_Impl, ITfTextInputProcessorEx,
+    ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl,
+    TF_AE_NONE, TF_ANCHOR_END, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION,
+    TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE, TF_ES_SYNC,
+    TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
 };
 use windows::core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
@@ -63,6 +70,23 @@ static LOCKS: AtomicIsize = AtomicIsize::new(0);
 /// Whether nothing of this DLL is in use: Windows may unload it only then.
 pub fn unloadable() -> bool {
     IN_USE.load(Ordering::SeqCst) == 0 && LOCKS.load(Ordering::SeqCst) == 0
+}
+
+/// Counts an object of this DLL as alive for as long as it lives (a field of
+/// the COM objects TSF may keep, such as the display attributes).
+pub(crate) struct Alive;
+
+impl Alive {
+    pub(crate) fn new() -> Self {
+        IN_USE.fetch_add(1, Ordering::SeqCst);
+        Alive
+    }
+}
+
+impl Drop for Alive {
+    fn drop(&mut self) {
+        IN_USE.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// How often the settings file is looked at for changes.
@@ -133,7 +157,8 @@ struct Composing {
     ITfTextInputProcessorEx,
     ITfKeyEventSink,
     ITfCompositionSink,
-    ITfThreadMgrEventSink
+    ITfThreadMgrEventSink,
+    ITfDisplayAttributeProvider
 )]
 pub struct TextService {
     activated: RefCell<Option<Activated>>,
@@ -146,6 +171,9 @@ pub struct TextService {
     told_no_caret: Cell<bool>,
     /// Shared with the edit sessions, which start and end compositions.
     composing: Rc<RefCell<Option<Composing>>>,
+    /// TSF's numbers for the underlines, once asked for (`None` if TSF would
+    /// not give them: the composition is then not underlined).
+    atoms: Cell<Option<Option<[u32; 3]>>>,
 }
 
 impl TextService {
@@ -159,6 +187,7 @@ impl TextService {
             appearance: RefCell::new(Appearance::default()),
             told_no_caret: Cell::new(false),
             composing: Rc::new(RefCell::new(None)),
+            atoms: Cell::new(None),
         }
     }
 }
@@ -272,8 +301,9 @@ impl TextService_Impl {
         if let Some(edit) = &outcome.edit {
             let composing = self.composing.borrow().is_some();
             let steps = plan(composing, edit);
+            let parts = self.parts(&edit.marks);
             if !steps.is_empty()
-                && let Err(e) = self.run(context, steps, true)
+                && let Err(e) = self.run(context, steps, parts, true)
             {
                 diag::log(&format!("could not edit the document: {e}"));
                 edited = false;
@@ -336,7 +366,34 @@ impl TextService_Impl {
     /// Run `steps` in an edit session of `context`. A key wants its text now
     /// (`sync`); a composition that ends because the focus moved does not mind
     /// when.
-    fn run(&self, context: &ITfContext, steps: Vec<Step>, sync: bool) -> Result<()> {
+    /// The underlines of a composition, with TSF's numbers for them.
+    fn parts(&self, marks: &[(Range<usize>, Mark)]) -> Vec<(Range<usize>, u32)> {
+        if marks.is_empty() {
+            return Vec::new();
+        }
+        let atoms = self.atoms.get().unwrap_or_else(|| {
+            let atoms = display::atoms()
+                .inspect_err(|e| diag::log(&format!("no underlines for the composition: {e}")))
+                .ok();
+            self.atoms.set(Some(atoms));
+            atoms
+        });
+        let Some(atoms) = atoms else {
+            return Vec::new();
+        };
+        marks
+            .iter()
+            .map(|(part, mark)| (part.clone(), display::atom_of(&atoms, *mark)))
+            .collect()
+    }
+
+    fn run(
+        &self,
+        context: &ITfContext,
+        steps: Vec<Step>,
+        parts: Vec<(Range<usize>, u32)>,
+        sync: bool,
+    ) -> Result<()> {
         let Some(client_id) = self.client_id() else {
             return Ok(());
         };
@@ -345,6 +402,7 @@ impl TextService_Impl {
             sink: self.to_interface(),
             composing: self.composing.clone(),
             steps: steps.clone(),
+            parts: parts.clone(),
         }
         .into();
         let write = TF_ES_READWRITE.0;
@@ -366,6 +424,7 @@ impl TextService_Impl {
                 sink: self.to_interface(),
                 composing: self.composing.clone(),
                 steps,
+                parts,
             }
             .into();
             // SAFETY: as above.
@@ -386,7 +445,7 @@ impl TextService_Impl {
     fn end_composition(&self) {
         let taken = self.composing.borrow().as_ref().map(|c| c.context.clone());
         if let Some(context) = taken
-            && let Err(e) = self.run(&context, vec![Step::End], false)
+            && let Err(e) = self.run(&context, vec![Step::End], Vec::new(), false)
         {
             diag::log(&format!("could not end the composition: {e}"));
             // Do not keep a composition we cannot reach.
@@ -433,7 +492,7 @@ impl TextService_Impl {
                     .and_then(|typist| typist.apply_config(&cycle_config(&config)));
                 if let (Some(edit), Some(context)) = (edit, context) {
                     let steps = plan(self.composing.borrow().is_some(), &edit);
-                    if let Err(e) = self.run(context, steps, true) {
+                    if let Err(e) = self.run(context, steps, Vec::new(), true) {
                         diag::log(&format!("could not edit the document: {e}"));
                     }
                 }
@@ -589,14 +648,16 @@ impl ITfCompositionSink_Impl for TextService_Impl {
     /// The application ended our composition (the user clicked elsewhere, the
     /// field went away): its text stays as shown, so only the engine's copy
     /// has to go.
-    fn OnCompositionTerminated(
-        &self,
-        _write: u32,
-        _composition: Ref<ITfComposition>,
-    ) -> Result<()> {
+    fn OnCompositionTerminated(&self, write: u32, composition: Ref<ITfComposition>) -> Result<()> {
         guarded("OnCompositionTerminated", Ok(()), || {
-            if let Ok(mut composing) = self.composing.try_borrow_mut() {
-                composing.take();
+            if let Ok(mut composing) = self.composing.try_borrow_mut()
+                && let Some(ended) = composing.take()
+            {
+                // What stays in the document is finished text: no underline.
+                let composition = composition.ok().unwrap_or(&ended.composition);
+                if let Err(e) = display::unmark(&ended.context, composition, write) {
+                    diag::log_key(|| format!("underline not taken off: {e}"));
+                }
             }
             if let Ok(mut typist) = self.typist.try_borrow_mut()
                 && let Some(typist) = typist.as_mut()
@@ -605,6 +666,30 @@ impl ITfCompositionSink_Impl for TextService_Impl {
             }
             Ok(())
         })
+    }
+}
+
+impl ITfDisplayAttributeProvider_Impl for TextService_Impl {
+    fn EnumDisplayAttributeInfo(&self) -> Result<IEnumTfDisplayAttributeInfo> {
+        guarded(
+            "EnumDisplayAttributeInfo",
+            Err(windows::Win32::Foundation::E_FAIL.into()),
+            || Ok(display::AttributeList::new().into()),
+        )
+    }
+
+    // The signature, raw pointer included, is COM's: the caller owns it.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn GetDisplayAttributeInfo(&self, id: *const GUID) -> Result<ITfDisplayAttributeInfo> {
+        guarded(
+            "GetDisplayAttributeInfo",
+            Err(windows::Win32::Foundation::E_FAIL.into()),
+            || {
+                // SAFETY: TSF passes a GUID that lives for the call, or null.
+                let id = unsafe { id.as_ref() }.ok_or(E_POINTER)?;
+                display::info(id)
+            },
+        )
     }
 }
 
@@ -647,6 +732,9 @@ struct EditSession {
     sink: ITfCompositionSink,
     composing: Rc<RefCell<Option<Composing>>>,
     steps: Vec<Step>,
+    /// The underlines of the composition after the steps (UTF-16 ranges and
+    /// TSF's numbers for the attributes).
+    parts: Vec<(Range<usize>, u32)>,
 }
 
 impl ITfEditSession_Impl for EditSession_Impl {
@@ -660,6 +748,19 @@ impl ITfEditSession_Impl for EditSession_Impl {
                         Step::Text(text) => self.write(cookie, text)?,
                         Step::End => self.end(cookie)?,
                     }
+                }
+                // The text is in; an underline that cannot be drawn is not
+                // worth failing the edit for.
+                let composing = self
+                    .composing
+                    .borrow()
+                    .as_ref()
+                    .map(|c| c.composition.clone());
+                if let Some(composition) = composing
+                    && !self.parts.is_empty()
+                    && let Err(e) = display::mark(&self.context, &composition, cookie, &self.parts)
+                {
+                    diag::log_key(|| format!("composition not underlined: {e}"));
                 }
                 Ok(())
             },
@@ -727,6 +828,10 @@ impl EditSession_Impl {
     fn end(&self, cookie: u32) -> Result<()> {
         let taken = self.composing.borrow_mut().take();
         if let Some(composing) = taken {
+            // What stays in the document is finished text: no underline.
+            if let Err(e) = display::unmark(&composing.context, &composing.composition, cookie) {
+                diag::log_key(|| format!("underline not taken off: {e}"));
+            }
             // SAFETY: the composition is alive.
             unsafe { composing.composition.EndComposition(cookie) }?;
         }

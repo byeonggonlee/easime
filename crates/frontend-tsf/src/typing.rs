@@ -22,10 +22,12 @@
 //!   a selection nobody can see is never made.
 
 use crate::keys::{self, KeyInfo, KeyboardState};
+use crate::marks::{Mark, marks};
 use easime_config::ToggleKey;
 use ime_core::{Key, Language};
 use ime_session::{Decision, KeyRole, Session, ToggleTracker};
 use std::collections::HashSet;
+use std::ops::Range;
 
 /// What to change in the document for one key.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -34,6 +36,9 @@ pub struct Edit {
     pub commit: String,
     /// The composition that follows the commit; empty ends the composition.
     pub preedit: String,
+    /// How the parts of the composition are drawn, in UTF-16 units of
+    /// `preedit` ([`crate::marks`]).
+    pub marks: Vec<(Range<usize>, Mark)>,
 }
 
 impl Edit {
@@ -189,6 +194,7 @@ impl Typist {
         let was_showing = !self.shown.is_empty();
         self.shown = output.preedit.text.clone();
         let edit = Edit {
+            marks: marks(self.language(), &output.preedit),
             commit: output.commit,
             preedit: output.preedit.text,
         };
@@ -234,7 +240,7 @@ impl Typist {
         self.shown.clear();
         (was_showing || !leftover.is_empty()).then(|| Edit {
             commit: leftover,
-            preedit: String::new(),
+            ..Edit::default()
         })
     }
 
@@ -429,6 +435,23 @@ mod tests {
             "only the last syllable is still composing"
         );
         assert_eq!(field.typist.shown(), "글");
+    }
+
+    #[test]
+    fn the_composition_says_how_it_is_drawn_and_finished_text_does_not() {
+        let mut typist = korean();
+        let edit = typist.key_down(letter('g'), &NO_KEYS).edit.unwrap();
+        assert_eq!(edit.preedit, "ㅎ");
+        assert_eq!(edit.marks, [(0..1, Mark::Composing)]);
+        let edit = typist.key_down(letter('k'), &NO_KEYS).edit.unwrap();
+        assert_eq!(edit.marks, [(0..1, Mark::Composing)]);
+        // Space finishes the syllable: finished text carries no mark.
+        let edit = typist
+            .key_down(named(VK_SPACE, 0x39), &NO_KEYS)
+            .edit
+            .unwrap();
+        assert_eq!((edit.commit.as_str(), edit.preedit.as_str()), ("하", ""));
+        assert!(edit.marks.is_empty());
     }
 
     #[test]
@@ -799,6 +822,7 @@ mod tests {
         let edit = |commit: &str, preedit: &str| Edit {
             commit: commit.into(),
             preedit: preedit.into(),
+            ..Edit::default()
         };
         let text = |t: &str| Step::Text(t.into());
         assert_eq!(plan(false, &edit("", "")), []);

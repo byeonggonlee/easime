@@ -18,20 +18,26 @@
 //! Switching a language shows a small box next to the text cursor ([`indicator`];
 //! where it goes is the portable rule in [`placement`]).
 //!
-//! **Not here yet:** an underline for the composition, a candidate window (so no
-//! conversion), and sharing the mode between programs.
+//! The composition is underlined: which part is which is the portable rule in
+//! [`marks`], and the Windows side is [`display`].
+//!
+//! **Not here yet:** a candidate window (so no conversion), and sharing the mode
+//! between programs.
 //! Only Korean can be typed ([`profiles::TYPEABLE`]). It has been tested against
 //! a simulated TSF application in CI, not on a real PC. See `docs/platforms.md`,
 //! "Windows", and `docs/status.md`.
 
 pub mod install;
 pub mod keys;
+pub mod marks;
 pub mod placement;
 pub mod profiles;
 pub mod typing;
 
 #[cfg(windows)]
 pub mod diag;
+#[cfg(windows)]
+pub mod display;
 #[cfg(windows)]
 pub mod indicator;
 #[cfg(windows)]

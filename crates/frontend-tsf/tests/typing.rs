@@ -30,15 +30,18 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{HKL, SetFocus};
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT,
-    GUID_COMPARTMENT_KEYBOARD_DISABLED, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
-    GUID_TFCAT_TIP_KEYBOARD, IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl,
-    ITextStoreACPSink, ITfCompartmentMgr, ITfContext, ITfContextComposition,
-    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfThreadMgr, TEXT_STORE_LOCK_FLAGS,
-    TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE,
-    TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS,
-    TS_LF_SYNC, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE,
-    TS_STATUS, TS_TEXTCHANGE,
+    CLSID_TF_CategoryMgr, CLSID_TF_DisplayAttributeMgr, CLSID_TF_InputProcessorProfiles,
+    CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
+    GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, GUID_PROP_ATTRIBUTE, GUID_TFCAT_TIP_KEYBOARD,
+    IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink, ITfCategoryMgr,
+    ITfCompartmentMgr, ITfContext, ITfContextComposition, ITfDisplayAttributeMgr, ITfEditSession,
+    ITfEditSession_Impl, ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfRange, ITfThreadMgr,
+    TEXT_STORE_LOCK_FLAGS, TF_ATTR_TARGET_CONVERTED, TF_CONTEXT_EDIT_CONTEXT_FLAGS,
+    TF_DISPLAYATTRIBUTE, TF_ES_READ, TF_ES_SYNC, TF_INPUTPROCESSORPROFILE,
+    TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_LS_DOT,
+    TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
+    TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS,
+    TS_TEXTCHANGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, FindWindowW, GetWindowRect, IsWindowVisible,
@@ -641,6 +644,107 @@ fn focused_window() -> HWND {
     }
 }
 
+/// The look of an underline, as an application asks TSF for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Underline {
+    dotted: bool,
+    bold: bool,
+    converting: bool,
+}
+
+const COMPOSING: Underline = Underline {
+    dotted: false,
+    bold: false,
+    converting: false,
+};
+
+/// The display attributes over the document, read the way an application
+/// that draws them does: the attribute property's runs of text, each value (an
+/// atom) turned into its GUID, and the GUID into the look its provider gives.
+fn underlines(context: &ITfContext, client: u32) -> Vec<(String, Underline)> {
+    let found = Rc::new(RefCell::new(Vec::new()));
+    let session: ITfEditSession = ReadUnderlines {
+        context: context.clone(),
+        found: found.clone(),
+    }
+    .into();
+    // SAFETY: the context and the session are alive for the call.
+    let result = unsafe {
+        context.RequestEditSession(
+            client,
+            &session,
+            TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_SYNC.0 | TF_ES_READ.0),
+        )
+    };
+    assert_eq!(
+        result.map(|r| r.is_ok()),
+        Ok(true),
+        "reading the attributes"
+    );
+    // SAFETY: Windows' own in-process COM classes.
+    let categories: ITfCategoryMgr =
+        unsafe { CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER) }.unwrap();
+    let attributes: ITfDisplayAttributeMgr =
+        unsafe { CoCreateInstance(&CLSID_TF_DisplayAttributeMgr, None, CLSCTX_INPROC_SERVER) }
+            .unwrap();
+    let runs = found.borrow().clone();
+    runs.into_iter()
+        .map(|(text, atom)| {
+            // SAFETY: plain calls on live interfaces; the out values live for them.
+            let id = unsafe { categories.GetGUID(atom) }.expect("the atom is TSF's");
+            let mut info = None;
+            let mut owner = GUID::zeroed();
+            unsafe { attributes.GetDisplayAttributeInfo(&id, &mut info, &mut owner) }
+                .unwrap_or_else(|e| panic!("TSF knows no display attribute {id:?}: {e}"));
+            assert_eq!(owner, registration::guid(profiles::CLSID), "it is easime's");
+            let mut look = TF_DISPLAYATTRIBUTE::default();
+            unsafe { info.unwrap().GetAttributeInfo(&mut look) }.unwrap();
+            let underline = Underline {
+                dotted: look.lsStyle == TF_LS_DOT,
+                bold: look.fBoldLine.as_bool(),
+                converting: look.bAttr == TF_ATTR_TARGET_CONVERTED,
+            };
+            (text, underline)
+        })
+        .collect()
+}
+
+/// Reads the runs of the document that carry a display attribute.
+#[implement(ITfEditSession)]
+struct ReadUnderlines {
+    context: ITfContext,
+    found: Rc<RefCell<Vec<(String, u32)>>>,
+}
+
+impl ITfEditSession_Impl for ReadUnderlines_Impl {
+    fn DoEditSession(&self, cookie: u32) -> Result<()> {
+        // SAFETY: the context is alive; the out values live for the calls.
+        let property = unsafe { self.context.GetProperty(&GUID_PROP_ATTRIBUTE) }?;
+        let mut runs = None;
+        unsafe { property.EnumRanges(cookie, &mut runs, None::<&ITfRange>) }?;
+        let Some(runs) = runs else {
+            return Ok(());
+        };
+        loop {
+            let mut one = [None];
+            let mut fetched = 0;
+            unsafe { runs.Next(&mut one, &mut fetched) }?;
+            let Some(range) = one[0].take().filter(|_| fetched == 1) else {
+                return Ok(());
+            };
+            let value = unsafe { property.GetValue(cookie, &range) }?;
+            let Ok(atom) = i32::try_from(&value) else {
+                continue; // no attribute on this run
+            };
+            let mut text = [0u16; 64];
+            let mut length = 0;
+            unsafe { range.GetText(cookie, 0, &mut text, &mut length) }?;
+            let text = String::from_utf16_lossy(&text[..length as usize]);
+            self.found.borrow_mut().push((text, atom as u32));
+        }
+    }
+}
+
 /// How many compositions the context has going on.
 fn compositions(context: &ITfContext) -> usize {
     let composer: ITfContextComposition = context.cast().unwrap();
@@ -835,9 +939,14 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     app.letters("g");
     assert_eq!(app.text(), "ㅎ", "the first jamo shows at once");
     assert_eq!(compositions(context), 1, "and starts a composition");
+    // Underlined as a Korean composition (a thin solid line), as an
+    // application drawing TSF's display attributes sees it.
+    assert_eq!(underlines(context, client), [("ㅎ".into(), COMPOSING)]);
     app.letters("ksrmf");
     assert_eq!(app.text(), "한글");
     assert_eq!(compositions(context), 1);
+    // The finished syllable has no line; the one still composed has.
+    assert_eq!(underlines(context, client), [("글".into(), COMPOSING)]);
 
     // Space finishes the syllable and then belongs to the application.
     let taken = app.press(VK_SPACE, 0x39, Some(" "));
@@ -847,6 +956,10 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
         compositions(context),
         0,
         "nothing is being composed any more"
+    );
+    assert!(
+        underlines(context, client).is_empty(),
+        "finished text is not underlined"
     );
 
     // Backspace takes back jamo of the syllable, then the application's own.

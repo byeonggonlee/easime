@@ -23,9 +23,9 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD,
-    GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, ITfCategoryMgr, ITfInputProcessorProfileMgr,
-    TF_INPUTPROCESSORPROFILE, TF_PROFILETYPE_INPUTPROCESSOR,
+    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+    GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, ITfCategoryMgr,
+    ITfInputProcessorProfileMgr, TF_INPUTPROCESSORPROFILE, TF_PROFILETYPE_INPUTPROCESSOR,
 };
 use windows::core::{BOOL, Error, GUID, PCWSTR, Result, s, w};
 
@@ -192,11 +192,17 @@ pub fn class_registered() -> bool {
 ///   not use the input method there. In such apps the service may not be able
 ///   to read the settings file or write its log (they live in the user's own
 ///   folders); it then types with the default settings, as when the file is
-///   missing.
+///   missing;
+/// * a display attribute provider: it says how its composition is underlined
+///   ([`crate::display`]).
 ///
 /// Not `SECUREMODE` (the sign-in screen and UAC prompts): a text service there
 /// must not touch user files or show its own windows, which this one does.
-pub const CATEGORIES: [GUID; 2] = [GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT];
+pub const CATEGORIES: [GUID; 3] = [
+    GUID_TFCAT_TIP_KEYBOARD,
+    GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+    GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+];
 
 fn category_manager() -> Result<ITfCategoryMgr> {
     // SAFETY: an in-process COM class of Windows itself.
