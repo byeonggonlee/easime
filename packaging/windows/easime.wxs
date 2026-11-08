@@ -4,7 +4,7 @@
   this; by hand:)
 
     wix build -arch x64 -ext WixToolset.UI.wixext \
-      -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d TsfDll=<frontend_tsf.dll built with --profile dll> \
+      -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d TsfDll=<frontend_tsf.dll, built with the dll profile> \
       -d Root=<repository root> \
       -o easime.msi packaging/windows/easime.wxs
 
