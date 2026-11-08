@@ -45,6 +45,15 @@ fn the_service_registers_is_listed_and_unregisters() {
         );
     }
 
+    // In every category it claims: a keyboard, usable in Store apps.
+    let categories = registration::categories().expect("TSF lists the categories");
+    for category in registration::CATEGORIES {
+        assert!(
+            categories.contains(&category),
+            "not in category {category:?}: {categories:?}"
+        );
+    }
+
     // Registering again (a repair, an upgrade over an old install) is fine.
     registration::register(&dll).expect("a second registration works");
     assert!(wanted.iter().all(registration::profile_registered));
@@ -58,6 +67,10 @@ fn the_service_registers_is_listed_and_unregisters() {
             profile.name()
         );
     }
+    assert!(
+        registration::categories().unwrap_or_default().is_empty(),
+        "no category is left"
+    );
     // Removing what is not there is fine too.
     registration::unregister().unwrap();
 }

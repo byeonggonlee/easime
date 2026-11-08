@@ -23,8 +23,9 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD, ITfCategoryMgr,
-    ITfInputProcessorProfileMgr, TF_INPUTPROCESSORPROFILE, TF_PROFILETYPE_INPUTPROCESSOR,
+    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD,
+    GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, ITfCategoryMgr, ITfInputProcessorProfileMgr,
+    TF_INPUTPROCESSORPROFILE, TF_PROFILETYPE_INPUTPROCESSOR,
 };
 use windows::core::{BOOL, Error, GUID, PCWSTR, Result, s, w};
 
@@ -184,6 +185,43 @@ pub fn class_registered() -> bool {
     key_exists(&class_key())
 }
 
+/// The TSF categories the text service is registered in:
+///
+/// * a keyboard text service (what the language settings list);
+/// * one that works in Store apps ("immersive" mode). Without it Windows does
+///   not use the input method there. In such apps the service may not be able
+///   to read the settings file or write its log (they live in the user's own
+///   folders); it then types with the default settings, as when the file is
+///   missing.
+///
+/// Not `SECUREMODE` (the sign-in screen and UAC prompts): a text service there
+/// must not touch user files or show its own windows, which this one does.
+pub const CATEGORIES: [GUID; 2] = [GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT];
+
+fn category_manager() -> Result<ITfCategoryMgr> {
+    // SAFETY: an in-process COM class of Windows itself.
+    unsafe { CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER) }
+}
+
+/// The categories TSF has the text service in.
+pub fn categories() -> Result<Vec<GUID>> {
+    let _com = Com::start();
+    let clsid = guid(CLSID);
+    // SAFETY: the GUID pointer lives for the call.
+    let list = unsafe { category_manager()?.EnumCategoriesInItem(&clsid) }?;
+    let mut found = Vec::new();
+    loop {
+        let mut one = [GUID::zeroed()];
+        let mut fetched = 0;
+        // SAFETY: `one` and `fetched` live for the call.
+        let next = unsafe { list.Next(&mut one, Some(&mut fetched)) };
+        if next.is_err() || fetched == 0 {
+            return Ok(found);
+        }
+        found.push(one[0]);
+    }
+}
+
 fn profile_manager() -> Result<ITfInputProcessorProfileMgr> {
     // SAFETY: an in-process COM class of Windows itself.
     unsafe { CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER) }
@@ -213,11 +251,12 @@ pub fn register_profiles(dll: &Path) -> Result<()> {
             )?;
         }
     }
-    // SAFETY: an in-process COM class of Windows itself.
-    let categories: ITfCategoryMgr =
-        unsafe { CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)? };
-    // SAFETY: GUID pointers live for the call.
-    unsafe { categories.RegisterCategory(&clsid, &GUID_TFCAT_TIP_KEYBOARD, &clsid) }
+    let categories = category_manager()?;
+    for category in &CATEGORIES {
+        // SAFETY: GUID pointers live for the call.
+        unsafe { categories.RegisterCategory(&clsid, category, &clsid) }?;
+    }
+    Ok(())
 }
 
 /// Take the profiles and the category away. Profiles that are not there are
@@ -231,11 +270,11 @@ pub fn unregister_profiles() -> Result<()> {
         let _ =
             unsafe { manager.UnregisterProfile(&clsid, profile.lang_id, &guid(profile.guid), 0) };
     }
-    // SAFETY: an in-process COM class of Windows itself.
-    let categories: ITfCategoryMgr =
-        unsafe { CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)? };
-    // SAFETY: GUID pointers live for the call.
-    let _ = unsafe { categories.UnregisterCategory(&clsid, &GUID_TFCAT_TIP_KEYBOARD, &clsid) };
+    let categories = category_manager()?;
+    for category in &CATEGORIES {
+        // SAFETY: GUID pointers live for the call; "not there" is fine.
+        let _ = unsafe { categories.UnregisterCategory(&clsid, category, &clsid) };
+    }
     Ok(())
 }
 
