@@ -1,0 +1,5 @@
+# The Windows text service is loaded into other programs, and the installer's
+# target PCs may not have the Visual C++ runtime: link the C runtime into the
+# binaries instead of depending on vcruntime140.dll.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

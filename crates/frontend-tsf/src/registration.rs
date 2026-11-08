@@ -16,6 +16,7 @@ use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
 };
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
     RegCreateKeyExW, RegDeleteTreeW, RegOpenKeyExW, RegSetValueExW,
@@ -25,7 +26,7 @@ use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIP_KEYBOARD, ITfCategoryMgr,
     ITfInputProcessorProfileMgr, TF_INPUTPROCESSORPROFILE, TF_PROFILETYPE_INPUTPROCESSOR,
 };
-use windows::core::{GUID, PCWSTR, Result};
+use windows::core::{BOOL, Error, GUID, PCWSTR, Result, s, w};
 
 /// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}` as a GUID. The ids in
 /// [`crate::profiles`] are constants checked by tests, so a bad one is a bug.
@@ -269,6 +270,47 @@ fn profile_key(profile: &profiles::Profile) -> String {
 /// in its own part of the registry), whatever the current user has enabled.
 pub fn profile_registered(profile: &profiles::Profile) -> bool {
     key_exists(&profile_key(profile))
+}
+
+/// `InstallLayoutOrTip` of `input.dll`, the call Windows' own setup and every IME
+/// installer use to add or remove an input method for the *current user*.
+type InstallLayoutOrTip = unsafe extern "system" fn(*const u16, u32) -> BOOL;
+const ILOT_UNINSTALL: u32 = 0x0000_0001;
+
+fn install_layout_or_tip(spec: &str, flags: u32) -> Result<()> {
+    // SAFETY: loading a system DLL by name.
+    let library = unsafe { LoadLibraryW(w!("input.dll")) }?;
+    // SAFETY: the name is a NUL-terminated string; the function has this signature.
+    let function = unsafe { GetProcAddress(library, s!("InstallLayoutOrTip")) }
+        .ok_or_else(Error::from_thread)?;
+    // SAFETY: input.dll exports `BOOL InstallLayoutOrTip(LPCWSTR, DWORD)`.
+    let function: InstallLayoutOrTip = unsafe { std::mem::transmute(function) };
+    let spec = wide(spec);
+    // SAFETY: `spec` is NUL-terminated and lives for the call.
+    if unsafe { function(spec.as_ptr(), flags) }.as_bool() {
+        Ok(())
+    } else {
+        Err(Error::from_thread())
+    }
+}
+
+/// Add easime's profile for `language` to the current user's input methods
+/// (this also adds the language to the user's list if it is not there). Needs
+/// no administrator rights; the machine-wide registration must have happened.
+pub fn enable_for_current_user(language: ime_core::Language) -> Result<()> {
+    let profile = profiles::profile_of(language)
+        .ok_or_else(|| Error::from(windows::Win32::Foundation::E_INVALIDARG))?;
+    let _com = Com::start();
+    install_layout_or_tip(&profiles::tip_spec(profile), 0)
+}
+
+/// Take it away again from the current user's input methods. (The language
+/// itself stays in the user's list.)
+pub fn disable_for_current_user(language: ime_core::Language) -> Result<()> {
+    let profile = profiles::profile_of(language)
+        .ok_or_else(|| Error::from(windows::Win32::Foundation::E_INVALIDARG))?;
+    let _com = Com::start();
+    install_layout_or_tip(&profiles::tip_spec(profile), ILOT_UNINSTALL)
 }
 
 /// Everything `DllRegisterServer` does, for the DLL at `dll`.

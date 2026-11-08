@@ -7,8 +7,10 @@
 //! language inside it: a profile is a `ime_session::Session` for one language
 //! ([`ime_session::Session::for_language`]).
 //!
-//! Only languages that have an engine get a profile, so Windows never offers an
-//! input method that does nothing (DESIGN.md 3.1). The GUIDs are fixed for
+//! Only languages that this frontend can really type get a profile, so Windows
+//! never offers an input method that does nothing (DESIGN.md 3.1): the language
+//! needs an engine ([`easime_config::AVAILABLE_LANGUAGES`]) and the text
+//! service must be able to drive it ([`TYPEABLE`]). The GUIDs are fixed for
 //! ever: Windows remembers the user's choice by them.
 
 use ime_core::Language;
@@ -60,10 +62,43 @@ pub const ALL: [Profile; 4] = [
     },
 ];
 
-/// The profiles to register: those whose language has an engine.
+/// The profile of `language`, if easime has one.
+pub fn profile_of(language: Language) -> Option<&'static Profile> {
+    ALL.iter().find(|profile| profile.language == language)
+}
+
+/// A language by the name the installer passes (`korean`, `japanese`, ...).
+pub fn language_named(name: &str) -> Option<Language> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "korean" => Some(Language::Korean),
+        "japanese" => Some(Language::Japanese),
+        "chinese_simplified" => Some(Language::ChineseSimplified),
+        "chinese_traditional" => Some(Language::ChineseTraditional),
+        _ => None,
+    }
+}
+
+/// What Windows' `InstallLayoutOrTip` takes to add `profile` to the current
+/// user's input methods (the same text an unattended Windows setup uses):
+/// the language id as four hex digits, then the class id and the profile id.
+pub fn tip_spec(profile: &Profile) -> String {
+    format!("{:04X}:{}{}", profile.lang_id, CLSID, profile.guid)
+}
+
+/// The languages the text service can type today. A language is added here when
+/// its typing works end to end in a Windows application (composition shown,
+/// text committed), not when its engine exists: Hangul first; Japanese needs the
+/// candidate window too.
+pub const TYPEABLE: [Language; 1] = [Language::Korean];
+
+/// The profiles to register: those whose language has an engine and that the
+/// text service can type.
 pub fn registered() -> Vec<Profile> {
     ALL.iter()
-        .filter(|profile| easime_config::AVAILABLE_LANGUAGES.contains(&profile.language))
+        .filter(|profile| {
+            easime_config::AVAILABLE_LANGUAGES.contains(&profile.language)
+                && TYPEABLE.contains(&profile.language)
+        })
         .cloned()
         .collect()
 }
@@ -126,9 +161,46 @@ mod tests {
     }
 
     #[test]
-    fn only_languages_with_an_engine_are_registered() {
+    fn a_profile_is_found_by_language_and_by_the_installers_name() {
+        for profile in &ALL {
+            assert_eq!(profile_of(profile.language), Some(profile));
+        }
+        assert_eq!(profile_of(Language::English), None);
+        assert_eq!(language_named("korean"), Some(Language::Korean));
+        assert_eq!(language_named(" Japanese "), Some(Language::Japanese));
+        assert_eq!(
+            language_named("chinese_traditional"),
+            Some(Language::ChineseTraditional)
+        );
+        assert_eq!(language_named("klingon"), None);
+        assert_eq!(language_named(""), None);
+    }
+
+    #[test]
+    fn the_tip_spec_is_what_windows_setup_writes() {
+        let korean = profile_of(Language::Korean).unwrap();
+        assert_eq!(
+            tip_spec(korean),
+            "0412:{CFC09673-DDBA-4C84-B57F-CF0B0DDC262C}{42FBAB7A-5B91-4A6A-868A-3CC5C8153492}"
+        );
+        let japanese = profile_of(Language::Japanese).unwrap();
+        assert!(tip_spec(japanese).starts_with("0411:{CFC09673"));
+    }
+
+    #[test]
+    fn only_languages_with_an_engine_that_can_be_typed_are_registered() {
         let languages: Vec<Language> = registered().iter().map(|p| p.language).collect();
-        assert_eq!(languages, easime_config::AVAILABLE_LANGUAGES);
+        assert_eq!(languages, [Language::Korean]);
+        for language in TYPEABLE {
+            assert!(
+                easime_config::AVAILABLE_LANGUAGES.contains(&language),
+                "{language:?} is typeable but has no engine"
+            );
+        }
+        assert!(
+            !languages.contains(&Language::Japanese),
+            "Japanese needs the candidate window first"
+        );
         assert!(
             !languages.contains(&Language::ChineseSimplified),
             "no Chinese engine yet, so no Chinese profile"

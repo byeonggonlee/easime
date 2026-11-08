@@ -17,18 +17,21 @@ pub mod profiles;
 pub mod registration;
 #[cfg(windows)]
 pub mod service;
+#[cfg(windows)]
+pub mod setup;
 
 /// The DLL's entry points. Windows loads the DLL, asks it to register itself
-/// (`regsvr32`, the installer) and later to unregister. The text service
-/// itself (the class factory) does not exist yet, so asking for the class is
-/// refused.
+/// (`regsvr32`, the installer) and later to unregister, and asks for the text
+/// service's class factory. The installer also runs two steps through
+/// `rundll32` (add or remove a language for the installing user).
 #[cfg(windows)]
 mod exports {
-    use std::ffi::c_void;
+    use crate::setup::{self, Step};
+    use std::ffi::{CStr, c_char, c_void};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicIsize, Ordering};
     use windows::Win32::Foundation::{
-        CLASS_E_CLASSNOTAVAILABLE, E_FAIL, E_POINTER, HINSTANCE, HMODULE, S_FALSE, S_OK, TRUE,
+        CLASS_E_CLASSNOTAVAILABLE, E_FAIL, E_POINTER, HINSTANCE, HMODULE, HWND, S_FALSE, S_OK, TRUE,
     };
     use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
     use windows::core::{BOOL, GUID, HRESULT, Interface};
@@ -71,6 +74,52 @@ mod exports {
             Ok(()) => S_OK,
             Err(e) => e.code(),
         }
+    }
+
+    /// What `rundll32` passes: a NUL-terminated ANSI command line.
+    ///
+    /// # Safety
+    /// `command_line` is null or points to a NUL-terminated string.
+    unsafe fn command_line_text(command_line: *const c_char) -> String {
+        if command_line.is_null() {
+            return String::new();
+        }
+        // SAFETY: promised by the caller.
+        unsafe { CStr::from_ptr(command_line) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// `rundll32 easime_tsf.dll,EnableForCurrentUser korean`: add the Korean
+    /// profile to the input methods of the current user (and so the language
+    /// too, if the user does not have it yet).
+    ///
+    /// # Safety
+    /// Called by `rundll32`, which passes a NUL-terminated command line.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "system" fn EnableForCurrentUser(
+        _window: HWND,
+        _instance: HINSTANCE,
+        command_line: *const c_char,
+        _show: i32,
+    ) {
+        // SAFETY: rundll32 passes a NUL-terminated string.
+        setup::run(Step::Enable, &unsafe { command_line_text(command_line) });
+    }
+
+    /// `rundll32 easime_tsf.dll,DisableForCurrentUser korean`: the reverse.
+    ///
+    /// # Safety
+    /// Called by `rundll32`, which passes a NUL-terminated command line.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "system" fn DisableForCurrentUser(
+        _window: HWND,
+        _instance: HINSTANCE,
+        command_line: *const c_char,
+        _show: i32,
+    ) {
+        // SAFETY: rundll32 passes a NUL-terminated string.
+        setup::run(Step::Disable, &unsafe { command_line_text(command_line) });
     }
 
     /// Windows may unload the DLL only when no text service or lock is alive.
