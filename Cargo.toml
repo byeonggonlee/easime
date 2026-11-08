@@ -13,3 +13,11 @@ authors = ["Byeonggon Lee"]
 # panic must abort instead of unwinding to a normal exit code.
 [profile.release]
 panic = "abort"
+
+# The Windows text service (frontend-tsf) is a DLL inside other programs: a bug
+# in it must not take the program down. It unwinds, and every entry point
+# catches the panic, writes it to the log and lets the key through. The DLL for
+# the installer is built with `--profile dll` (packaging/windows/build.ps1).
+[profile.dll]
+inherits = "release"
+panic = "unwind"

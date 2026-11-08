@@ -9,8 +9,8 @@
 //! language list afterwards. Anyone can run the same commands by hand to add or
 //! remove one language.
 
+use crate::diag::log;
 use crate::{profiles, registration};
-use std::io::Write;
 
 /// What to do with the profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,22 +46,4 @@ pub fn run(step: Step, command_line: &str) -> bool {
         Err(why) => log(&format!("setup: {} {name}: FAILED: {why}", step.verb())),
     }
     outcome.is_ok()
-}
-
-/// Append a line to the log (the temporary folder if the process has no home,
-/// as an installer's helper process may not). A log that cannot be written is
-/// not a reason to fail the installer.
-fn log(line: &str) {
-    let path =
-        easime_config::log_path().unwrap_or_else(|| std::env::temp_dir().join("easime-setup.log"));
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        let _ = writeln!(file, "{line}");
-    }
 }

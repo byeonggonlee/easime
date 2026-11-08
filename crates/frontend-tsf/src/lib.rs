@@ -15,6 +15,8 @@ pub mod profiles;
 pub mod typing;
 
 #[cfg(windows)]
+pub mod diag;
+#[cfg(windows)]
 pub mod registration;
 #[cfg(windows)]
 pub mod service;

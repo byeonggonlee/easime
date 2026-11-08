@@ -1,24 +1,52 @@
 //! The text service itself: the COM object Windows creates in every
 //! application that lets the user type, and the factory that makes it.
 //!
-//! **Step one**: the service activates, registers a key event sink with TSF,
-//! and lets every key through (it "eats" nothing). So a registered easime does
-//! not type yet and cannot get in the way; what is proven is that Windows can
-//! create it, activate it and call its sink. Typing comes next.
+//! **What it does.** Windows asks about every key twice, `OnTestKeyDown` ("would
+//! you take it?") and `OnKeyDown` (take it). Both go to the [`Typist`] (the part
+//! with no Windows API in it, [`crate::typing`]), which decides. What comes back
+//! is an edit of the document: finished text, and the text being composed. The
+//! composition is a TSF composition: its text is in the document, and the
+//! application shows it as composing. The document is only touched inside an
+//! *edit session* that TSF grants (`RequestEditSession`), which is what
+//! [`EditSession`] is.
 //!
-//! TSF asks the sink twice per key press, `OnTestKeyDown` ("would you take
-//! it?", no side effects) and `OnKeyDown` (do it). That shapes how the shared
-//! `Session` is used later (docs/platforms.md).
+//! **What it does not do yet:** show which mode (English or the language) is
+//! on, underline the composition (no display attributes), and candidates for
+//! conversion. See `docs/platforms.md`.
+//!
+//! One service lives per thread of an application, so each has its own typist,
+//! and its mode (English or Korean) is its own. Everything here runs on that
+//! one thread, so plain cells are enough; no cell is borrowed while a call goes
+//! out to the application, because the application may call back in.
+//!
+//! A panic must never take the application down with it: every entry point
+//! catches it, writes it to the log and says "not eaten".
 
+use crate::diag;
+use crate::keys::{KeyInfo, KeyboardState};
+use crate::profiles;
+use crate::registration;
+use crate::typing::{Outcome, Step, Typist, plan};
+use easime_config::Config;
+use ime_session::{ConfigReloader, JapaneseDictionary, Session};
 use std::cell::RefCell;
 use std::ffi::c_void;
+use std::mem::ManuallyDrop;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicIsize, Ordering};
+use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{CLASS_E_NOAGGREGATION, E_INVALIDARG, E_POINTER, LPARAM, WPARAM};
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
+use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardState;
 use windows::Win32::UI::TextServices::{
-    ITfContext, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfTextInputProcessor,
+    ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext, ITfContextComposition,
+    ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection, ITfKeyEventSink,
+    ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource, ITfTextInputProcessor,
     ITfTextInputProcessor_Impl, ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl,
-    ITfThreadMgr,
+    ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl, TF_AE_NONE, TF_ANCHOR_END,
+    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READWRITE,
+    TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
 };
 use windows::core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
@@ -31,18 +59,56 @@ pub fn unloadable() -> bool {
     IN_USE.load(Ordering::SeqCst) == 0
 }
 
+/// How often the settings file is looked at for changes.
+const CONFIG_POLL: Duration = Duration::from_secs(2);
+
+/// Run `f`; if it panics, log that and answer `fallback` instead of letting the
+/// panic cross into the application.
+fn guarded<T>(what: &str, fallback: T, f: impl FnOnce() -> T) -> T {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(value) => value,
+        Err(_) => {
+            diag::log(&format!("panic in {what}; the key is passed on"));
+            fallback
+        }
+    }
+}
+
+fn keyboard_state() -> KeyboardState {
+    let mut state = [0u8; 256];
+    // SAFETY: the buffer is the 256 bytes the call wants. A failure leaves it
+    // zeroed: no modifier held.
+    let _ = unsafe { GetKeyboardState(&mut state) };
+    state
+}
+
 /// What TSF gave the service when it was activated.
 struct Activated {
     thread_manager: ITfThreadMgr,
     client_id: u32,
+    /// Where the thread sink was registered, to take it away again.
+    thread_sink_cookie: u32,
+}
+
+/// The composition that is going on, and the context it is in.
+struct Composing {
+    context: ITfContext,
+    composition: ITfComposition,
 }
 
 /// The text service of one thread of one application.
-#[implement(ITfTextInputProcessorEx, ITfKeyEventSink)]
+#[implement(
+    ITfTextInputProcessorEx,
+    ITfKeyEventSink,
+    ITfCompositionSink,
+    ITfThreadMgrEventSink
+)]
 pub struct TextService {
-    /// Windows calls into the service from the thread it is activated on, so
-    /// a plain cell is enough.
     activated: RefCell<Option<Activated>>,
+    typist: RefCell<Option<Typist>>,
+    reloader: RefCell<Option<ConfigReloader>>,
+    /// Shared with the edit sessions, which start and end compositions.
+    composing: Rc<RefCell<Option<Composing>>>,
 }
 
 impl TextService {
@@ -50,6 +116,9 @@ impl TextService {
         IN_USE.fetch_add(1, Ordering::SeqCst);
         Self {
             activated: RefCell::new(None),
+            typist: RefCell::new(None),
+            reloader: RefCell::new(None),
+            composing: Rc::new(RefCell::new(None)),
         }
     }
 }
@@ -66,19 +135,170 @@ impl Drop for TextService {
     }
 }
 
+/// The input method this thread starts with: the language of the profile the
+/// user picked in Windows, and the user's settings.
+fn make_typist() -> (Typist, Option<ConfigReloader>) {
+    let language = registration::active_profile_language().unwrap_or(profiles::TYPEABLE[0]);
+    let config = Config::load().unwrap_or_else(|why| {
+        diag::log(&format!("settings not read, using the defaults: {why}"));
+        Config::default()
+    });
+    diag::log(&format!(
+        "start: {language:?}, switch key {:?}",
+        config.shortcuts.toggle_key
+    ));
+    let session = Session::for_language(
+        &config,
+        language,
+        JapaneseDictionary::installed(),
+        Box::new(diag::log),
+    );
+    let reloader = easime_config::config_path().map(|path| ConfigReloader::new(path, CONFIG_POLL));
+    (Typist::new(session, config.shortcuts.toggle_key), reloader)
+}
+
 impl TextService_Impl {
-    /// Start serving: hand TSF the key event sink, and remember what it gave us.
+    /// Start serving: take the key sink and the thread sink, and remember what
+    /// TSF gave us.
     fn activate(&self, thread_manager: &ITfThreadMgr, client_id: u32) -> Result<()> {
         let sink: ITfKeyEventSink = self.to_interface();
         let keystrokes: ITfKeystrokeMgr = thread_manager.cast()?;
         // SAFETY: both interfaces are alive for the call.
         unsafe { keystrokes.AdviseKeyEventSink(client_id, &sink, true) }
             .map_err(|e| windows::core::Error::new(e.code(), format!("AdviseKeyEventSink: {e}")))?;
+
+        let thread_sink: ITfThreadMgrEventSink = self.to_interface();
+        let source: ITfSource = thread_manager.cast()?;
+        // SAFETY: the sink is alive for the call.
+        let cookie = unsafe { source.AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink) }
+            .map_err(|e| windows::core::Error::new(e.code(), format!("AdviseSink(thread): {e}")))?;
+
+        let (typist, reloader) = make_typist();
+        *self.typist.borrow_mut() = Some(typist);
+        *self.reloader.borrow_mut() = reloader;
         *self.activated.borrow_mut() = Some(Activated {
             thread_manager: thread_manager.clone(),
             client_id,
+            thread_sink_cookie: cookie,
         });
         Ok(())
+    }
+
+    fn client_id(&self) -> Option<u32> {
+        self.activated.borrow().as_ref().map(|a| a.client_id)
+    }
+
+    /// Make `outcome`'s edit in the document of `context`. Failures go to the
+    /// log: the key has been dealt with either way.
+    fn perform(&self, context: &ITfContext, outcome: &Outcome) {
+        if let Some(language) = outcome.switched_to {
+            diag::log(&format!("language -> {language:?}"));
+        }
+        let Some(edit) = &outcome.edit else {
+            return;
+        };
+        let composing = self.composing.borrow().is_some();
+        let steps = plan(composing, edit);
+        if steps.is_empty() {
+            return;
+        }
+        if let Err(e) = self.run(context, steps, true) {
+            diag::log(&format!("could not edit the document: {e}"));
+        }
+    }
+
+    /// Run `steps` in an edit session of `context`. A key wants its text now
+    /// (`sync`); a composition that ends because the focus moved does not mind
+    /// when.
+    fn run(&self, context: &ITfContext, steps: Vec<Step>, sync: bool) -> Result<()> {
+        let Some(client_id) = self.client_id() else {
+            return Ok(());
+        };
+        let session: ITfEditSession = EditSession {
+            context: context.clone(),
+            sink: self.to_interface(),
+            composing: self.composing.clone(),
+            steps: steps.clone(),
+        }
+        .into();
+        let write = TF_ES_READWRITE.0;
+        let first = if sync {
+            TF_ES_SYNC.0 | write
+        } else {
+            TF_ES_ASYNCDONTCARE.0 | write
+        };
+        // SAFETY: the context and the session are alive for the call. The
+        // session runs inside it (sync) or later (async), on this thread.
+        let mut result = unsafe {
+            context.RequestEditSession(client_id, &session, TF_CONTEXT_EDIT_CONTEXT_FLAGS(first))
+        }?;
+        if result == TF_E_SYNCHRONOUS {
+            // The application could not grant the lock now: have the text put
+            // in when it can.
+            let session: ITfEditSession = EditSession {
+                context: context.clone(),
+                sink: self.to_interface(),
+                composing: self.composing.clone(),
+                steps,
+            }
+            .into();
+            // SAFETY: as above.
+            result = unsafe {
+                context.RequestEditSession(
+                    client_id,
+                    &session,
+                    TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_ASYNCDONTCARE.0 | write),
+                )
+            }?;
+        }
+        result.ok()
+    }
+
+    /// The composition is over without a key (the focus moved on, the service
+    /// stops): end it in the document, where it is, and forget the engine's
+    /// copy. The text stays as it is shown.
+    fn end_composition(&self) {
+        let taken = self.composing.borrow().as_ref().map(|c| c.context.clone());
+        if let Some(context) = taken
+            && let Err(e) = self.run(&context, vec![Step::End], false)
+        {
+            diag::log(&format!("could not end the composition: {e}"));
+            // Do not keep a composition we cannot reach.
+            self.composing.borrow_mut().take();
+        }
+        if let Some(typist) = self.typist.borrow_mut().as_mut() {
+            typist.forget();
+        }
+    }
+
+    /// Settings changed on disk: use them. What is being composed is finished
+    /// first.
+    fn reload_settings(&self, context: Option<&ITfContext>) {
+        let changed = self
+            .reloader
+            .borrow_mut()
+            .as_mut()
+            .and_then(|reloader| reloader.poll(Instant::now()));
+        let Some(result) = changed else {
+            return;
+        };
+        match result {
+            Ok(config) => {
+                diag::log("settings changed, using them");
+                let edit = self
+                    .typist
+                    .borrow_mut()
+                    .as_mut()
+                    .and_then(|typist| typist.apply_config(&config));
+                if let (Some(edit), Some(context)) = (edit, context) {
+                    let steps = plan(self.composing.borrow().is_some(), &edit);
+                    if let Err(e) = self.run(context, steps, true) {
+                        diag::log(&format!("could not edit the document: {e}"));
+                    }
+                }
+            }
+            Err(why) => diag::log(&format!("settings changed but not understood, kept: {why}")),
+        }
     }
 }
 
@@ -89,11 +309,17 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
     }
 
     fn Deactivate(&self) -> Result<()> {
+        self.end_composition();
         if let Some(activated) = self.activated.borrow_mut().take() {
             let keystrokes: ITfKeystrokeMgr = activated.thread_manager.cast()?;
             // SAFETY: the interface is alive for the call.
             unsafe { keystrokes.UnadviseKeyEventSink(activated.client_id)? };
+            let source: ITfSource = activated.thread_manager.cast()?;
+            // SAFETY: as above.
+            let _ = unsafe { source.UnadviseSink(activated.thread_sink_cookie) };
         }
+        *self.typist.borrow_mut() = None;
+        *self.reloader.borrow_mut() = None;
         Ok(())
     }
 }
@@ -115,40 +341,227 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         Ok(())
     }
 
-    // Step one takes no key: every answer is "not eaten".
     fn OnTestKeyDown(
         &self,
         _context: Ref<ITfContext>,
-        _wparam: WPARAM,
-        _lparam: LPARAM,
+        wparam: WPARAM,
+        lparam: LPARAM,
     ) -> Result<BOOL> {
-        Ok(false.into())
+        guarded("OnTestKeyDown", Ok(false.into()), || {
+            let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
+            let wanted = match self.typist.borrow().as_ref() {
+                Some(typist) => typist.test_key_down(key, &keyboard_state()),
+                None => false,
+            };
+            diag::log_key(|| format!("test key down {key:?} -> {wanted}"));
+            Ok(wanted.into())
+        })
     }
 
     fn OnTestKeyUp(
         &self,
         _context: Ref<ITfContext>,
-        _wparam: WPARAM,
-        _lparam: LPARAM,
+        wparam: WPARAM,
+        lparam: LPARAM,
     ) -> Result<BOOL> {
-        Ok(false.into())
+        guarded("OnTestKeyUp", Ok(false.into()), || {
+            let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
+            let wanted = match self.typist.borrow().as_ref() {
+                Some(typist) => typist.test_key_up(key),
+                None => false,
+            };
+            Ok(wanted.into())
+        })
     }
 
-    fn OnKeyDown(
-        &self,
-        _context: Ref<ITfContext>,
-        _wparam: WPARAM,
-        _lparam: LPARAM,
-    ) -> Result<BOOL> {
-        Ok(false.into())
+    fn OnKeyDown(&self, context: Ref<ITfContext>, wparam: WPARAM, lparam: LPARAM) -> Result<BOOL> {
+        guarded("OnKeyDown", Ok(false.into()), || {
+            let Some(context) = context.as_ref() else {
+                return Ok(false.into());
+            };
+            let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
+            self.reload_settings(Some(context));
+            // A composition left in another text field is finished there first.
+            let elsewhere = self
+                .composing
+                .borrow()
+                .as_ref()
+                .is_some_and(|c| c.context != *context);
+            if elsewhere {
+                self.end_composition();
+            }
+            let outcome = match self.typist.borrow_mut().as_mut() {
+                Some(typist) => typist.key_down(key, &keyboard_state()),
+                None => return Ok(false.into()),
+            };
+            diag::log_key(|| format!("key down {key:?} -> {outcome:?}"));
+            self.perform(context, &outcome);
+            Ok(outcome.eaten.into())
+        })
     }
 
-    fn OnKeyUp(&self, _context: Ref<ITfContext>, _wparam: WPARAM, _lparam: LPARAM) -> Result<BOOL> {
-        Ok(false.into())
+    fn OnKeyUp(&self, context: Ref<ITfContext>, wparam: WPARAM, lparam: LPARAM) -> Result<BOOL> {
+        guarded("OnKeyUp", Ok(false.into()), || {
+            let Some(context) = context.as_ref() else {
+                return Ok(false.into());
+            };
+            let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
+            let outcome = match self.typist.borrow_mut().as_mut() {
+                Some(typist) => typist.key_up(key),
+                None => return Ok(false.into()),
+            };
+            diag::log_key(|| format!("key up {key:?} -> {outcome:?}"));
+            self.perform(context, &outcome);
+            Ok(outcome.eaten.into())
+        })
     }
 
     fn OnPreservedKey(&self, _context: Ref<ITfContext>, _guid: *const GUID) -> Result<BOOL> {
         Ok(false.into())
+    }
+}
+
+impl ITfCompositionSink_Impl for TextService_Impl {
+    /// The application ended our composition (the user clicked elsewhere, the
+    /// field went away): its text stays as shown, so only the engine's copy
+    /// has to go.
+    fn OnCompositionTerminated(
+        &self,
+        _write: u32,
+        _composition: Ref<ITfComposition>,
+    ) -> Result<()> {
+        guarded("OnCompositionTerminated", Ok(()), || {
+            if let Ok(mut composing) = self.composing.try_borrow_mut() {
+                composing.take();
+            }
+            if let Ok(mut typist) = self.typist.try_borrow_mut()
+                && let Some(typist) = typist.as_mut()
+            {
+                typist.forget();
+            }
+            Ok(())
+        })
+    }
+}
+
+impl ITfThreadMgrEventSink_Impl for TextService_Impl {
+    fn OnInitDocumentMgr(&self, _document: Ref<ITfDocumentMgr>) -> Result<()> {
+        Ok(())
+    }
+
+    fn OnUninitDocumentMgr(&self, _document: Ref<ITfDocumentMgr>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Another text field has the focus: the composition of the old one ends
+    /// where it is.
+    fn OnSetFocus(
+        &self,
+        _focus: Ref<ITfDocumentMgr>,
+        _previous: Ref<ITfDocumentMgr>,
+    ) -> Result<()> {
+        guarded("OnSetFocus", Ok(()), || {
+            self.end_composition();
+            self.reload_settings(None);
+            Ok(())
+        })
+    }
+
+    fn OnPushContext(&self, _context: Ref<ITfContext>) -> Result<()> {
+        Ok(())
+    }
+
+    fn OnPopContext(&self, _context: Ref<ITfContext>) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// The operations on the document, run where TSF allows them.
+#[implement(ITfEditSession)]
+struct EditSession {
+    context: ITfContext,
+    sink: ITfCompositionSink,
+    composing: Rc<RefCell<Option<Composing>>>,
+    steps: Vec<Step>,
+}
+
+impl ITfEditSession_Impl for EditSession_Impl {
+    fn DoEditSession(&self, cookie: u32) -> Result<()> {
+        guarded::<Result<()>>(
+            "DoEditSession",
+            Err(windows::Win32::Foundation::E_FAIL.into()),
+            || {
+                for step in &self.steps {
+                    match step {
+                        Step::Text(text) => self.write(cookie, text)?,
+                        Step::End => self.end(cookie)?,
+                    }
+                }
+                Ok(())
+            },
+        )
+    }
+}
+
+impl EditSession_Impl {
+    /// Make `text` the text of the composition, starting one at the cursor if
+    /// there is none, and put the cursor after it.
+    fn write(&self, cookie: u32, text: &str) -> Result<()> {
+        let existing = self
+            .composing
+            .borrow()
+            .as_ref()
+            .map(|c| c.composition.clone());
+        let composition = match existing {
+            Some(composition) => composition,
+            None => {
+                let insert: ITfInsertAtSelection = self.context.cast()?;
+                // SAFETY: the context is alive; `QUERYONLY` inserts nothing.
+                let at_cursor =
+                    unsafe { insert.InsertTextAtSelection(cookie, TF_IAS_QUERYONLY, &[]) }?;
+                let composer: ITfContextComposition = self.context.cast()?;
+                // SAFETY: the range and the sink are alive for the call.
+                let composition =
+                    unsafe { composer.StartComposition(cookie, &at_cursor, &self.sink) }?;
+                *self.composing.borrow_mut() = Some(Composing {
+                    context: self.context.clone(),
+                    composition: composition.clone(),
+                });
+                composition
+            }
+        };
+        // SAFETY: the composition is alive.
+        let range = unsafe { composition.GetRange() }?;
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        // SAFETY: the range is alive; `wide` lives for the call.
+        unsafe { range.SetText(cookie, 0, &wide) }?;
+        // SAFETY: as above.
+        unsafe { range.Collapse(cookie, TF_ANCHOR_END) }?;
+        let mut selection = TF_SELECTION {
+            range: ManuallyDrop::new(Some(range)),
+            style: TF_SELECTIONSTYLE {
+                ase: TF_AE_NONE,
+                fInterimChar: false.into(),
+            },
+        };
+        // SAFETY: the selection holds a live range; TSF takes its own reference.
+        let result = unsafe {
+            self.context
+                .SetSelection(cookie, std::slice::from_ref(&selection))
+        };
+        // SAFETY: the range was put there above and is released once.
+        unsafe { ManuallyDrop::drop(&mut selection.range) };
+        result
+    }
+
+    /// End the composition; its text stays in the document.
+    fn end(&self, cookie: u32) -> Result<()> {
+        let taken = self.composing.borrow_mut().take();
+        if let Some(composing) = taken {
+            // SAFETY: the composition is alive.
+            unsafe { composing.composition.EndComposition(cookie) }?;
+        }
+        Ok(())
     }
 }
 

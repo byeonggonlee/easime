@@ -27,10 +27,15 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "MSI versions are numeric (major.minor.build); got '$Version'"
 }
 
-# The terminal demo, and the text service (target\release\frontend_tsf.dll).
-cargo build --release --locked -p easime-cli -p frontend-tsf
+# The terminal demo, and the text service. The text service is a DLL inside other
+# programs, so it is built with panics that unwind (and are caught at its entry
+# points) instead of killing the program: the `dll` profile, see Cargo.toml.
+cargo build --release --locked -p easime-cli
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
-if (-not (Test-Path (Join-Path $root "target\release\frontend_tsf.dll"))) { throw "frontend_tsf.dll was not built" }
+cargo build --profile dll --locked -p frontend-tsf
+if ($LASTEXITCODE -ne 0) { throw "cargo build of the text service failed" }
+$tsfDll = Join-Path $root "target\dll\frontend_tsf.dll"
+if (-not (Test-Path $tsfDll)) { throw "frontend_tsf.dll was not built" }
 
 $wix = Join-Path $env:USERPROFILE ".dotnet\tools\wix.exe"
 if (-not (Test-Path $wix)) { $wix = "wix" }
@@ -48,7 +53,7 @@ New-Item -ItemType Directory -Force $OutDir | Out-Null
 $out = Join-Path $OutDir "easime-$Version-x64.msi"
 $binaries = Join-Path $root "target\release"
 $source = Join-Path $root "packaging\windows\easime.wxs"
-& $wix build -arch x64 -ext $uiExtension -d "Version=$Version" -d "Binaries=$binaries" -d "Root=$root" -o $out $source
+& $wix build -arch x64 -ext $uiExtension -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Root=$root" -o $out $source
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 
 Write-Host "built $out"

@@ -4,7 +4,8 @@
   this; by hand:)
 
     wix build -arch x64 -ext WixToolset.UI.wixext \
-      -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe and frontend_tsf.dll> -d Root=<repository root> \
+      -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d TsfDll=<frontend_tsf.dll built with --profile dll> \
+      -d Root=<repository root> \
       -o easime.msi packaging/windows/easime.wxs
 
   WHAT IT INSTALLS
@@ -44,9 +45,10 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="easime">
         <!-- The text service. The file is built as frontend_tsf.dll and installed
-             as easime_tsf.dll, the name the custom actions and the docs use. -->
+             as easime_tsf.dll, the name the custom actions and the docs use. It is
+             built with the `dll` profile (panics unwind and are caught). -->
         <Component Id="TextService">
-          <File Id="EasimeTsfDll" Name="easime_tsf.dll" Source="$(Binaries)/frontend_tsf.dll" />
+          <File Id="EasimeTsfDll" Name="easime_tsf.dll" Source="$(TsfDll)" />
         </Component>
         <Component Id="Demo">
           <File Id="EasimeCliExe" Source="$(Binaries)/easime-cli.exe" />
