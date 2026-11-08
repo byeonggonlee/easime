@@ -36,38 +36,71 @@ Kirigami.ScrollablePage {
                 Kirigami.FormData.label: Tr.t("표시 시간:")
                 enabled: EasimeSettings.indicatorBox
 
-                QQC2.SpinBox {
+                // A native text field exposes the same seconds to assistive
+                // technology as to sighted users; an integer SpinBox would
+                // expose milliseconds through its numeric accessibility API.
+                QQC2.TextField {
                     id: duration
                     objectName: "indicator-duration"
                     Accessible.name: Tr.t("표시 시간 (초)")
-                    from: 100
-                    to: 10000
-                    stepSize: 100
-                    editable: true
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 5
+                    selectByMouse: true
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    readonly property int value: EasimeSettings.indicatorMs
                     validator: DoubleValidator {
-                        bottom: duration.from / 1000
-                        top: duration.to / 1000
+                        bottom: 0.1
+                        top: 10
                         decimals: 3
                         notation: DoubleValidator.StandardNotation
                         locale: duration.locale.name
                     }
-                    // Keep milliseconds on disk, but edit localized seconds.
-                    // Four significant digits preserve every allowed millisecond.
-                    textFromValue: function(value, locale) {
+                    function textFromValue(value, locale) {
                         return Number(value / 1000).toLocaleString(locale, "g", 4)
                     }
-                    valueFromText: function(text, locale) {
+                    function valueFromText(text, locale) {
                         return Math.round(Number.fromLocaleString(locale, text) * 1000)
                     }
-                    value: EasimeSettings.indicatorMs
-                    onValueModified: {
-                        EasimeSettings.applyIndicatorMs(value)
-                        value = Qt.binding(() => EasimeSettings.indicatorMs)
+                    function save(milliseconds) {
+                        EasimeSettings.applyIndicatorMs(milliseconds)
+                        text = Qt.binding(() => textFromValue(value, locale))
                     }
+                    function step(amount) {
+                        var base = acceptableInput ? valueFromText(text, locale) : value
+                        save(Math.max(100, Math.min(10000, base + amount)))
+                    }
+                    text: textFromValue(value, locale)
+                    onEditingFinished: {
+                        if (acceptableInput) save(valueFromText(text, locale))
+                        else text = Qt.binding(() => textFromValue(value, locale))
+                    }
+                    // Reject incomplete edits on blur as well as on Enter.
+                    onActiveFocusChanged: {
+                        if (!activeFocus && !acceptableInput)
+                            text = Qt.binding(() => textFromValue(value, locale))
+                    }
+                    Keys.onUpPressed: step(100)
+                    Keys.onDownPressed: step(-100)
                 }
                 QQC2.Label {
                     text: Tr.t("초")
+                }
+                QQC2.ToolButton {
+                    objectName: "duration-decrease"
+                    text: "−"
+                    Accessible.name: Tr.t("표시 시간 줄이기")
+                    enabled: duration.value > 100
+                    onClicked: duration.step(-100)
+                    QQC2.ToolTip.visible: hovered || activeFocus
+                    QQC2.ToolTip.text: Accessible.name
+                }
+                QQC2.ToolButton {
+                    objectName: "duration-increase"
+                    text: "+"
+                    Accessible.name: Tr.t("표시 시간 늘리기")
+                    enabled: duration.value < 10000
+                    onClicked: duration.step(100)
+                    QQC2.ToolTip.visible: hovered || activeFocus
+                    QQC2.ToolTip.text: Accessible.name
                 }
             }
 

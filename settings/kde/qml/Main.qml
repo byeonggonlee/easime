@@ -106,13 +106,28 @@ Kirigami.ApplicationWindow {
             var japanese = find(page, "switch-japanese")
             japanese.click()
             console.info("INTERACTION japanese-on languages=" + EasimeSettings.languages
-                + " switch=" + japanese.checked + " result=" + EasimeSettings.resultKind)
+                + " switch=" + find(page, "switch-japanese").checked + " result=" + EasimeSettings.resultKind)
             var after = []
             describe(page, page, 0, after)
             console.info("STRUCTURE-AFTER languages\n" + after.join("\n"))
         } else if (name === "languages-enable-korean") {
             find(page, "switch-korean").click()
         } else if (name === "languages-reorder") {
+            var japanese = find(page, "switch-japanese")
+            var korean = find(page, "switch-korean")
+            var next = japanese.nextItemInFocusChain(true)
+            var foundKorean = false
+            for (var n = 0; n < 30 && next !== japanese; ++n) {
+                if (next === korean) { foundKorean = true; break }
+                var ancestor = next
+                while (ancestor && ancestor !== page) ancestor = ancestor.parent
+                if (!ancestor) break
+                next = next.nextItemInFocusChain(true)
+            }
+            if (japanese.mapToItem(page, 0, 0).y >= korean.mapToItem(page, 0, 0).y
+                    || !foundKorean) {
+                console.error("UX-CHECK-FAILED reverse language order or Tab chain")
+            }
             find(page, "move-up-korean").click()
         } else if (name === "languages-verify") {
             var korean = find(page, "switch-korean")
@@ -140,13 +155,13 @@ Kirigami.ApplicationWindow {
                     }
                 }
             }
-            duration.increase()
-            duration.valueModified()
+            find(page, "duration-increase").click()
             if (EasimeSettings.indicatorMs !== 1100) {
                 console.error("UX-CHECK-FAILED duration was not saved")
             }
             EasimeSettings.applyIndicatorMs(1250)
-            if (duration.value !== 1250) {
+            if (duration.value !== 1250
+                    || duration.text !== duration.textFromValue(1250, duration.locale)) {
                 console.error("UX-CHECK-FAILED duration binding was lost after editing")
             }
             EasimeSettings.applyIndicatorMs(1000)

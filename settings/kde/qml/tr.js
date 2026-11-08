@@ -478,6 +478,18 @@ var table = {
     "ja": "表示時間（秒）",
     "zh-Hant": "顯示時間（秒）",
     "zh-Hans": "显示时间（秒）"
+  },
+  "표시 시간 줄이기": {
+    "en": "Decrease display duration",
+    "ja": "表示時間を短くする",
+    "zh-Hant": "縮短顯示時間",
+    "zh-Hans": "缩短显示时间"
+  },
+  "표시 시간 늘리기": {
+    "en": "Increase display duration",
+    "ja": "表示時間を長くする",
+    "zh-Hant": "延長顯示時間",
+    "zh-Hans": "延长显示时间"
   }
 };
 // END TABLE
