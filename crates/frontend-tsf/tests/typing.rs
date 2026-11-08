@@ -33,8 +33,9 @@ use windows::Win32::UI::TextServices::{
     TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS, TS_TEXTCHANGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
-    SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, DispatchMessageW, FindWindowW, GetWindowRect, IsWindowVisible,
+    MSG, PM_REMOVE, PeekMessageW, SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE,
+    WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 use windows::core::{
     BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement, w,
@@ -441,10 +442,16 @@ impl ITextStoreACP_Impl for TextStore_Impl {
         _view: u32,
         _start: i32,
         _end: i32,
-        _rect: *mut RECT,
-        _clipped: *mut BOOL,
+        rect: *mut RECT,
+        clipped: *mut BOOL,
     ) -> Result<()> {
-        Err(E_FAIL.into())
+        // The text cursor is a thin rectangle at a place of this test's choosing.
+        // SAFETY: TSF passes valid pointers.
+        unsafe {
+            *rect = CURSOR;
+            *clipped = false.into();
+        }
+        Ok(())
     }
 
     fn GetScreenExt(&self, _view: u32) -> Result<RECT> {
@@ -539,6 +546,28 @@ fn letter(c: char) -> (u8, u16) {
         .expect("a lower-case letter");
     let scan = first + row.find(c).unwrap() as u8;
     (scan, u16::from(c.to_ascii_uppercase() as u8))
+}
+
+/// Where the fake document says its text cursor is on the screen.
+const CURSOR: RECT = RECT {
+    left: 120,
+    top: 200,
+    right: 122,
+    bottom: 220,
+};
+
+/// The mode box, if it is on the screen: its rectangle.
+fn mode_box() -> Option<RECT> {
+    // SAFETY: looking a window of our own class up by name.
+    unsafe {
+        let window = FindWindowW(w!("EasimeIndicator"), None).ok()?;
+        if !IsWindowVisible(window).as_bool() {
+            return None;
+        }
+        let mut area = RECT::default();
+        GetWindowRect(window, &mut area).ok()?;
+        Some(area)
+    }
 }
 
 const VK_BACK: u16 = 0x08;
@@ -791,8 +820,17 @@ fn scenario(app: &Application, context: &ITfContext) {
     );
     assert_eq!(app.text(), "한글");
 
+    assert!(mode_box().is_none(), "no box before the user switches");
+
     // The Hangul key switches to English: the keys go to the application as typed.
     assert!(app.press(VK_HANGUL, 0x72, None), "the Hangul key is taken");
+    // The box says so, just under the text cursor, and goes away by itself.
+    let shown = mode_box().expect("the mode box is on the screen after a switch");
+    assert_eq!(shown.left, CURSOR.left, "starts at the cursor");
+    assert_eq!(shown.top, CURSOR.bottom + 2, "just below the cursor");
+    assert!(shown.right - shown.left >= 48 && shown.right - shown.left == shown.bottom - shown.top);
+    pump(1500);
+    assert!(mode_box().is_none(), "and goes away after its time");
     app.letters("gk");
     assert_eq!(app.text(), "한글gk");
     assert!(app.press(VK_HANGUL, 0x72, None));

@@ -23,13 +23,15 @@
 //! catches it, writes it to the log and says "not eaten".
 
 use crate::diag;
+use crate::indicator::{self, Indicator};
 use crate::keys::{KeyInfo, KeyboardState};
+use crate::placement::Rect;
 use crate::profiles;
 use crate::registration;
 use crate::typing::{Outcome, Step, Typist, plan};
-use easime_config::Config;
+use easime_config::{Appearance, Config};
 use ime_session::{ConfigReloader, JapaneseDictionary, Session};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -41,12 +43,12 @@ use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardState;
 use windows::Win32::UI::TextServices::{
     ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext, ITfContextComposition,
-    ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection, ITfKeyEventSink,
-    ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource, ITfTextInputProcessor,
+    ITfContextView, ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection,
+    ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource, ITfTextInputProcessor,
     ITfTextInputProcessor_Impl, ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl,
     ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl, TF_AE_NONE, TF_ANCHOR_END,
-    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
+    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE,
+    TF_ES_READ, TF_ES_READWRITE, TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
 };
 use windows::core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
@@ -107,6 +109,11 @@ pub struct TextService {
     activated: RefCell<Option<Activated>>,
     typist: RefCell<Option<Typist>>,
     reloader: RefCell<Option<ConfigReloader>>,
+    /// The box that says which language is on, and whether and how long to show it.
+    indicator: RefCell<Indicator>,
+    appearance: RefCell<Appearance>,
+    /// Whether the log already says that no cursor position could be found.
+    told_no_caret: Cell<bool>,
     /// Shared with the edit sessions, which start and end compositions.
     composing: Rc<RefCell<Option<Composing>>>,
 }
@@ -118,6 +125,9 @@ impl TextService {
             activated: RefCell::new(None),
             typist: RefCell::new(None),
             reloader: RefCell::new(None),
+            indicator: RefCell::new(Indicator::default()),
+            appearance: RefCell::new(Appearance::default()),
+            told_no_caret: Cell::new(false),
             composing: Rc::new(RefCell::new(None)),
         }
     }
@@ -137,7 +147,7 @@ impl Drop for TextService {
 
 /// The input method this thread starts with: the language of the profile the
 /// user picked in Windows, and the user's settings.
-fn make_typist() -> (Typist, Option<ConfigReloader>) {
+fn make_typist() -> (Typist, Option<ConfigReloader>, Appearance) {
     let language = registration::active_profile_language().unwrap_or(profiles::TYPEABLE[0]);
     let config = Config::load().unwrap_or_else(|why| {
         diag::log(&format!("settings not read, using the defaults: {why}"));
@@ -154,7 +164,11 @@ fn make_typist() -> (Typist, Option<ConfigReloader>) {
         Box::new(diag::log),
     );
     let reloader = easime_config::config_path().map(|path| ConfigReloader::new(path, CONFIG_POLL));
-    (Typist::new(session, config.shortcuts.toggle_key), reloader)
+    (
+        Typist::new(session, config.shortcuts.toggle_key),
+        reloader,
+        config.appearance,
+    )
 }
 
 impl TextService_Impl {
@@ -173,9 +187,10 @@ impl TextService_Impl {
         let cookie = unsafe { source.AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink) }
             .map_err(|e| windows::core::Error::new(e.code(), format!("AdviseSink(thread): {e}")))?;
 
-        let (typist, reloader) = make_typist();
+        let (typist, reloader, appearance) = make_typist();
         *self.typist.borrow_mut() = Some(typist);
         *self.reloader.borrow_mut() = reloader;
+        *self.appearance.borrow_mut() = appearance;
         *self.activated.borrow_mut() = Some(Activated {
             thread_manager: thread_manager.clone(),
             client_id,
@@ -191,20 +206,66 @@ impl TextService_Impl {
     /// Make `outcome`'s edit in the document of `context`. Failures go to the
     /// log: the key has been dealt with either way.
     fn perform(&self, context: &ITfContext, outcome: &Outcome) {
+        if let Some(edit) = &outcome.edit {
+            let composing = self.composing.borrow().is_some();
+            let steps = plan(composing, edit);
+            if !steps.is_empty()
+                && let Err(e) = self.run(context, steps, true)
+            {
+                diag::log(&format!("could not edit the document: {e}"));
+            }
+        }
+        // After the edit, so the box sits next to where the cursor is now.
         if let Some(language) = outcome.switched_to {
             diag::log(&format!("language -> {language:?}"));
+            self.show_indicator(context, language);
         }
-        let Some(edit) = &outcome.edit else {
+    }
+
+    /// Say which language is on, next to the text cursor, if the user wants it.
+    /// Only a switch the user made comes here, never a focus change.
+    fn show_indicator(&self, context: &ITfContext, language: ime_core::Language) {
+        let appearance = self.appearance.borrow().clone();
+        if !appearance.indicator_box {
+            return;
+        }
+        let caret = self.caret_of(context).or_else(indicator::system_caret);
+        let Some(caret) = caret else {
+            // Not at some other place: the language is still in the tray and
+            // the settings. Say so once in the log instead of every switch.
+            if !self.told_no_caret.replace(true) {
+                diag::log("mode box: this program gives no text cursor position, so none is shown");
+            }
             return;
         };
-        let composing = self.composing.borrow().is_some();
-        let steps = plan(composing, edit);
-        if steps.is_empty() {
-            return;
+        let shown = self
+            .indicator
+            .borrow_mut()
+            .show(language, caret, appearance.indicator_ms);
+        diag::log_key(|| format!("mode box {language:?} at {shown:?} for {caret:?}"));
+    }
+
+    /// Where the text cursor is on the screen, as the application's document says.
+    fn caret_of(&self, context: &ITfContext) -> Option<Rect> {
+        let client_id = self.client_id()?;
+        let found = Rc::new(Cell::new(None));
+        let session: ITfEditSession = CaretQuery {
+            context: context.clone(),
+            found: found.clone(),
         }
-        if let Err(e) = self.run(context, steps, true) {
-            diag::log(&format!("could not edit the document: {e}"));
+        .into();
+        // SAFETY: the context and the session are alive for the call.
+        let result = unsafe {
+            context.RequestEditSession(
+                client_id,
+                &session,
+                TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_SYNC.0 | TF_ES_READ.0),
+            )
+        };
+        if let Err(e) = result {
+            diag::log_key(|| format!("cursor position: {e}"));
         }
+        found.get()
     }
 
     /// Run `steps` in an edit session of `context`. A key wants its text now
@@ -285,6 +346,7 @@ impl TextService_Impl {
         match result {
             Ok(config) => {
                 diag::log("settings changed, using them");
+                *self.appearance.borrow_mut() = config.appearance.clone();
                 let edit = self
                     .typist
                     .borrow_mut()
@@ -562,6 +624,52 @@ impl EditSession_Impl {
             unsafe { composing.composition.EndComposition(cookie) }?;
         }
         Ok(())
+    }
+}
+
+/// Asks the document where its cursor is on the screen.
+#[implement(ITfEditSession)]
+struct CaretQuery {
+    context: ITfContext,
+    found: Rc<Cell<Option<Rect>>>,
+}
+
+impl ITfEditSession_Impl for CaretQuery_Impl {
+    fn DoEditSession(&self, cookie: u32) -> Result<()> {
+        guarded::<Result<()>>(
+            "CaretQuery",
+            Err(windows::Win32::Foundation::E_FAIL.into()),
+            || {
+                let mut selection = [TF_SELECTION::default()];
+                let mut fetched = 0;
+                // SAFETY: the buffer holds the one selection asked for.
+                unsafe {
+                    self.context.GetSelection(
+                        cookie,
+                        TF_DEFAULT_SELECTION,
+                        &mut selection,
+                        &mut fetched,
+                    )
+                }?;
+                // SAFETY: the range was handed to us by GetSelection; taken once.
+                let Some(range) = (unsafe { ManuallyDrop::take(&mut selection[0].range) }) else {
+                    return Ok(());
+                };
+                // SAFETY: the context is alive.
+                let view: ITfContextView = unsafe { self.context.GetActiveView() }?;
+                let mut area = windows::Win32::Foundation::RECT::default();
+                let mut clipped = BOOL::default();
+                // SAFETY: the range, the rectangle and the flag live for the call.
+                unsafe { view.GetTextExt(cookie, &range, &mut area, &mut clipped) }?;
+                self.found.set(Some(Rect {
+                    left: area.left,
+                    top: area.top,
+                    right: area.right.max(area.left + 1),
+                    bottom: area.bottom.max(area.top + 1),
+                }));
+                Ok(())
+            },
+        )
     }
 }
 

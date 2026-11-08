@@ -21,11 +21,14 @@
 //! "Windows", and `docs/status.md`.
 
 pub mod keys;
+pub mod placement;
 pub mod profiles;
 pub mod typing;
 
 #[cfg(windows)]
 pub mod diag;
+#[cfg(windows)]
+pub mod indicator;
 #[cfg(windows)]
 pub mod registration;
 #[cfg(windows)]
