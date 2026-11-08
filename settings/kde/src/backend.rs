@@ -82,7 +82,8 @@ pub mod qobject {
         #[qinvokable]
         fn reload(self: Pin<&mut EasimeSettings>);
 
-        /// Look for the Japanese dictionary now (not at start: it opens the files).
+        /// Look for the Japanese dictionary, once (not at start: it opens the
+        /// files, tens of megabytes). "Reload" looks again.
         #[qinvokable]
         #[cxx_name = "refreshDictionary"]
         fn refresh_dictionary(self: Pin<&mut EasimeSettings>);
@@ -308,6 +309,11 @@ impl qobject::EasimeSettings {
     }
 
     fn refresh_dictionary(mut self: Pin<&mut Self>) {
+        // The page asks each time it opens; reading the files again each time
+        // would make switching pages stall.
+        if self.dictionary_state().to_string() != "unknown" {
+            return;
+        }
         let state = crate::dictionary::inspect_installed();
         self.as_mut()
             .set_dictionary_detail(QString::from(state.detail().as_str()));
@@ -315,11 +321,15 @@ impl qobject::EasimeSettings {
             .set_dictionary_state(QString::from(state.code()));
     }
 
-    fn reload(self: Pin<&mut Self>) {
-        self.run(|model| {
+    fn reload(mut self: Pin<&mut Self>) {
+        self.as_mut().run(|model| {
             model.reload();
             Ok(Outcome::Done("reloaded", String::new()))
         });
+        // "Reload" also looks for the dictionary again (it may have been
+        // installed while the window was open).
+        self.as_mut().set_dictionary_state(QString::from("unknown"));
+        self.refresh_dictionary();
     }
 
     fn reset_to_defaults(self: Pin<&mut Self>) {

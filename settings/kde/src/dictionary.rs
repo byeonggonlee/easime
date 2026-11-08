@@ -16,6 +16,8 @@ pub enum DictionaryState {
     Missing(Vec<PathBuf>),
     /// Files exist but some could not be read (how many), with how many could.
     Unreadable { broken: usize, usable: usize },
+    /// Files exist and none could be read (how many): only kana, like missing.
+    Broken(usize),
 }
 
 impl DictionaryState {
@@ -25,6 +27,7 @@ impl DictionaryState {
             DictionaryState::Found(_) => "found",
             DictionaryState::Missing(_) => "missing",
             DictionaryState::Unreadable { .. } => "unreadable",
+            DictionaryState::Broken(_) => "broken",
         }
     }
 
@@ -38,6 +41,7 @@ impl DictionaryState {
                 .collect::<Vec<_>>()
                 .join("\n"),
             DictionaryState::Unreadable { broken, .. } => broken.to_string(),
+            DictionaryState::Broken(count) => count.to_string(),
         }
     }
 }
@@ -47,7 +51,9 @@ pub fn inspect(dirs: &[PathBuf]) -> DictionaryState {
     let report = engine_japanese::load_dictionaries(dirs);
     let usable = report.loaded.len();
     let broken = report.failed.len();
-    if broken > 0 {
+    if broken > 0 && usable == 0 {
+        DictionaryState::Broken(broken)
+    } else if broken > 0 {
         DictionaryState::Unreadable { broken, usable }
     } else if usable == 0 {
         DictionaryState::Missing(dirs.to_vec())
@@ -97,6 +103,16 @@ mod tests {
         let state = inspect(std::slice::from_ref(&dir));
         assert_eq!(state, DictionaryState::Found(1));
         assert_eq!((state.code(), state.detail().as_str()), ("found", "1"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn only_broken_files_mean_no_dictionary_at_all() {
+        let dir = folder("all-broken");
+        fs::write(dir.join("bad.bin"), b"not a dictionary").unwrap();
+        let state = inspect(std::slice::from_ref(&dir));
+        assert_eq!(state, DictionaryState::Broken(1));
+        assert_eq!((state.code(), state.detail().as_str()), ("broken", "1"));
         let _ = fs::remove_dir_all(dir);
     }
 

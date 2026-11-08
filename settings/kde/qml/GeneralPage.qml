@@ -196,6 +196,8 @@ Kirigami.ScrollablePage {
                         return Tr.t("있음 (파일 %1개). 단어 단위로 한자를 고를 수 있습니다.").arg(EasimeSettings.dictionaryDetail)
                     case "missing":
                         return Tr.t("찾지 못했습니다. 일본어를 켜도 가나만 후보로 나옵니다. easime 패키지를 다시 설치하거나 사전 파일을 아래 폴더 중 한 곳에 두세요:\n%1").arg(EasimeSettings.dictionaryDetail)
+                    case "broken":
+                        return Tr.t("사전 파일 %1개를 모두 읽지 못해 일본어를 켜도 가나만 후보로 나옵니다. 로그 파일에서 이유를 확인하고 easime 패키지를 다시 설치해 주세요.").arg(EasimeSettings.dictionaryDetail)
                     case "unreadable":
                         return Tr.t("읽지 못한 사전 파일이 %1개 있습니다. 나머지로 변환하며, 자세한 이유는 로그 파일에 있습니다.").arg(EasimeSettings.dictionaryDetail)
                     }

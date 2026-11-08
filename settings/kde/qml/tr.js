@@ -197,6 +197,12 @@ var table = {
     "zh-Hant": "變更會立即儲存到設定檔，執行中的 easime 稍後會重新讀取。不需要重新啟動。",
     "zh-Hans": "更改会立即保存到设置文件，正在运行的 easime 稍后会重新读取。无需重启。"
   },
+  "사전 파일 %1개를 모두 읽지 못해 일본어를 켜도 가나만 후보로 나옵니다. 로그 파일에서 이유를 확인하고 easime 패키지를 다시 설치해 주세요.": {
+    "en": "None of the %1 dictionary file(s) could be read, so even with Japanese on only kana are offered. See the log file for why, and reinstall the easime package.",
+    "ja": "辞書ファイル %1 個をすべて読み込めないため、日本語をオンにしても候補は仮名だけです。ログファイルで理由を確認し、easime パッケージを再インストールしてください。",
+    "zh-Hant": "%1 個詞典檔案全部無法讀取，因此即使開啟日文，候選也只有假名。請在記錄檔查看原因，並重新安裝 easime 套件。",
+    "zh-Hans": "%1 个词典文件全部无法读取，因此即使开启日文，候选也只有假名。请在日志文件中查看原因，并重新安装 easime 软件包。"
+  },
   "상태 표시:": {
     "en": "Indicator:",
     "ja": "状態表示:",
