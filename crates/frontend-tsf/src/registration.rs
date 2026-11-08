@@ -153,9 +153,9 @@ pub fn unregister_class() -> Result<()> {
     result.ok()
 }
 
-/// Whether the COM class is registered.
-pub fn class_registered() -> bool {
-    let path = wide(&class_key());
+/// Whether a key below `HKLM` exists.
+fn key_exists(path: &str) -> bool {
+    let path = wide(path);
     let mut key = HKEY::default();
     // SAFETY: `path` is NUL-terminated; `key` receives the opened key.
     let opened = unsafe {
@@ -176,6 +176,11 @@ pub fn class_registered() -> bool {
     } else {
         false
     }
+}
+
+/// Whether the COM class is registered.
+pub fn class_registered() -> bool {
+    key_exists(&class_key())
 }
 
 fn profile_manager() -> Result<ITfInputProcessorProfileMgr> {
@@ -252,9 +257,18 @@ pub fn profile_lookup(profile: &profiles::Profile) -> Result<()> {
     }
 }
 
-/// Whether Windows lists this profile of the text service.
+/// Where TSF keeps the machine-wide registration of a profile.
+fn profile_key(profile: &profiles::Profile) -> String {
+    format!(
+        "SOFTWARE\\Microsoft\\CTF\\TIP\\{CLSID}\\LanguageProfile\\0x{:08x}\\{}",
+        profile.lang_id, profile.guid
+    )
+}
+
+/// Whether TSF has this profile of the text service registered (machine-wide,
+/// in its own part of the registry), whatever the current user has enabled.
 pub fn profile_registered(profile: &profiles::Profile) -> bool {
-    profile_lookup(profile).is_ok()
+    key_exists(&profile_key(profile))
 }
 
 /// Everything `DllRegisterServer` does, for the DLL at `dll`.
