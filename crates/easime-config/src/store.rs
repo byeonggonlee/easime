@@ -109,16 +109,25 @@ impl Config {
     }
 
     /// Write settings to `path`, creating directories as needed. The file is
-    /// replaced atomically so a reader never sees a half-written file.
+    /// replaced atomically so a reader never sees a half-written file, and a
+    /// symlink is followed so dotfiles managers keep their link.
     pub fn save_to(&self, path: &Path) -> Result<(), StoreError> {
-        if let Some(dir) = path.parent() {
+        let target = if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+            fs::canonicalize(path)?
+        } else {
+            path.to_path_buf()
+        };
+        if let Some(dir) = target.parent() {
             fs::create_dir_all(dir)?;
         }
-        let mut tmp = path.as_os_str().to_owned();
+        let mut tmp = target.as_os_str().to_owned();
         tmp.push(".tmp");
         let tmp = PathBuf::from(tmp);
         fs::write(&tmp, self.to_toml())?;
-        fs::rename(&tmp, path)?;
+        if let Ok(meta) = fs::metadata(&target) {
+            let _ = fs::set_permissions(&tmp, meta.permissions());
+        }
+        fs::rename(&tmp, &target)?;
         Ok(())
     }
 

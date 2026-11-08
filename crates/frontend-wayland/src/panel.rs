@@ -231,7 +231,11 @@ impl Panel {
         };
         let surface = &self.ensure_surface().surface;
         surface.attach(Some(&buffer), 0, 0);
-        surface.damage(0, 0, bitmap.width as i32, bitmap.height as i32);
+        if surface.version() >= 4 {
+            surface.damage_buffer(0, 0, bitmap.width as i32, bitmap.height as i32);
+        } else {
+            surface.damage(0, 0, bitmap.width as i32, bitmap.height as i32);
+        }
         surface.commit();
         if let Some(previous) = self.candidate_buffer.replace(buffer) {
             previous.destroy();

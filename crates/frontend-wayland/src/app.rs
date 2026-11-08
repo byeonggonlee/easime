@@ -200,7 +200,7 @@ impl App {
         log!("applying new settings");
         self.stop_repeat();
         let leftover = self.session.apply_config(config);
-        self.toggle = ToggleTracker::with_setting(config.shortcuts.toggle_key);
+        self.toggle.set_setting(config.shortcuts.toggle_key);
         self.set_indicator(IndicatorSettings::from_config(config));
         notify_language(&self.session);
 
@@ -480,9 +480,15 @@ impl App {
             }
         };
 
-        let (held_back, decision) = self
-            .toggle
-            .on_press(key, toggle_role(keysym), (serial, time));
+        let role = match toggle_role(keysym) {
+            ime_session::KeyRole::RightAlt
+                if self.current_modifiers().any() || self.shift_held() =>
+            {
+                ime_session::KeyRole::Other
+            }
+            role => role,
+        };
+        let (held_back, decision) = self.toggle.on_press(key, role, (serial, time));
         if let Some(Held {
             key,
             token: (serial, time),
@@ -717,9 +723,8 @@ impl Dispatch<ZwpInputMethodContextV1, ()> for App {
             }
             zwp_input_method_context_v1::Event::Reset => {
                 // The application discarded its text state.
-                if let Some(engine) = app.session.engine() {
-                    engine.reset();
-                }
+                app.stop_repeat();
+                app.session.reset();
                 app.candidates_visible = false;
                 app.hide_indicator();
             }

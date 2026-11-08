@@ -173,7 +173,11 @@ pub fn system_language_tags_in(env: &dyn Fn(&str) -> Option<OsString>) -> Vec<St
     let neutral = matches!(locale.as_deref(), Some("C" | "POSIX"));
     let list = if neutral { None } else { get("LANGUAGE") };
     let mut tags: Vec<String> = match &list {
-        Some(list) => list.split(':').map(str::to_owned).collect(),
+        Some(list) => list
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
         None => Vec::new(),
     };
     if tags.is_empty()
@@ -357,5 +361,6 @@ mod tests {
         assert!(system(&[("LANGUAGE", "ko"), ("LC_ALL", "POSIX")]).is_empty());
         // An empty value counts as not set.
         assert_eq!(system(&[("LANGUAGE", ""), ("LANG", "ko_KR")]), [Korean]);
+        assert_eq!(system(&[("LANGUAGE", ":"), ("LANG", "ko_KR")]), [Korean]);
     }
 }

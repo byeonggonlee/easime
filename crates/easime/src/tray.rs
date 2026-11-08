@@ -313,7 +313,10 @@ pub fn start_with(actions: Actions) -> Sender<LanguageNews> {
                 }
             };
             frontend_wayland::log!("tray: icon registered");
-            for (language, cycle) in receiver.iter() {
+            for (mut language, mut cycle) in receiver.iter() {
+                while let Ok(next) = receiver.try_recv() {
+                    (language, cycle) = next;
+                }
                 if handle
                     .update(|tray| tray.set_language(language, cycle.clone()))
                     .is_none()
@@ -416,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn the_two_chinese_scripts_share_the_letter_for_now() {
+    fn languages_without_an_engine_have_no_tray_icon_yet() {
         let (mut tray, _) = tray(Language::ChineseSimplified);
         assert!(
             tray.icon_pixmap().is_empty(),

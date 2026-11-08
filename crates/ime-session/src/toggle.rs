@@ -110,6 +110,16 @@ impl<K: Copy + PartialEq, T: Copy> ToggleTracker<K, T> {
         self.pending.is_some_and(|p| p.key == key)
     }
 
+    /// Take any held-back press and forget it.
+    pub fn take_pending(&mut self) -> Option<Held<K, T>> {
+        self.pending.take()
+    }
+
+    /// Update the switch-key setting without losing a held-back press.
+    pub fn set_setting(&mut self, setting: ToggleKey) {
+        self.setting = setting;
+    }
+
     /// Forget any held-back press (e.g. on focus change).
     pub fn clear(&mut self) {
         self.pending = None;
