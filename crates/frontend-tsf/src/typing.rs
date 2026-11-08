@@ -18,13 +18,17 @@
 //!   between) is taken, at the release. TSF cannot send a held-back key again,
 //!   and an application must see Alt when it is the modifier of a shortcut.
 //! * Holding the Hangul key does not switch again and again.
-//! * There is no candidate window yet, so a conversion is taken back at once:
-//!   a selection nobody can see is never made.
+//! * A conversion (Hanja, kanji) needs the frontend's candidate window. Until
+//!   the frontend says it has one ([`Typist::set_candidate_window`]) the Hanja
+//!   key goes to the application and a conversion is taken back at once, and
+//!   when the window cannot be shown the frontend takes it back
+//!   ([`Typist::candidates_not_shown`]): a selection nobody can see is never
+//!   made.
 
 use crate::keys::{self, KeyInfo, KeyboardState};
 use crate::marks::{Mark, marks};
 use easime_config::ToggleKey;
-use ime_core::{Key, Language};
+use ime_core::{CandidateList, Key, Language};
 use ime_session::{Decision, KeyRole, Session, ToggleTracker};
 use std::collections::HashSet;
 use std::ops::Range;
@@ -111,6 +115,10 @@ pub struct Typist {
     taken_presses: HashSet<u16>,
     /// The composition last asked for (what the document shows as composing).
     shown: String,
+    /// Whether the frontend can show candidates.
+    candidate_window: bool,
+    /// The candidates after the last key, while a conversion is going on.
+    candidates: Option<CandidateList>,
 }
 
 impl Typist {
@@ -121,7 +129,33 @@ impl Typist {
             toggle: ToggleTracker::with_setting(toggle_key),
             taken_presses: HashSet::new(),
             shown: String::new(),
+            candidate_window: false,
+            candidates: None,
         }
+    }
+
+    /// Whether the frontend can show a candidate window (see the module docs).
+    pub fn set_candidate_window(&mut self, available: bool) {
+        self.candidate_window = available;
+    }
+
+    /// The candidates to show after the last key, while a conversion is going on.
+    pub fn candidates(&self) -> Option<&CandidateList> {
+        self.candidates.as_ref()
+    }
+
+    /// The frontend could not show the candidates: take the conversion back
+    /// (what was being converted stays, as it was typed), so no candidate is
+    /// chosen that the user could not see. The edit to make, if any.
+    pub fn candidates_not_shown(&mut self) -> Option<Edit> {
+        self.candidates.take()?;
+        let output = self.session.cancel_conversion()?;
+        self.shown = output.preedit.text.clone();
+        Some(Edit {
+            marks: marks(self.language(), &output.preedit),
+            commit: output.commit,
+            preedit: output.preedit.text,
+        })
     }
 
     /// The active language.
@@ -145,7 +179,7 @@ impl Typist {
         let Some(event) = keys::key_event(key, state) else {
             return false;
         };
-        event.key != Key::Hanja && self.session.wants_key(event)
+        (event.key != Key::Hanja || self.candidate_window) && self.session.wants_key(event)
     }
 
     /// `OnKeyDown`: take the key (or not) and say what to do with the document.
@@ -176,8 +210,8 @@ impl Typist {
         let Some(event) = keys::key_event(key, state) else {
             return Outcome::passed();
         };
-        if event.key == Key::Hanja {
-            // Conversion needs a candidate window, which does not exist yet.
+        if event.key == Key::Hanja && !self.candidate_window {
+            // Conversion needs a candidate window.
             return Outcome::passed();
         }
         let Some(mut output) = self.session.process_key(event) else {
@@ -185,12 +219,13 @@ impl Typist {
             return Outcome::passed();
         };
         let handled = output.handled;
-        if output.candidates.is_some() {
+        if output.candidates.is_some() && !self.candidate_window {
             // Never allow a selection that the user could not see.
             if let Some(taken_back) = self.session.cancel_conversion() {
                 output = taken_back;
             }
         }
+        self.candidates = output.candidates.clone();
         let was_showing = !self.shown.is_empty();
         self.shown = output.preedit.text.clone();
         let edit = Edit {
@@ -238,6 +273,7 @@ impl Typist {
     fn finished(&mut self, leftover: String) -> Option<Edit> {
         let was_showing = !self.shown.is_empty();
         self.shown.clear();
+        self.candidates = None;
         (was_showing || !leftover.is_empty()).then(|| Edit {
             commit: leftover,
             ..Edit::default()
@@ -264,6 +300,7 @@ impl Typist {
         self.taken_presses.clear();
         self.session.reset();
         self.shown.clear();
+        self.candidates = None;
     }
 
     /// New settings while running: what is being composed is finished first
@@ -659,6 +696,52 @@ mod tests {
     }
 
     #[test]
+    fn with_a_candidate_window_the_hanja_key_converts_and_a_digit_chooses() {
+        let mut typist = korean();
+        typist.set_candidate_window(true);
+        for c in "gks".chars() {
+            typist.key_down(letter(c), &NO_KEYS);
+        }
+        let hanja = named(VK_HANJA, 0x73);
+        assert!(typist.test_key_down(hanja, &NO_KEYS));
+        let converting = typist.key_down(hanja, &NO_KEYS);
+        assert!(converting.eaten);
+        let list = typist.candidates().expect("the candidates to show").clone();
+        assert!(!list.items.is_empty());
+        let edit = converting
+            .edit
+            .expect("the syllable is marked as converted");
+        assert_eq!(edit.preedit, "한");
+        assert_eq!(edit.marks, [(0..1, Mark::Converting)]);
+        // 1 chooses the first candidate on the page.
+        let one = named(0x31, 0x02);
+        assert!(typist.test_key_down(one, &NO_KEYS));
+        let chosen = typist.key_down(one, &NO_KEYS);
+        assert!(chosen.eaten);
+        assert_eq!(chosen.edit.unwrap().commit, list.items[0]);
+        assert!(typist.candidates().is_none(), "the window goes away");
+    }
+
+    #[test]
+    fn candidates_that_could_not_be_shown_are_taken_back() {
+        let mut typist = korean();
+        typist.set_candidate_window(true);
+        for c in "gks".chars() {
+            typist.key_down(letter(c), &NO_KEYS);
+        }
+        typist.key_down(named(VK_HANJA, 0x73), &NO_KEYS);
+        assert!(typist.candidates().is_some());
+        let edit = typist.candidates_not_shown().expect("the syllable is back");
+        assert_eq!(edit.preedit, "한");
+        assert_eq!(edit.marks, [(0..1, Mark::Composing)]);
+        assert!(typist.candidates().is_none());
+        assert!(typist.candidates_not_shown().is_none(), "only once");
+        // Typing goes on from the syllable.
+        let edit = typist.key_down(letter('r'), &NO_KEYS).edit.unwrap();
+        assert_eq!((edit.commit.as_str(), edit.preedit.as_str()), ("한", "ㄱ"));
+    }
+
+    #[test]
     fn a_conversion_that_cannot_be_shown_is_taken_back() {
         use engine_japanese::dictionary::MemoryDictionary;
         let words = std::sync::Arc::new(MemoryDictionary::parse("にほん\t日本,二本\n").0);
@@ -747,11 +830,14 @@ mod tests {
                 t.key_down(named(VK_HANGUL, 0x72), &NO_KEYS);
             },
         ];
-        for prepare in prepare {
+        // With and without a candidate window (which lets the Hanja key in).
+        for (prepare, window) in prepare.into_iter().flat_map(|p| [(p, false), (p, true)]) {
             for (key, state) in many_keys() {
                 let mut asked = korean();
+                asked.set_candidate_window(window);
                 prepare(&mut asked);
                 let mut plain = korean();
+                plain.set_candidate_window(window);
                 prepare(&mut plain);
                 let wanted = asked.test_key_down(key, &state);
                 // Asking must not change anything.

@@ -32,34 +32,62 @@ const GAP: i32 = 2;
 /// The top-left corner of a `size` by `size` box for the cursor rectangle
 /// `caret`, inside `work` (the usable area of the monitor the cursor is on).
 pub fn box_position(caret: Rect, size: i32, work: Rect) -> (i32, i32) {
-    // Below the cursor if it fits, else above, else wherever it fits best.
+    window_position(caret, size, size, work)
+}
+
+/// The top-left corner of a window of `width` × `height` for the text cursor at
+/// `caret`, by the same rule as the box: just below the cursor, above it when
+/// there is no room below, and always on the screen (`work`).
+pub fn window_position(caret: Rect, width: i32, height: i32, work: Rect) -> (i32, i32) {
     let below = caret.bottom + GAP;
-    let above = caret.top - GAP - size;
-    let top = if below + size <= work.bottom {
+    let above = caret.top - GAP - height;
+    let top = if below + height <= work.bottom {
         below
     } else if above >= work.top {
         above
     } else {
-        // Neither: keep it on the screen, the side with more room.
         let room_below = work.bottom - caret.bottom;
         let room_above = caret.top - work.top;
         if room_below >= room_above {
-            work.bottom - size
+            work.bottom - height
         } else {
             work.top
         }
     };
-    // Starts at the cursor's left edge, moved left if it would leave the screen.
-    let left = caret.left.min(work.right - size).max(work.left);
+    let left = caret.left.min(work.right - width).max(work.left);
     (
         left,
-        top.clamp(work.top, (work.bottom - size).max(work.top)),
+        top.clamp(work.top, (work.bottom - height).max(work.top)),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wide_window_keeps_its_left_on_the_screen_and_goes_above_when_it_must() {
+        let screen = Rect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let near_right = Rect {
+            left: 1800,
+            top: 100,
+            right: 1802,
+            bottom: 120,
+        };
+        assert_eq!(window_position(near_right, 400, 300, screen), (1520, 122));
+        let near_bottom = Rect {
+            left: 100,
+            top: 900,
+            right: 102,
+            bottom: 920,
+        };
+        assert_eq!(window_position(near_bottom, 400, 300, screen), (100, 598));
+    }
 
     const SCREEN: Rect = Rect {
         left: 0,

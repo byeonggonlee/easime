@@ -30,6 +30,7 @@
 pub mod install;
 pub mod keys;
 pub mod marks;
+pub mod page;
 pub mod placement;
 pub mod profiles;
 pub mod typing;
