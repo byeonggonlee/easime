@@ -42,7 +42,10 @@ Kirigami.ScrollablePage {
                     stepSize: 100
                     editable: true
                     value: EasimeSettings.indicatorMs
-                    onValueModified: EasimeSettings.applyIndicatorMs(value)
+                    onValueModified: {
+                        EasimeSettings.applyIndicatorMs(value)
+                        value = Qt.binding(() => EasimeSettings.indicatorMs)
+                    }
                 }
                 QQC2.Label {
                     text: Tr.t("밀리초 (1000 = 1초)")

@@ -306,19 +306,34 @@ pub fn find_desktop_file(env: Env) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// True if a process named `name` exists, going by `<proc>/<pid>/comm`.
+/// True if a process named `name` owned by the current user exists, going by
+/// `<proc>/<pid>/comm`.
 pub fn process_named(proc: &Path, name: &str) -> bool {
     let Ok(entries) = fs::read_dir(proc) else {
         return false;
     };
+    #[cfg(unix)]
+    let self_uid = {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(proc.join("self")).ok().map(|m| m.uid())
+    };
     entries.flatten().any(|entry| {
-        entry
+        if !entry
             .file_name()
             .to_string_lossy()
             .bytes()
             .all(|b| b.is_ascii_digit())
-            && fs::read_to_string(entry.path().join("comm"))
-                .is_ok_and(|comm| comm.trim_end() == name)
+        {
+            return false;
+        }
+        #[cfg(unix)]
+        if let Some(uid) = self_uid {
+            use std::os::unix::fs::MetadataExt;
+            if fs::metadata(entry.path()).ok().map(|m| m.uid()) != Some(uid) {
+                return false;
+            }
+        }
+        fs::read_to_string(entry.path().join("comm")).is_ok_and(|comm| comm.trim_end() == name)
     })
 }
 

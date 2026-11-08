@@ -351,17 +351,25 @@ fn set(doc: &mut DocumentMut, table: &str, key: &str, mut value: Value) {
 }
 
 /// Write the whole file at once: a reader (the daemon watches the file) never
-/// sees a half-written one.
+/// sees a half-written one. A symbolic link is followed so dotfiles managers
+/// keep their link, and existing permissions are kept.
 fn write_atomic(path: &Path, text: &str) -> Result<(), Failure> {
     let write = || -> io::Result<()> {
-        if let Some(dir) = path.parent() {
+        let target = match fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => fs::canonicalize(path)?,
+            _ => path.to_path_buf(),
+        };
+        if let Some(dir) = target.parent() {
             fs::create_dir_all(dir)?;
         }
-        let mut tmp = path.as_os_str().to_owned();
+        let mut tmp = target.as_os_str().to_owned();
         tmp.push(".tmp");
         let tmp = PathBuf::from(tmp);
         fs::write(&tmp, text)?;
-        fs::rename(&tmp, path)
+        if let Ok(meta) = fs::metadata(&target) {
+            let _ = fs::set_permissions(&tmp, meta.permissions());
+        }
+        fs::rename(&tmp, &target)
     };
     write().map_err(|e| Failure::new(FailureKind::WriteFailed, e.to_string()))
 }
