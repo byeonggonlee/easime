@@ -47,8 +47,8 @@ extended-description = """\
 Easy Eastern Asian IME: a Korean and Japanese (and soon Chinese) input \
 method for KDE Plasma 6 on Wayland, written in Rust, with its settings \
 window ("easime Settings" in the application menu) and the Japanese \
-dictionary. After installing, select easime in System Settings > Keyboard > \
-Virtual Keyboard."""
+dictionary. After installing, activate easime in "easime Settings" or select \
+easime in System Settings > Keyboard > Virtual Keyboard."""
 assets = [
     ["target/release/easime", "usr/bin/", "755"],
     ["../../settings/kde/target/release/easime-settings", "usr/bin/", "755"],

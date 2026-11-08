@@ -33,8 +33,8 @@ All agents should start with [AGENTS.md](AGENTS.md) and read DESIGN.md before wo
 Linux first (KDE Plasma 6, then GNOME), followed by Windows (TSF) and macOS (InputMethodKit).
 Linux packages (`.deb` / `.rpm`) are built by CI and will be published on GitHub Releases when a `v*` tag is pushed:
 one package per distribution (`.rpm` for Fedora, `.deb` for Debian 13) with the input method daemon, the settings window (listed in the app menu as "easime Settings") and the Japanese dictionary.
-CI installs each into a clean Fedora or Debian 13 container and starts the daemon and the settings window from the installed package. After installing, select easime in System Settings > Keyboard > Virtual Keyboard.
-A Windows installer (MSI) is built and tested in CI too (each CI run keeps it as an artifact): it registers the text service with Windows and adds Korean to the language settings of the user who installs it; uninstalling takes both away. The text service types Hangul into the focused text field (verified in CI against a simulated TSF application, with no candidate window or mode indicator yet); it has never been tried on a real PC, so it is not published.
+CI installs each into a clean Fedora or Debian 13 container and starts the daemon and the settings window from the installed package. After installing, activate easime from "easime Settings" (with confirmation and undo) or select easime in System Settings > Keyboard > Virtual Keyboard.
+A Windows installer (MSI) is built and tested in CI too (each CI run keeps it as an artifact): it registers the text service with Windows and adds Korean to the language settings of the user who installs it; uninstalling takes both away. The text service types Hangul into the focused text field (verified in CI against a simulated TSF application, with the cursor-adjacent mode box; no taskbar/language-bar indicator or candidate window yet); it has never been tried on a real PC, so it is not published.
 
 ## License
 Licensed under either of

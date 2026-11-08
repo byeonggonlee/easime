@@ -2,9 +2,9 @@ name: Release
 
 # Push a tag like v0.1.0 to build the Linux packages and publish a release.
 #
-# The Windows installer is NOT published: its text service (TSF) cannot type
-# yet, or has not been tried on a real PC (see packaging/windows and
-# docs/status.md). The CI builds and tests it on every push.
+# The Windows installer is NOT published: its text service (TSF) has not been
+# tried on a real PC yet (see packaging/windows and docs/status.md). The CI
+# builds and tests it on every push.
 on:
   push:
     tags: ["v*"]

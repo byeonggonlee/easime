@@ -60,7 +60,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 ```
 
 ### 핵심 trait (`ime-core`)
-- `trait InputEngine { fn process_key(&mut self, key: KeyEvent) -> EngineOutput; fn reset(&mut self); fn flush(&mut self) -> String; }`
+- `trait InputEngine { fn process_key(&mut self, key: KeyEvent) -> EngineOutput; fn wants_key(&self, key: KeyEvent) -> bool; fn reset(&mut self); fn flush(&mut self) -> String; }`
 - `EngineOutput { commit: String, preedit: Preedit, candidates: Option<CandidateList>, handled: bool }`
 - **후보 목록을 처음부터 API에 포함한다** (일본어/중국어 필수, 한국어 한자 변환에도 사용).
 - preedit는 하이라이트 구간(segment)과 커서 위치를 표현할 수 있게 한다 (일본어 문절 변환 대비).
@@ -80,19 +80,19 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 - **Windows**: **WinUI 3** (Windows 11 Fluent 디자인)
 - **macOS**: **SwiftUI**
 - 공통 페이지 구성 (사이드바):
-  - **일반**: 자동 시작, 트레이 아이콘, 커서 아래 상태 박스 켜기/끄기
+  - **일반**: 입력기 활성화·되돌리기(KDE), 지원·사전 상태, 설정 파일 위치·다시 읽기·초기화, (나중에) 자동 시작·트레이 아이콘 켜기/끄기
   - **언어**: 순환에 넣을 언어 선택과 순서 (영어/한국어/일본어/중국어)
-  - **단축키**: 전환 키 선택 (한/영 키 / 오른쪽 Alt)
+  - **단축키**: 전환 키 선택 (한/영 키 / 오른쪽 Alt 단독 탭 / 둘 다)
   - **한국어**: 자판(두벌식), 백스페이스 단위, (나중에) 한자 변환 키
   - **일본어**: 로마자 표, 가나 종류, (나중에) 사전/학습 관리
   - **중국어**: 간체와 번체는 별개 입력 언어(`简体中文`, `繁體中文`)로 언어 페이지에 따로 나온다. 중국어 전용 페이지는 병음 옵션이 생길 때 추가한다
-  - **모양**: 후보창 글꼴/크기, 가로/세로 배치, 상태 박스 표시 시간
-  - **앱 호환성** (Linux): Electron/Chromium 플래그 안내, XIM 상태 확인
+  - **모양**: 커서 옆 상태 박스 켜기/끄기·표시 시간, (나중에) 후보창 글꼴/크기, 가로/세로 배치
+  - **앱 호환성** (Linux, 나중에): Electron/Chromium 플래그 안내, XIM 상태 확인
 - **단계 (2026-11-07 결정)**: 목표는 초보자용과 전문가용을 나누는 것이고, 단기에는 **전문가용만** 만든다. 전문가용은 아래 페이지에서 모든 옵션을 바로 바꾸고, 변경은 즉시 저장한다. 일본어·중국어 페이지는 실제 옵션이 생길 때 추가한다(빈 페이지를 만들지 않는다).
 - **Linux 구현** (`settings/kde`, 메인 워크스페이스와 별개의 cargo 프로젝트: Qt 6와 Kirigami가 필요하므로):
   - `src/model.rs`: Qt 없는 상태·저장 로직(단위 테스트). `src/view.rs`: QML이 묶는 값. `src/backend.rs`: cxx-qt QObject(`EasimeSettings`, QML 싱글톤). `qml/`: Kirigami 화면(페이지마다 파일 하나).
   - 저장은 **바뀐 키만** `toml_edit`으로 고친다. 직접 고친 파일의 주석, 키 순서, 모르는 키가 남는다. 읽을 수 없는 파일은 절대 덮어쓰지 않고(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다.
-  - 화면의 문구는 모두 `qsTr()`이다. 번역(일본어 등)은 해당 언어 사용자의 검토가 필요하다.
+  - 화면의 문구는 모두 `qml/tr.js`의 `Tr.t(...)`를 거친다(한국어 원문을 키로 한 5개 언어 번역표). 한국어 외의 번역은 원어민 검토 전 초안이며 일반 페이지에서 이를 알린다.
 - 설정 파일 위치: Linux `~/.config/easime/config.toml`, Windows `%APPDATA%\easime\config.toml`,
   macOS `~/Library/Application Support/easime/config.toml`. 변경되면 재시작 없이 다시 읽는다.
 
@@ -102,15 +102,15 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - Qt 6와 Kirigami가 있는 환경에서 만든다: `.rpm`은 Fedora 컨테이너에서, `.deb`는 Debian 13(trixie) 컨테이너에서 그 배포판의 라이브러리로 만든다. 그러므로 `.deb`는 Debian 13 이상, Ubuntu는 Plasma 6와 Qt가 충분히 새로운 25.04 이상을 대상으로 한다. 시험한 것은 clean `debian:trixie`와 `fedora:latest` 컨테이너뿐이다.
   - 데몬이 Qt 6·Kirigami에 의존하게 되므로 KDE가 아닌 데스크톱(GNOME 등)에 설치하면 Qt가 함께 설치된다. GNOME 지원이 생기면 다시 나눌지 따진다.
   - 빌드와 검증은 `.github/workflows/packages.yml`(재사용 워크플로) 하나다. CI와 릴리스(`release.yml`)가 같은 흐름과 **같은 실제 Mozc 사전**을 쓴다. 사전은 먼저 한 번 만들어 おおさか→大阪 같은 조회를 확인한 뒤 두 패키지가 쓴다. 각 패키지는 clean 컨테이너(Fedora, Debian)에 배포판의 의존성만으로 설치하고, 설치된 데몬이 시작되어 이유를 말하며 멈추는지(컴포지터가 없으므로)와 설치된 설정 창이 모든 페이지를 여는지 확인한 뒤에야 두 파일이 한 아티팩트(`easime-linux-packages-<commit>`)로 묶인다.
-  - 패키지를 설치해도 easime가 입력기로 **선택되지는 않는다**: 시스템 설정 → 키보드 → 가상 키보드에서 고르고 다시 로그인해야 한다. 사용자의 데스크톱 설정을 설치 스크립트가 몰래 바꾸지 않기 때문이다(AGENTS.md). 확인과 되돌리기를 갖춘 활성화 화면은 초보자용 첫 실행 안내의 몫이다.
+  - 패키지를 설치해도 easime가 입력기로 **자동 선택되지는 않는다**: 사용자의 데스크톱 설정을 설치 스크립트가 몰래 바꾸지 않기 때문이다(AGENTS.md). 설정 창(`easime-settings`) 일반 화면의 활성화 카드(바꿀 설정 확인과 되돌리기 제공)에서 켜거나 시스템 설정 → 키보드 → 가상 키보드에서 고른 뒤 다시 로그인해야 한다.
 - **Windows**: **MSI(WiX 5)**, `packaging/windows/easime.wxs`. `build.ps1`이 만들고 `test.ps1`이 CI의 Windows 러너에 실제로 설치·사용·업그레이드·제거를 시험한다.
   담는 것: 텍스트 서비스 DLL(`easime_tsf.dll`, 64비트), 터미널 데모(`easime-cli.exe`), 라이선스.
-  - **설치 때** DLL을 Windows에 등록하고(`regsvr32`, 실패하면 설치가 멈추고 뒤에서 실패하면 등록을 되돌린다), **설치한 사용자의** 언어 목록에 그 언어의 easime 프로필을 켠다(DLL의 `rundll32` 내보내기 `EnableForCurrentUser <언어>`가 `InstallLayoutOrTip`을 부른다. 그 언어가 목록에 없으면 언어도 함께 추가된다). 설치 창(WiX UI의 기능 트리)에서 언어를 기능("easime keyboard (listed under Korean)")으로 고르게 하므로 그 화면이 확인이고, 무인 설치(`/qn`)는 기본값(한국어)을 따른다. 기본 설치 폴더는 `C:\Program Files\easime`.
+  - **설치 때** DLL을 Windows에 등록하고(`regsvr32`, 실패하면 설치가 멈추고 뒤에서 실패하면 등록을 되돌린다), **설치한 사용자의** 언어 목록에 easime 프로필(한국어 아래 등록된 단일 프로필)을 켠다(DLL의 `rundll32` 내보내기 `EnableForCurrentUser`가 `InstallLayoutOrTip`을 부른다. 한국어가 목록에 없으면 언어도 함께 추가된다). 설치 창(WiX UI의 기능 트리)에서 기능("easime keyboard (listed under Korean)")을 고르게 하므로 그 화면이 확인이고, 무인 설치(`/qn`)는 기본값(켜짐)을 따른다. 기본 설치 폴더는 `C:\Program Files\easime`.
   - **제거 때** 그 사용자의 켠 프로필을 끄고(`DisableForCurrentUser`; 설치가 언어까지 더했다면 그 언어도 목록에서 사라지는 것을 CI에서 확인했다. 설치 전에 이미 있던 언어는 남을 것으로 예상하며 확인하지 않았다) Windows 등록을 푼 다음 파일을 지운다. 되돌리기는 제거다. 업그레이드는 옛 버전을 먼저 제거하고 새 버전을 설치하되, 이때는 사용자 언어 목록에서 빼거나 등록을 푸는 단계를 건너뛴다(`UPGRADINGPRODUCTCODE`): 뺐다가 다시 넣으면 한국어가 사용자 언어 목록 끝으로 밀릴 수 있기 때문이다. CI가 업그레이드 뒤 언어 목록 순서가 그대로인 것을 확인한다. 로그(`easime.log`)는 1MB를 넘으면 `easime.log.old`로 옮겨 계속 커지지 않게 한다.
   - **같은 PC의 다른 사용자**는 등록된 프로필을 Windows 설정의 "키보드 추가"에서 직접 켠다(등록은 기계 전체, 켜기는 설치한 사용자만).
-  - **타자할 수 있는 언어만** 켠다: `frontend-tsf::profiles::TYPEABLE`(지금은 한국어). 일본어·중국어는 후보창 등이 생겨 실제로 입력되면 기능과 프로필을 함께 더한다.
+  - **순환에는 타자할 수 있는 언어만** 넣는다: `frontend-tsf::profiles::TYPEABLE`(지금은 한국어). 일본어·중국어는 후보창 등이 생겨 실제로 입력되면 `TYPEABLE`에 더한다.
   - **한계**: DLL이 64비트뿐이라 32비트 프로그램에서는 쓸 수 없다. ARM64 Windows의 ARM64 프로그램도 마찬가지일 것으로 예상한다(확인하지 않음). 입력기를 켜서 쓰는 중에 제거·업그레이드하면 DLL이 프로그램에 불려 있어 다시 로그인하거나 재시작해야 지워질 수 있다고 예상한다(CI에서는 DLL을 쓰는 프로그램이 없어 확인하지 못했다). 코드 서명이 없어 설치할 때 SmartScreen 경고가 뜰 수 있다(예상).
-  - 릴리스에는 올리지 않고 CI 아티팩트(`easime-windows-installer-<commit>`)로만 둔다: 키 처리가 끝나지 않았고 실제 PC에서 시험한 적이 없다.
+  - 릴리스에는 올리지 않고 CI 아티팩트(`easime-windows-installer-<commit>`)로만 둔다: 실제 PC에서 시험한 적이 없다.
   - CI의 `test.ps1`이 확인하는 것: 설치 후 Windows의 COM 클래스(설치된 DLL을 가리킴)와 TSF 프로필 등록(한국어만), 설치한 사용자의 언어 설정에 한국어 켜짐, 설치된 DLL을 COM이 불러 서비스를 만드는 것, 한국어 기능을 뺀 설치(등록은 있고 켜짐은 없음), 제거 후 아무것도 남지 않음(폴더, Windows 등록, 사용자 언어 목록), `ADDLOCAL=ALL`, 업그레이드(등록과 켜짐 유지), 다운그레이드 거부. 같은 단계의 결과와 `easime.log`가 CI 로그에 남는다.
   시스템 PATH에 폴더를 더하는 기능은 기본이 꺼져 있다(`ADDLOCAL=ALL`로 켠다): 시스템 설정을 바꾸는 일이기 때문이다.
 - **macOS**: `.pkg` (서명/공증)
