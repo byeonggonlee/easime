@@ -2,6 +2,7 @@
 //! user reads are written in QML (so they can be translated); this only
 //! produces codes and technical details.
 
+use crate::activation::{Activation, State};
 use crate::model::{Failure, FailureKind, Model, backspace_code, language_code, toggle_key_code};
 
 /// The code QML switches on for a failure.
@@ -11,6 +12,48 @@ pub fn failure_code(kind: FailureKind) -> &'static str {
         FailureKind::NoHome => "no_home",
         FailureKind::WriteFailed => "write_failed",
         FailureKind::Invalid => "invalid",
+        FailureKind::ActivationChanged => "activation_changed",
+    }
+}
+
+/// What the page that offers to select easime as the input method shows.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ActivationView {
+    /// `unsupported`, `not_installed`, `other`, `selected` (chosen, starts at
+    /// the next login) or `running`.
+    pub state: String,
+    /// The input method selected now, by name; empty if none.
+    pub current: String,
+    /// Whether the change can be undone, and to what (empty: "none").
+    pub can_undo: bool,
+    pub undo_name: String,
+    /// The file the change goes to.
+    pub file: String,
+}
+
+impl ActivationView {
+    pub fn of(activation: &Activation) -> Self {
+        let mut view = Self {
+            file: activation
+                .kwinrc()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            ..Self::default()
+        };
+        match activation.state() {
+            State::Unsupported => view.state = "unsupported".into(),
+            State::NotInstalled => view.state = "not_installed".into(),
+            State::Other { current } => {
+                view.state = "other".into();
+                view.current = current.unwrap_or_default();
+            }
+            State::Selected { running, can_undo } => {
+                view.state = if running { "running" } else { "selected" }.into();
+                view.can_undo = can_undo;
+                view.undo_name = activation.undo_target().flatten().unwrap_or_default();
+            }
+        }
+        view
     }
 }
 
@@ -76,6 +119,55 @@ mod tests {
         assert_eq!(view.problem_kind, "");
     }
 
+    fn activation_in(dir: &std::path::Path, kwinrc: Option<&str>, running: bool) -> Activation {
+        let desktop = dir.join("easime.desktop");
+        std::fs::write(&desktop, "").unwrap();
+        if let Some(text) = kwinrc {
+            std::fs::write(dir.join("kwinrc"), text).unwrap();
+        }
+        Activation::new(
+            true,
+            Some(dir.join("kwinrc")),
+            Some(desktop),
+            Some(dir.join("backup.toml")),
+            Box::new(move || running),
+        )
+    }
+
+    #[test]
+    fn the_activation_page_shows_each_state() {
+        let dir =
+            std::env::temp_dir().join(format!("easime-view-activation-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let other = activation_in(
+            &dir,
+            Some("[Wayland]\nInputMethod=/x/org.kde.plasma.keyboard.desktop\n"),
+            false,
+        );
+        let view = ActivationView::of(&other);
+        assert_eq!(
+            (view.state.as_str(), view.current.as_str()),
+            ("other", "org.kde.plasma.keyboard")
+        );
+        assert!(!view.can_undo);
+        assert_eq!(view.file, dir.join("kwinrc").to_string_lossy());
+
+        other.activate().unwrap();
+        let view = ActivationView::of(&other);
+        assert_eq!(view.state, "selected");
+        assert!(view.can_undo);
+        assert_eq!(view.undo_name, "org.kde.plasma.keyboard");
+
+        let running = activation_in(&dir, None, true);
+        assert_eq!(ActivationView::of(&running).state, "running");
+
+        let mut not_kde = activation_in(&dir, None, false);
+        not_kde.set_kde_for_test(false);
+        assert_eq!(ActivationView::of(&not_kde).state, "unsupported");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn a_missing_home_shows_as_a_problem() {
         let view = View::of(&Model::open_with_system(None, Vec::new()));
@@ -90,6 +182,7 @@ mod tests {
             FailureKind::NoHome,
             FailureKind::WriteFailed,
             FailureKind::Invalid,
+            FailureKind::ActivationChanged,
         ]
         .map(failure_code);
         for (i, a) in codes.iter().enumerate() {

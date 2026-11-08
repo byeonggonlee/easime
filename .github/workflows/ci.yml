@@ -148,10 +148,14 @@ jobs:
             log="settings-$lang.log"
             cfg="home-$lang/.config/easime/config.toml"
             rm -rf "home-$lang"; mkdir -p "shots/$lang" "home-$lang"
+            # easime is "installed" in the user's applications folder, and the
+            # session is KDE, so the window offers to select it as the input method.
+            mkdir -p "home-$lang/.local/share/applications"
+            printf '[Desktop Entry]\nType=Application\nName=easime\n' > "home-$lang/.local/share/applications/easime.desktop"
             set +e
             # The system language is neutral (C.UTF-8) so every run starts with
             # all input languages off; the display language is forced.
-            env -u LANGUAGE -u LC_ALL LANG=C.UTF-8 \
+            env -u LANGUAGE -u LC_ALL LANG=C.UTF-8 XDG_CURRENT_DESKTOP=KDE \
               HOME="$PWD/home-$lang" XDG_CONFIG_HOME="$PWD/home-$lang/.config" XDG_STATE_HOME="$PWD/home-$lang/.state" \
               timeout 120 settings/kde/target/debug/easime-settings --ui-language="$lang" --screenshots="$PWD/shots/$lang" > "$log" 2>&1
             code=$?
@@ -166,7 +170,13 @@ jobs:
             check test "$code" = 0
             check grep -q "UI-LANGUAGE $lang\$" "$log"
             check grep -q 'SETTINGS-WINDOW-LOADED pages=5' "$log"
-            check test "$(grep -c 'SCREENSHOT .* true' "$log" || true)" = 8
+            check test "$(grep -c 'SCREENSHOT .* true' "$log" || true)" = 9
+            # Selecting easime as the input method asks, changes kwinrc, and the
+            # end of the tour undoes it.
+            check grep -q 'INTERACTION activation-before state=other' "$log"
+            check grep -q 'INTERACTION activation-after state=selected undo=true result=activated' "$log"
+            check grep -q 'INTERACTION activation-undone state=other undo=false result=deactivated' "$log"
+            if grep -q easime "home-$lang/.config/kwinrc"; then echo "FAILED ($lang): kwinrc still names easime after the undo"; fail=1; fi
             # Clicking the real controls must change the settings and the file.
             check grep -q 'INPUT-LANGUAGES languages= follow-system=true' "$log"
             check grep -q 'INTERACTION japanese-on languages=japanese switch=true result=saved' "$log"

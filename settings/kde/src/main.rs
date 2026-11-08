@@ -1,6 +1,7 @@
 //! The easime settings window (expert version: every option on one of a few
 //! pages, saved as soon as it changes).
 
+mod activation;
 mod backend;
 mod model;
 mod view;

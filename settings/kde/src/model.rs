@@ -86,6 +86,9 @@ pub enum FailureKind {
     WriteFailed,
     /// The request itself makes no sense (for example an unknown value).
     Invalid,
+    /// Undoing the input method change was refused: another input method has
+    /// been selected since, and that choice stays.
+    ActivationChanged,
 }
 
 impl Failure {

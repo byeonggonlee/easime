@@ -12,7 +12,7 @@ import "tr.js" as Tr
 ColumnLayout {
     id: messages
 
-    readonly property var failures: ["unreadable", "no_home", "write_failed", "invalid"]
+    readonly property var failures: ["unreadable", "no_home", "write_failed", "invalid", "activation_changed"]
 
     function goodNews(kind, detail) {
         switch (kind) {
@@ -20,6 +20,10 @@ ColumnLayout {
             return Tr.t("저장했습니다. 실행 중인 easime에 곧 반영됩니다.")
         case "reloaded":
             return Tr.t("설정 파일을 다시 읽었습니다.")
+        case "activated":
+            return Tr.t("easime를 입력기로 선택했습니다. 다시 로그인하면 사용할 수 있습니다.")
+        case "deactivated":
+            return Tr.t("이전 입력기로 되돌렸습니다. 다시 로그인하면 적용됩니다.")
         case "reset":
             return detail !== ""
                 ? Tr.t("기본값으로 되돌렸습니다. 이전 파일은 %1에 보관했습니다.").arg(detail)
@@ -85,6 +89,8 @@ ColumnLayout {
                 return Tr.t("저장하지 못했습니다. 변경하기 전 값을 그대로 보여 드립니다.") + "\n" + EasimeSettings.resultDetail
             case "invalid":
                 return Tr.t("알 수 없는 값이라 적용하지 않았습니다.")
+            case "activation_changed":
+                return Tr.t("그 사이 다른 입력기가 선택되어 있어 되돌리지 않았습니다.")
             }
             return ""
         }

@@ -78,7 +78,25 @@ Kirigami.ApplicationWindow {
     // only flips `checked` and never emits toggled(), which the pages listen to.
     // The pictures that follow show the result.
     function interact(name, page) {
-        if (name === "languages") {
+        if (name === "general") {
+            // Select easime as the input method like a person would: the button
+            // asks, "OK" answers. Only where there is something to select.
+            console.info("INTERACTION activation-before state=" + EasimeSettings.activationState)
+            if (EasimeSettings.activationState === "other") {
+                page.openActivationDialog()
+                page.acceptActivationDialog()
+                console.info("INTERACTION activation-after state=" + EasimeSettings.activationState
+                    + " undo=" + EasimeSettings.activationCanUndo + " result=" + EasimeSettings.resultKind)
+            }
+        } else if (name === "general-undo") {
+            // The end of the tour puts the selection back, also like a person would.
+            if (EasimeSettings.activationCanUndo) {
+                page.openUndoDialog()
+                page.acceptUndoDialog()
+                console.info("INTERACTION activation-undone state=" + EasimeSettings.activationState
+                    + " undo=" + EasimeSettings.activationCanUndo + " result=" + EasimeSettings.resultKind)
+            }
+        } else if (name === "languages") {
             var japanese = find(page, "switch-japanese")
             japanese.click()
             console.info("INTERACTION japanese-on languages=" + EasimeSettings.languages
@@ -171,11 +189,14 @@ Kirigami.ApplicationWindow {
                 plan.push({ kind: "sidebar" })
             }
             plan.push({ kind: "capture", name: name, describe: true })
-            if (name === "languages" || name === "shortcuts" || name === "appearance") {
+            if (name === "general" || name === "languages" || name === "shortcuts" || name === "appearance") {
                 plan.push({ kind: "interact", name: name })
                 plan.push({ kind: "capture", name: name + "-after", describe: false })
             }
         }
+        // Back to the first page to undo what the tour selected there.
+        plan.push({ kind: "show", index: 0 })
+        plan.push({ kind: "interact", name: "general-undo" })
         return plan
     }
 

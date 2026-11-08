@@ -176,6 +176,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
           XDG_RUNTIME_DIR: /tmp
+          XDG_CURRENT_DESKTOP: KDE
           QT_LOGGING_TO_CONSOLE: "1"
           QT_FORCE_STDERR_LOGGING: "1"
           LANG: C.UTF-8
@@ -197,7 +198,11 @@ jobs:
           cat settings.log
           test "$code" = 0
           grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
-          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 8
+          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 9
+          # In a KDE session the installed easime.desktop is found, so the window
+          # offers to select it (and the tour undoes it).
+          grep -q 'INTERACTION activation-before state=other' settings.log
+          grep -q 'INTERACTION activation-undone state=other undo=false result=deactivated' settings.log
           if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.log \
               | grep -v 'Created graphical object was not placed in the graphics scene'; then
             echo "QML reported warnings or errors (above)"; exit 1
@@ -234,6 +239,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QT_QUICK_BACKEND: software
           XDG_RUNTIME_DIR: /tmp
+          XDG_CURRENT_DESKTOP: KDE
           QT_LOGGING_TO_CONSOLE: "1"
           QT_FORCE_STDERR_LOGGING: "1"
           LANG: C.UTF-8
@@ -253,7 +259,11 @@ jobs:
           cat settings.log
           test "$code" = 0
           grep -q 'SETTINGS-WINDOW-LOADED pages=5' settings.log
-          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 8
+          test "$(grep -c 'SCREENSHOT .* true' settings.log)" = 9
+          # In a KDE session the installed easime.desktop is found, so the window
+          # offers to select it (and the tour undoes it).
+          grep -q 'INTERACTION activation-before state=other' settings.log
+          grep -q 'INTERACTION activation-undone state=other undo=false result=deactivated' settings.log
           if grep -E 'qrc:/|<Unknown File>|TypeError|ReferenceError|is not installed|is not a type|nable to assign|annot assign|is not defined|failed to load' settings.log \
               | grep -v 'Created graphical object was not placed in the graphics scene'; then
             echo "QML reported warnings or errors (above)"; exit 1

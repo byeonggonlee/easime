@@ -14,11 +14,70 @@ Kirigami.ScrollablePage {
         return path.replace(/[\/\\][^\/\\]*$/, "")
     }
 
+    // The same two steps a person takes (the button opens the question, "OK"
+    // answers it); the CI uses them because it has no mouse.
+    function openActivationDialog() { confirmActivation.open() }
+    function acceptActivationDialog() { confirmActivation.accept() }
+    function openUndoDialog() { confirmUndo.open() }
+    function acceptUndoDialog() { confirmUndo.accept() }
+
+    readonly property string currentInputMethod: EasimeSettings.activationCurrent !== ""
+        ? EasimeSettings.activationCurrent : Tr.t("(없음)")
+    readonly property string undoInputMethod: EasimeSettings.activationUndoName !== ""
+        ? EasimeSettings.activationUndoName : Tr.t("(없음)")
+
     ColumnLayout {
         spacing: Kirigami.Units.largeSpacing
 
         Messages {
             Layout.fillWidth: true
+        }
+
+        // Installing the package does not select easime as the input method.
+        // Choosing it changes a KDE setting, so it asks first and can be undone.
+        Kirigami.InlineMessage {
+            objectName: "activation-card"
+            Layout.fillWidth: true
+            visible: EasimeSettings.activationState !== "unsupported"
+            type: {
+                switch (EasimeSettings.activationState) {
+                case "selected":
+                case "running":
+                    return Kirigami.MessageType.Positive
+                case "not_installed":
+                    return Kirigami.MessageType.Warning
+                }
+                return Kirigami.MessageType.Information
+            }
+            text: {
+                switch (EasimeSettings.activationState) {
+                case "other":
+                    return Tr.t("easime가 아직 입력기로 선택되지 않았습니다. 선택하면 다음에 로그인할 때부터 easime로 입력합니다.")
+                case "selected":
+                    return Tr.t("easime를 입력기로 선택했습니다. 다시 로그인하면 사용할 수 있습니다.")
+                case "running":
+                    return Tr.t("easime를 입력기로 사용하고 있습니다.")
+                case "not_installed":
+                    return Tr.t("easime의 입력기 파일(easime.desktop)을 찾지 못해 입력기로 선택할 수 없습니다. easime가 제대로 설치되었는지 확인해 주세요.")
+                }
+                return ""
+            }
+            actions: [
+                Kirigami.Action {
+                    objectName: "activate"
+                    text: Tr.t("입력기로 사용하기…")
+                    icon.name: "dialog-ok-apply"
+                    visible: EasimeSettings.activationState === "other"
+                    onTriggered: page.openActivationDialog()
+                },
+                Kirigami.Action {
+                    objectName: "undo-activation"
+                    text: Tr.t("이전 입력기로 되돌리기…")
+                    icon.name: "edit-undo"
+                    visible: EasimeSettings.activationCanUndo
+                    onTriggered: page.openUndoDialog()
+                }
+            ]
         }
 
         QQC2.Label {
@@ -108,6 +167,26 @@ Kirigami.ScrollablePage {
                 onClicked: confirmReset.open()
             }
         }
+    }
+
+    Kirigami.PromptDialog {
+        id: confirmActivation
+
+        title: Tr.t("easime를 입력기로 사용할까요?")
+        subtitle: Tr.t("KDE의 가상 키보드 설정을 바꿉니다.\n파일: %1\n지금 선택된 입력기: %2 → easime\n바꾼 뒤 다시 로그인하면 적용되며, 이 화면에서 언제든 되돌릴 수 있습니다.")
+            .arg(EasimeSettings.activationFile).arg(page.currentInputMethod)
+        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
+        onAccepted: EasimeSettings.applyActivation()
+    }
+
+    Kirigami.PromptDialog {
+        id: confirmUndo
+
+        title: Tr.t("이전 입력기로 되돌릴까요?")
+        subtitle: Tr.t("가상 키보드 설정을 easime를 고르기 전의 값(%1)으로 되돌립니다. 다시 로그인하면 적용됩니다.")
+            .arg(page.undoInputMethod)
+        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
+        onAccepted: EasimeSettings.undoActivation()
     }
 
     Kirigami.PromptDialog {

@@ -2,8 +2,11 @@
 //! model's state into properties (so bindings update), and reports what
 //! happened after each action in `resultKind` / `resultDetail`.
 
-use crate::model::{Failure, Model, backspace_from_code, language_from_code, toggle_key_from_code};
-use crate::view::{View, failure_code};
+use crate::activation::{Activation, Failure as ActivationFailure};
+use crate::model::{
+    Failure, FailureKind, Model, backspace_from_code, language_from_code, toggle_key_from_code,
+};
+use crate::view::{ActivationView, View, failure_code};
 use core::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
@@ -19,6 +22,11 @@ pub mod qobject {
         #[qobject]
         #[qml_element]
         #[qml_singleton]
+        #[qproperty(QString, activation_state, cxx_name = "activationState")]
+        #[qproperty(QString, activation_current, cxx_name = "activationCurrent")]
+        #[qproperty(bool, activation_can_undo, cxx_name = "activationCanUndo")]
+        #[qproperty(QString, activation_undo_name, cxx_name = "activationUndoName")]
+        #[qproperty(QString, activation_file, cxx_name = "activationFile")]
         #[qproperty(QString, languages)]
         #[qproperty(bool, languages_follow_system, cxx_name = "languagesFollowSystem")]
         #[qproperty(QString, toggle_key, cxx_name = "toggleKey")]
@@ -58,6 +66,14 @@ pub mod qobject {
         fn set_indicator_milliseconds(self: Pin<&mut EasimeSettings>, milliseconds: i32);
 
         #[qinvokable]
+        #[cxx_name = "applyActivation"]
+        fn apply_activation(self: Pin<&mut EasimeSettings>);
+
+        #[qinvokable]
+        #[cxx_name = "undoActivation"]
+        fn undo_activation(self: Pin<&mut EasimeSettings>);
+
+        #[qinvokable]
         #[cxx_name = "clearResult"]
         fn clear_result(self: Pin<&mut EasimeSettings>);
 
@@ -71,6 +87,11 @@ pub mod qobject {
 }
 
 pub struct EasimeSettingsRust {
+    activation_state: QString,
+    activation_current: QString,
+    activation_can_undo: bool,
+    activation_undo_name: QString,
+    activation_file: QString,
     languages: QString,
     languages_follow_system: bool,
     toggle_key: QString,
@@ -84,17 +105,25 @@ pub struct EasimeSettingsRust {
     config_path: QString,
     log_path: QString,
     model: Model,
+    activation: Activation,
 }
 
 impl Default for EasimeSettingsRust {
     fn default() -> Self {
         let model = Model::open(easime_config::config_path());
         let view = View::of(&model);
+        let activation = Activation::from_env(&|name| std::env::var_os(name));
+        let shown = ActivationView::of(&activation);
         let path_text = |path: Option<&std::path::Path>| {
             path.map(|p| QString::from(p.to_string_lossy().as_ref()))
                 .unwrap_or_default()
         };
         Self {
+            activation_state: QString::from(shown.state.as_str()),
+            activation_current: QString::from(shown.current.as_str()),
+            activation_can_undo: shown.can_undo,
+            activation_undo_name: QString::from(shown.undo_name.as_str()),
+            activation_file: QString::from(shown.file.as_str()),
             languages: QString::from(view.languages.as_str()),
             languages_follow_system: view.languages_follow_system,
             toggle_key: QString::from(view.toggle_key.as_str()),
@@ -108,6 +137,7 @@ impl Default for EasimeSettingsRust {
             config_path: path_text(model.path()),
             log_path: path_text(easime_config::log_path().as_deref()),
             model,
+            activation,
         }
     }
 }
@@ -207,6 +237,56 @@ impl qobject::EasimeSettings {
             model.set_indicator_ms(milliseconds)?;
             Ok(Outcome::Done("saved", String::new()))
         });
+    }
+
+    /// Show the state of the input method selection again.
+    fn refresh_activation(mut self: Pin<&mut Self>) {
+        let view = ActivationView::of(&self.as_ref().rust().activation);
+        self.as_mut()
+            .set_activation_state(QString::from(view.state.as_str()));
+        self.as_mut()
+            .set_activation_current(QString::from(view.current.as_str()));
+        self.as_mut().set_activation_can_undo(view.can_undo);
+        self.as_mut()
+            .set_activation_undo_name(QString::from(view.undo_name.as_str()));
+        self.as_mut()
+            .set_activation_file(QString::from(view.file.as_str()));
+    }
+
+    /// Run an input method change, report it like any other action, and show
+    /// the new state.
+    fn run_activation(
+        mut self: Pin<&mut Self>,
+        done: &'static str,
+        action: impl FnOnce(&Activation) -> Result<(), ActivationFailure>,
+    ) {
+        self.as_mut().set_result_kind(QString::default());
+        let outcome = action(&self.as_ref().rust().activation);
+        let (kind, detail) = match outcome {
+            Ok(()) => (done.to_owned(), String::new()),
+            Err(ActivationFailure::Changed) => (
+                failure_code(FailureKind::ActivationChanged).to_owned(),
+                String::new(),
+            ),
+            Err(ActivationFailure::NotPossible) => {
+                (failure_code(FailureKind::Invalid).to_owned(), String::new())
+            }
+            Err(ActivationFailure::Io(detail)) => {
+                (failure_code(FailureKind::WriteFailed).to_owned(), detail)
+            }
+        };
+        self.as_mut()
+            .set_result_detail(QString::from(detail.as_str()));
+        self.as_mut().set_result_kind(QString::from(kind.as_str()));
+        self.refresh_activation();
+    }
+
+    fn apply_activation(self: Pin<&mut Self>) {
+        self.run_activation("activated", Activation::activate);
+    }
+
+    fn undo_activation(self: Pin<&mut Self>) {
+        self.run_activation("deactivated", Activation::undo);
     }
 
     /// Forget what the last action reported, for example when the user moves

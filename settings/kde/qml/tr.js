@@ -29,6 +29,12 @@ var table = {
     "zh-Hant": "Backspace 刪除的單位：",
     "zh-Hans": "Backspace 删除的单位："
   },
+  "KDE의 가상 키보드 설정을 바꿉니다.\n파일: %1\n지금 선택된 입력기: %2 → easime\n바꾼 뒤 다시 로그인하면 적용되며, 이 화면에서 언제든 되돌릴 수 있습니다.": {
+    "en": "This changes KDE's virtual keyboard setting.\nFile: %1\nSelected input method now: %2 → easime\nIt takes effect after you log in again, and you can undo it here at any time.",
+    "ja": "KDE の仮想キーボードの設定を変更します。\nファイル: %1\n現在選ばれている入力メソッド: %2 → easime\n再ログインすると反映されます。この画面でいつでも元に戻せます。",
+    "zh-Hant": "將變更 KDE 的虛擬鍵盤設定。\n檔案：%1\n目前選用的輸入法：%2 → easime\n重新登入後生效，您隨時可在此畫面還原。",
+    "zh-Hans": "将更改 KDE 的虚拟键盘设置。\n文件：%1\n当前选用的输入法：%2 → easime\n重新登录后生效，您随时可以在此界面还原。"
+  },
   "easime 설정": {
     "en": "easime Settings",
     "ja": "easime 設定",
@@ -41,11 +47,41 @@ var table = {
     "zh-Hant": "將 easime 設定還原為預設值",
     "zh-Hans": "将 easime 设置恢复为默认值"
   },
+  "easime가 아직 입력기로 선택되지 않았습니다. 선택하면 다음에 로그인할 때부터 easime로 입력합니다.": {
+    "en": "easime is not selected as your input method yet. Once you select it, easime types from your next login.",
+    "ja": "easime はまだ入力メソッドとして選ばれていません。選ぶと、次回のログインから easime で入力できます。",
+    "zh-Hant": "尚未選用 easime 作為輸入法。選用後，下次登入起即可使用 easime 輸入。",
+    "zh-Hans": "尚未选用 easime 作为输入法。选用后，下次登录起即可使用 easime 输入。"
+  },
+  "easime를 입력기로 사용하고 있습니다.": {
+    "en": "You are using easime as your input method.",
+    "ja": "easime を入力メソッドとして使っています。",
+    "zh-Hant": "目前正使用 easime 作為輸入法。",
+    "zh-Hans": "当前正使用 easime 作为输入法。"
+  },
+  "easime를 입력기로 사용할까요?": {
+    "en": "Use easime as your input method?",
+    "ja": "easime を入力メソッドとして使いますか？",
+    "zh-Hant": "要將 easime 設為輸入法嗎？",
+    "zh-Hans": "要将 easime 设为输入法吗？"
+  },
+  "easime를 입력기로 선택했습니다. 다시 로그인하면 사용할 수 있습니다.": {
+    "en": "easime is selected as your input method. You can use it after you log in again.",
+    "ja": "easime を入力メソッドとして選びました。再ログインすると使えます。",
+    "zh-Hant": "已選用 easime 作為輸入法。重新登入後即可使用。",
+    "zh-Hans": "已选用 easime 作为输入法。重新登录后即可使用。"
+  },
   "easime의 설정이 모두 기본값으로 바뀝니다. 지금 설정 파일은 config.toml.bak으로 보관되며, 입력기 선택이나 다른 프로그램의 설정은 바뀌지 않습니다.": {
     "en": "All of easime's settings will be reset to their defaults. The current settings file is kept as config.toml.bak. Your input method selection and other programs' settings are not changed.",
     "ja": "easime の設定がすべて初期値に戻ります。現在の設定ファイルは config.toml.bak として保管され、入力メソッドの選択や他のプログラムの設定は変わりません。",
     "zh-Hant": "easime 的所有設定都會還原為預設值。目前的設定檔會保留為 config.toml.bak，輸入法的選擇和其他程式的設定不會改變。",
     "zh-Hans": "easime 的所有设置都会恢复为默认值。当前的设置文件会保留为 config.toml.bak，输入法的选择和其他程序的设置不会改变。"
+  },
+  "easime의 입력기 파일(easime.desktop)을 찾지 못해 입력기로 선택할 수 없습니다. easime가 제대로 설치되었는지 확인해 주세요.": {
+    "en": "easime's input method file (easime.desktop) was not found, so it cannot be selected. Please check that easime is installed correctly.",
+    "ja": "easime の入力メソッドファイル（easime.desktop）が見つからないため選べません。easime が正しくインストールされているか確認してください。",
+    "zh-Hant": "找不到 easime 的輸入法檔案（easime.desktop），因此無法選用。請確認 easime 已正確安裝。",
+    "zh-Hans": "找不到 easime 的输入法文件（easime.desktop），因此无法选用。请确认 easime 已正确安装。"
   },
   "中文:": {
     "en": "中文:",
@@ -58,6 +94,18 @@ var table = {
     "ja": "日本語:",
     "zh-Hant": "日本語:",
     "zh-Hans": "日本語:"
+  },
+  "가상 키보드 설정을 easime를 고르기 전의 값(%1)으로 되돌립니다. 다시 로그인하면 적용됩니다.": {
+    "en": "The virtual keyboard setting goes back to its value before easime was chosen (%1). It takes effect after you log in again.",
+    "ja": "仮想キーボードの設定を、easime を選ぶ前の値（%1）に戻します。再ログインすると反映されます。",
+    "zh-Hant": "虛擬鍵盤設定將還原為選用 easime 之前的值（%1）。重新登入後生效。",
+    "zh-Hans": "虚拟键盘设置将还原为选用 easime 之前的值（%1）。重新登录后生效。"
+  },
+  "그 사이 다른 입력기가 선택되어 있어 되돌리지 않았습니다.": {
+    "en": "Another input method was selected in the meantime, so nothing was changed back.",
+    "ja": "その間に別の入力メソッドが選ばれていたため、元には戻しませんでした。",
+    "zh-Hant": "期間已選用其他輸入法，因此未還原。",
+    "zh-Hans": "期间已选用其他输入法，因此未还原。"
   },
   "글자 단위 (한 → 지움)": {
     "en": "Whole syllable (한 → erased)",
@@ -245,11 +293,35 @@ var table = {
     "zh-Hant": "此設定視窗的翻譯為草稿，尚未經過母語人士審閱。",
     "zh-Hans": "此设置窗口的翻译为草稿，尚未经过母语人士审阅。"
   },
+  "이전 입력기로 되돌렸습니다. 다시 로그인하면 적용됩니다.": {
+    "en": "Went back to the previous input method. It takes effect after you log in again.",
+    "ja": "前の入力メソッドに戻しました。再ログインすると反映されます。",
+    "zh-Hant": "已還原為先前的輸入法。重新登入後生效。",
+    "zh-Hans": "已还原为之前的输入法。重新登录后生效。"
+  },
+  "이전 입력기로 되돌리기…": {
+    "en": "Go back to the previous input method…",
+    "ja": "前の入力メソッドに戻す…",
+    "zh-Hant": "還原為先前的輸入法…",
+    "zh-Hans": "还原为之前的输入法…"
+  },
+  "이전 입력기로 되돌릴까요?": {
+    "en": "Go back to the previous input method?",
+    "ja": "前の入力メソッドに戻しますか？",
+    "zh-Hant": "要還原為先前的輸入法嗎？",
+    "zh-Hans": "要还原为之前的输入法吗？"
+  },
   "일반": {
     "en": "General",
     "ja": "全般",
     "zh-Hant": "一般",
     "zh-Hans": "常规"
+  },
+  "입력기로 사용하기…": {
+    "en": "Use as input method…",
+    "ja": "入力メソッドとして使う…",
+    "zh-Hant": "設為輸入法…",
+    "zh-Hans": "设为输入法…"
   },
   "입력창을 누르거나 창을 옮길 때는 표시하지 않고, 사용자가 언어를 바꿀 때만 잠깐 나타납니다.": {
     "en": "It is not shown when you click an input field or move between windows; it appears briefly only when you switch the language.",
