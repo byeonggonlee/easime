@@ -91,7 +91,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 - 예상: 키는 IBus가 전달하므로 키 반복은 우리 몫이 아니다(조사 필요). 상태 표시는 GNOME 입력 소스 표시기에 기댄다. 트레이가 없다.
 - Wayland 어댑터와 달라지는 것: 프로토콜, 키 코드 해석, 창 표시. 전환 키 판정·세션·엔진은 같다.
 
-### Windows (TSF): 일부 있음 (등록·설치는 있고, 타자는 아직)
+### Windows (TSF): 한국어 타자까지 있음 (실제 PC 미시험)
 
 - 코어: 전부 쓴다. 코어는 `frontend-tsf`(`cdylib` DLL)에 정적으로 링크된다.
 - 어댑터가 하는 일: TSF 텍스트 서비스 등록, 키 이벤트 싱크(키 코드는 가상 키 코드), 조합 중인 글자는 TSF composition, 후보창, 언어 표시.
@@ -102,7 +102,11 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
   - 오른쪽 Alt: 일부 자판에서는 AltGr(Ctrl+Alt)로 동작한다. 그런 자판은 어댑터가 `KeyRole::Other`로 알려야 한다(예상, 조사 필요).
   - 키 반복은 OS가 한다(예상). `repeat.rs`에 해당하는 코드는 필요 없을 것이다.
 - 코어 바깥(OS 고유): WinUI 3 설정 앱(계획), MSI + TSF 등록. **MSI가 있다**(`packaging/windows`): 텍스트 서비스 DLL을 Windows에 등록하고, 설치한 사용자의 언어 목록에 타자할 수 있는 언어의 프로필을 켠다(언어를 직접 추가하지 않아도 되게 하려는 것). 제거하면 둘 다 되돌린다. 키는 아직 처리하지 않는다. 설치 동작과 한계는 [architecture.md](architecture.md)의 "패키징과 배포". CI의 Windows 러너에서 설치·언어 켜짐·제거·업그레이드를 시험한다.
-- 지금 Windows 쪽에 있는 것(모두 CI의 Windows 러너에서 빌드·테스트): 코어 다섯 크레이트, 키 입력 해석(`frontend-tsf::keys`: 가상 키·스캔 코드 → `KeyEvent`, 전환 키 분류), 시스템 언어 읽기, 설정 변경 감지(`ConfigReloader`), 설정·로그·사전 경로 규칙. TSF **등록**(COM 클래스 레지스트리 키와 언어별 TSF 프로필, `DllRegisterServer`/`DllUnregisterServer`)은 있고, CI의 Windows 러너가 실제로 등록 → TSF가 기록한 프로필 등록(레지스트리의 `CTF\TIP`)이 있는지 확인 → 제거까지 시험한다(`frontend-tsf/tests/registration.rs`). TSF 인터페이스(`GetProfile`)의 조회 결과는 사용자가 설정한 언어에 달려 있어 러너에서는 정보로만 남긴다. **텍스트 서비스 1단계**(COM 클래스 팩터리, 활성화, TSF에 키 이벤트 싱크 등록)는 있고 CI의 Windows 러너가 확인한다: `regsvr32`가 빌드된 DLL을 등록하고, COM이 레지스트리의 그 DLL에서 서비스를 만들고, TSF가 프로필을 이 프로세스에 활성화해(`ActivateProfile`, 이 프로세스에만 적용되어 사용자 설정은 바뀌지 않음) DLL을 불러 서비스를 만들고 활성화해 스레드 관리자가 easime의 싱크를 포그라운드 키 싱크로 보고하는 것(러너에는 한국어가 설치되어 있지 않고 TSF는 설치되지 않은 언어의 프로필 활성화를 거부하므로, 시험은 미국 영어 아래 시험 전용 프로필로 한다. 한국어 프로필을 실제로 쓰려면 Windows 언어 설정에서 그 언어가 있어야 할 것으로 보이며 확인하지 않았다), 팩터리가 서비스를 세고 놓아 주는 것(`frontend-tsf/tests/{dll,service}.rs`). **그러나 어떤 키도 먹지 않는다**(조합, 후보창, 전환 키 없음): 등록돼도 입력은 되지 않는다. 그래서 MSI는 아직 등록하지 않는다(아무것도 안 하는 입력기를 Windows 언어 목록에 보이지 않기 위해). 이것은 Windows에서 입력이 된다는 뜻이 **아니다**.
+- 지금 Windows 쪽에 있는 것(모두 CI의 Windows 러너에서 빌드·테스트): 코어 다섯 크레이트, 키 입력 해석(`frontend-tsf::keys`: 가상 키·스캔 코드 → `KeyEvent`, 전환 키 분류), 시스템 언어 읽기, 설정 변경 감지(`ConfigReloader`), 설정·로그·사전 경로 규칙. TSF **등록**(COM 클래스 레지스트리 키와 언어별 TSF 프로필, `DllRegisterServer`/`DllUnregisterServer`)은 있고, CI의 Windows 러너가 실제로 등록 → TSF가 기록한 프로필 등록(레지스트리의 `CTF\TIP`)이 있는지 확인 → 제거까지 시험한다(`frontend-tsf/tests/registration.rs`). TSF 인터페이스(`GetProfile`)의 조회 결과는 사용자가 설정한 언어에 달려 있어 러너에서는 정보로만 남긴다. **텍스트 서비스 1단계**(COM 클래스 팩터리, 활성화, TSF에 키 이벤트 싱크 등록)와 **2단계(한글 타자)**가 있다. 키가 하는 일은 TSF 없이 되는 `frontend-tsf::typing`(`Typist`: `OnTestKeyDown`/`OnKeyDown`을 나누어 답하고 둘이 어긋나지 않는다는 것을 모든 키로 시험, 한/영 키와 오른쪽 Alt 탭 전환, 문서에 할 일을 `Step`으로 계획)에 있어 모든 OS의 CI가 시험한다. TSF 쪽(`service.rs`)은 그 결과를 TSF 편집 세션 안에서 문서에 쓴다: 조합(composition)을 커서에서 시작해 글자를 바꿔 쓰고, 확정할 글자는 조합에 쓴 뒤 조합을 끝내며, 포커스가 옮겨 가거나 응용 프로그램이 조합을 끝내면 거기서 끝내고 엔진의 사본만 버린다. 언어는 사용자가 Windows에서 고른 프로필이 정하고(`GetActiveProfile`), 설정 파일은 실행 중에 따른다(`ConfigReloader`, 2초마다 확인). 항목마다 패닉을 잡아 키를 통과시키고(`dll` 빌드 프로필은 abort가 아니라 unwind) `easime.log`에 남긴다(`EASIME_LOG_KEYS=1`이면 모든 키).
+
+**CI의 Windows 러너가 확인하는 것(`frontend-tsf/tests/`)**: `regsvr32`가 빌드된 DLL을 등록하고, COM이 레지스트리의 그 DLL에서 서비스를 만들고(`dll.rs`), TSF가 프로필을 이 프로세스에 활성화해(`ActivateProfile`, 이 프로세스에만 적용되어 사용자 설정은 바뀌지 않음) DLL을 불러 서비스를 만들고 활성화해 스레드 관리자가 easime의 싱크를 포그라운드 키 싱크로 보고하는 것. 그리고 **실제 TSF를 통한 타자**(`typing.rs`): 포커스가 있는 창과 문서(문자열을 가진 텍스트 저장소 `ITextStoreACP`)로 응용 프로그램을 흉내 내고, `ITfKeystrokeMgr`로 키를 보내(`TestKeyDown` 다음 `KeyDown`, TSF를 아는 응용 프로그램이 하는 방식) `gksrmf`가 `한글`이 되며 조합이 하나만 있는 것, Space는 음절을 확정하고 응용 프로그램이 받는 것, Backspace가 조합을 줄이다 응용 프로그램의 것이 되는 것, 한/영 키가 영어와 한국어를 오가며 조합 중인 음절을 먼저 확정하는 것을 확인한다. (러너에는 한국어가 설치되어 있지 않고 TSF는 설치되지 않은 언어의 프로필 활성화를 거부하므로, 시험은 미국 영어 아래 시험 전용 프로필로 하고, easime의 프로필이 아니면 한국어로 시작한다.)
+
+**아직 없는 것 / 확인하지 않은 것**: ① 지금 영어 모드인지 한국어 모드인지 알려 주는 표시(커서 옆 박스, 언어 바 단추)가 없다 — 쳐 봐야 안다. ② 조합 글자에 밑줄(display attribute)이 없다. ③ 후보창이 없어서 한자·일본어 변환은 못 하고, 한자 키는 응용 프로그램에 넘긴다. ④ 모드는 응용 프로그램(스레드)마다 따로이고 프로그램 사이에 공유되지 않는다(Linux는 데몬 하나라 공유). ⑤ **실제 PC의 응용 프로그램(메모장, 브라우저, 메신저, 게임 등)에서는 시험하지 않았다.** 시험 응용 프로그램이 TSF 규칙을 지키는 가짜이므로, 특히 "OnTestKeyDown은 가져가겠다고 하고 OnKeyDown은 가져가지 않는 키"(조합을 확정하고 Space·Enter·숫자는 응용 프로그램에 넘기는 경우)가 모든 응용 프로그램에서 키를 잃지 않는지는 실제 PC에서 확인해야 한다. ⑥ 오른쪽 Alt 탭 전환은 Windows에서 Wayland와 다르게 동작한다(누름은 응용 프로그램에 그대로 가고, 눌렀다 떼는 탭이면 뗄 때 전환하며 그 뗌을 먹는다): TSF는 먹은 키를 나중에 다시 보낼 수 없고, Alt가 단축키의 수정 키일 수 있기 때문이다. AltGr 자판은 위 한계 그대로다. 이것도 실제 PC에서는 시험하지 않았다.
 - **등록 방식(사용자 결정, 2026-11-08)**: 언어마다 TSF 프로필(한국어, 日本語, 繁體中文, 简体中文)로 등록한다. 언어는 OS(Win+Space, 작업 표시줄 언어 표시)가 고르고, easime 안에서는 한/영 키가 "영어 ↔ 그 프로필의 언어"만 바꾼다. 그러므로 프로필 하나는 **언어 하나만 켠 `Session`**이다(`Session::for_language`: 설정 파일의 언어 목록과 순서, 시스템 언어와 무관하게 그 언어와 영어만 오가고, 설정이 바뀌어도 그대로다. 나머지 설정은 따른다). 엔진이 있는 언어의 프로필만 등록한다(`frontend-tsf::profiles`: 프로필 목록, LANGID ko-KR 0x0412·ja-JP 0x0411·zh-TW 0x0404·zh-CN 0x0804, 고정 GUID, 이름 `easime (한국어)` 식. 지금은 한국어와 日本語). Linux의 "한 키로 영어→한국어→일본어 순환"은 Windows에서 다르게 동작한다.
 
 ### macOS (InputMethodKit): 계획
@@ -129,17 +133,17 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 | 사전 읽기 | `engine-japanese/src/file_dict.rs` | **있음** 파일 전체를 메모리로 | 프로세스마다 읽으면 비싸다. **조사 필요** | 프로세스 하나라 Linux와 같을 것(예상) |
 | 시스템 언어 읽기 | `easime-config/src/locale.rs` | **있음** `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` | **있음** `GetUserPreferredUILanguages`. CI의 Windows 러너에서 호출이 되는 것만 확인했고 한국어·일본어 Windows에서는 돌려 보지 않았다 | **없음**: 환경 변수가 비어 있어 영어만(안전한 폴백). 선호 언어 API가 필요 |
 | 로그 위치 | `easime-config/src/store.rs`(`log_path_for`), 쓰기는 `frontend-wayland/src/log.rs` | **있음** `~/.local/state/easime/easime.log` | 경로 **있음**(`%LOCALAPPDATA%\easime\easime.log`, 모든 OS에서 테스트), 쓰는 쪽은 **계획** | 경로 **있음**(`~/Library/Logs/easime/easime.log`), 쓰는 쪽은 **계획** |
-| 키 코드 → `KeyEvent` | `frontend-wayland/src/translate.rs`, `frontend-tsf/src/keys.rs` | **있음** X keysym | **있음(TSF에 연결 전)** 가상 키 코드 + 스캔 코드(물리 키 기준 US 글자, 레이아웃과 무관). 모든 OS에서 단위 테스트 | **계획** macOS 키 코드 |
-| 전환 키 분류(`KeyRole`) | `translate.rs`의 `toggle_role`, `frontend-tsf/src/keys.rs`의 `toggle_role` | **있음** | **있음(TSF에 연결 전)** 한/영 키, 오른쪽 Alt(확장 키 표시). AltGr 자판 처리는 **조사 필요** | **계획** (수정 키 이벤트 조사 필요) |
+| 키 코드 → `KeyEvent` | `frontend-wayland/src/translate.rs`, `frontend-tsf/src/keys.rs` | **있음** X keysym | **있음** 가상 키 코드 + 스캔 코드(물리 키 기준 US 글자, 레이아웃과 무관). 모든 OS에서 단위 테스트, TSF에 연결됨 | **계획** macOS 키 코드 |
+| 전환 키 분류(`KeyRole`) | `translate.rs`의 `toggle_role`, `frontend-tsf/src/keys.rs`의 `toggle_role` | **있음** | **있음** 한/영 키, 오른쪽 Alt(확장 키 표시). AltGr 자판 처리는 **조사 필요** | **계획** (수정 키 이벤트 조사 필요) |
 | 키 반복 | `frontend-wayland/src/repeat.rs`, `timer.rs` | **있음** 직접 반복 | OS가 한다(예상) | OS가 한다(예상) |
-| 조합·확정 전달 | `frontend-wayland/src/app.rs`의 `apply` | **있음** `commit_string`, `preedit_string` | **계획** TSF composition | **계획** `setMarkedText`, `insertText` |
+| 조합·확정 전달 | `frontend-wayland/src/app.rs`의 `apply` | **있음** `commit_string`, `preedit_string` | **있음** TSF composition(편집 세션 안에서 쓰고 끝냄. 밑줄은 아직 없음) | **계획** `setMarkedText`, `insertText` |
 | 후보창 | `frontend-wayland/src/candidate.rs`, `panel.rs` | **있음** 입력 패널 + 직접 그림 | **계획** | **계획** |
 | 언어 표시 글자 | `ime-session/src/indicator.rs` | **있음(공통)** | 공통 | 공통 |
 | 표시 글꼴 | `frontend-wayland/src/font.rs` | **있음** Noto Sans CJK 등 | **계획** OS의 CJK 글꼴 | **계획** OS의 CJK 글꼴 |
 | 상태 표시 방식 | `panel.rs`(박스), `crates/easime/src/tray.rs`(트레이) | **있음** 커서 옆 박스, 트레이 아이콘(StatusNotifierItem, 클릭·메뉴로 언어 전환; 실제 Plasma 미검증, D-Bus 위의 가짜 셸로 시험) | **계획** 알림 영역 아이콘 또는 언어 바 | **계획** 메뉴 막대 입력 소스 |
-| 프로세스 구조와 등록 | `data/easime.desktop` 등 | **있음** KWin 가상 키보드 | **계획** TSF DLL 등록 | **계획** `~/Library/Input Methods` |
+| 프로세스 구조와 등록 | `data/easime.desktop` 등 | **있음** KWin 가상 키보드 | **있음** TSF DLL 등록(`regsvr32`, MSI) | **계획** `~/Library/Input Methods` |
 | 설정 앱 | `settings/` | **있음** `settings/kde` (Kirigami) | **계획** WinUI 3 | **계획** SwiftUI |
-| 패키지 | `crates/easime`, `settings/kde`, `packaging/` | **있음** `.deb`, `.rpm` | **있음(타자 미완)** MSI (DLL 등록 + 사용자 언어 켜기) | **계획** `.pkg` |
+| 패키지 | `crates/easime`, `settings/kde`, `packaging/` | **있음** `.deb`, `.rpm` | **있음(한국어만, 실제 PC 미시험)** MSI (DLL 등록 + 사용자 언어 켜기) | **계획** `.pkg` |
 | 어댑터 테스트 | `frontend-wayland/tests/` | **있음** 가짜 KWin | **계획** 새 방법 필요 | **계획** 새 방법 필요 |
 
 설정 앱은 OS마다 따로 만들지만 **같은 설정 파일과 같은 페이지 구성**을 쓴다. 설정 앱을 코어에 합치지 않는다.
@@ -151,7 +155,10 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 | 차이 | 지침 |
 |---|---|
 | 프로세스 구조(데몬 하나 / 앱마다 DLL) | 전체 공통 상태를 OS에 맞는 방법으로 지킨다. 코어는 프로세스 하나가 `Session` 하나를 가진다고만 가정한다 |
-| 키 반복 | OS가 해 주면 어댑터는 반복하지 않는다. 코어는 반복을 알지 못한다 |
+| 키 반복 | OS가 해 주면 어댑터는 반복하지 않는다. 코어는 반복을 알지 못한다. 단, 한/영 키를 누르고 있을 때 Windows가 보내는 반복은 전환이 아니다(`Typist`가 막는다) |
+| 먹은 키를 나중에 다시 보내기 | Wayland는 오른쪽 Alt 누름을 붙들었다가 다른 키가 오면 응용 프로그램에 다시 보낸다. TSF는 그럴 수 없으므로 Windows는 누름을 그대로 통과시키고 탭의 뗌만 먹는다 |
+| 키를 가져갈지 먼저 묻는 OS (Windows `OnTestKeyDown`) | 엔진은 부작용 없이 답하는 `InputEngine::wants_key`를 갖고, `false`는 "이 키로 `process_key`는 아무것도 하지 않는다"는 약속이다(`ime_core::contract`가 모든 엔진을 시험). `true`는 넉넉해도 된다 |
+| 후보창이 없는 동안 | 변환을 시작한 키는 곧바로 취소해 보이지 않는 선택이 일어나지 않게 한다(Wayland와 같은 규칙) |
 | 전환 키로 쓸 수 있는 키 | `KeyRole`로 추상화했다. 키가 없는 OS는 설정 선택지와 기본값을 제품 결정으로 정한다 |
 | 상태 표시 방법 | 정보(현재 언어)는 같고 표현(박스, 트레이, 메뉴 막대)은 OS를 따른다 |
 | 글꼴과 글자꼴 | 언어별 지역 글자꼴 원칙(DESIGN.md 6절)은 같고 글꼴 이름은 OS별이다 |

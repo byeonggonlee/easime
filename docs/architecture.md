@@ -24,7 +24,7 @@
 - TSF DLL은 각 앱 프로세스에 로드된다 → "전체 공통 입력 상태"를 위해 상태 공유 방법이 필요하다
   (공유 메모리 또는 named pipe 서비스).
 - 후보창과 상태 박스는 Win32 레이어드 창으로 그린다. 상태는 알림 영역 아이콘(또는 언어 바)으로 표시한다.
-- 설치: **MSI(WiX 5)** + TSF 등록(`regsvr32` 방식). 코드 서명은 선택 사항. 설치 프로그램의 틀은 이미 있다(`packaging/windows`, 아래 "패키징과 배포"). MSI는 TSF DLL을 Windows에 등록하고(`regsvr32`) 설치한 사용자의 언어 목록에 한국어를 켠다(사용자가 Windows 설정에서 언어를 직접 추가하지 않아도 된다). 텍스트 서비스는 아직 키를 처리하지 않는다.
+- 설치: **MSI(WiX 5)** + TSF 등록(`regsvr32` 방식). 코드 서명은 선택 사항. 설치 프로그램의 틀은 이미 있다(`packaging/windows`, 아래 "패키징과 배포"). MSI는 TSF DLL을 Windows에 등록하고(`regsvr32`) 설치한 사용자의 언어 목록에 한국어를 켠다(사용자가 Windows 설정에서 언어를 직접 추가하지 않아도 된다). 텍스트 서비스는 한글을 TSF 조합으로 쓴다(실제 PC에서는 아직 시험하지 않았다).
 
 ### macOS (마지막)
 - **InputMethodKit**: Objective-C/Swift 껍데기 + Rust 정적 라이브러리, `~/Library/Input Methods`에 `.app` 번들 설치
@@ -47,7 +47,7 @@ crates/
   frontend-wayland/  KWin input-method-v1 (Linux)
   frontend-xim/      XIM 서버 (XWayland, X11)
   frontend-ibus/     IBus 호환 D-Bus 서비스 (GNOME)
-  frontend-tsf/      Windows TSF DLL (지금은 키 입력 해석, 언어별 프로필 목록, TSF 등록, 활성화만 하고 키는 먹지 않는 텍스트 서비스 1단계)
+  frontend-tsf/      Windows TSF DLL (키 입력 해석, 키 처리 파이프라인 `typing`(Windows API 없음), 언어별 프로필 목록, TSF 등록, 한글을 TSF 조합으로 쓰는 텍스트 서비스. 후보창·모드 표시·밑줄은 아직)
   easime/            Linux 데몬 바이너리 (Wayland + XIM + IBus 프론트엔드, 트레이, D-Bus)
 settings/
   kde/               Linux 설정 앱: Rust + cxx-qt + QML + Kirigami
