@@ -55,12 +55,18 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-sess
 - Claude Code adds its trailer itself; other tools do not, so add it yourself.
 - Fill in "LLM assistance" in the PR template. Model names belong only in trailers and PR descriptions, never in code comments or docs.
 
+## Documentation entry point
+
+- [Complete document index](docs/README.md): every repository document, including dated plans, contribution templates, data notes and licenses, must be reachable from this index.
+- [2026-11-08 development and design assessment](docs/assessment-2026-11-08.md): evidence, gaps and recommended priorities; proposals are not approved product decisions.
+- When adding, moving or deleting documentation, update the index and affected links in the same commit. Keep current decisions, implementation status and dated proposals distinct. Check local links and reachability from AGENTS.md before committing documentation changes.
+
 ## Read when needed
 | File | When |
 |---|---|
-| `docs/concept.md` | product concept, target user, what the popups and indicator should feel like |
-| `docs/decisions.md` | any design or product question: goals, decided choices, license notes |
-| `docs/platforms.md` | deciding whether logic belongs in the shared core or in an OS frontend; anything OS-dependent (paths, keys, repeat, locale); starting a Windows/macOS/GNOME frontend |
-| `docs/architecture.md` | touching a frontend or protocol (KWin, GNOME, Windows, macOS), config format, settings GUI, packaging |
-| `docs/status.md` | choosing what to do next: roadmap, what exists, known gaps, unfinished branches |
-| `docs/development.md` | trying the daemon in KWin, recovery steps, build dependencies |
+| [docs/concept.md](docs/concept.md) | product concept, target user, what the popups and indicator should feel like |
+| [docs/decisions.md](docs/decisions.md) | any design or product question: goals, decided choices, license notes |
+| [docs/platforms.md](docs/platforms.md) | deciding whether logic belongs in the shared core or in an OS frontend; anything OS-dependent (paths, keys, repeat, locale); starting a Windows/macOS/GNOME frontend |
+| [docs/architecture.md](docs/architecture.md) | touching a frontend or protocol (KWin, GNOME, Windows, macOS), config format, settings GUI, packaging |
+| [docs/status.md](docs/status.md) | choosing what to do next: roadmap, what exists, known gaps, unfinished branches |
+| [docs/development.md](docs/development.md) | trying the daemon in KWin, recovery steps, build dependencies |
