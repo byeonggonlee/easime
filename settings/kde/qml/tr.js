@@ -161,12 +161,6 @@ var table = {
     "zh-Hant": "兩者皆可（目前預設）",
     "zh-Hans": "两者皆可（当前默认）"
   },
-  "뒤로": {
-    "en": "Move later",
-    "ja": "後ろへ",
-    "zh-Hant": "往後",
-    "zh-Hans": "靠后"
-  },
   "로그 파일:": {
     "en": "Log file:",
     "ja": "ログファイル:",
@@ -184,12 +178,6 @@ var table = {
     "ja": "外観",
     "zh-Hant": "外觀",
     "zh-Hans": "外观"
-  },
-  "밀리초 (1000 = 1초)": {
-    "en": "milliseconds (1000 = 1 second)",
-    "ja": "ミリ秒（1000 = 1秒）",
-    "zh-Hant": "毫秒（1000 = 1 秒）",
-    "zh-Hans": "毫秒（1000 = 1 秒）"
   },
   "바꾼 내용은 바로 설정 파일에 저장되고, 실행 중인 easime가 곧 다시 읽습니다. 다시 시작할 필요는 없습니다.": {
     "en": "Changes are saved to the settings file right away, and the running easime will read them again shortly. There is no need to restart.",
@@ -256,12 +244,6 @@ var table = {
     "ja": "不明な値のため、適用しませんでした。",
     "zh-Hant": "未知的值，因此未套用。",
     "zh-Hans": "未知的值，因此未应用。"
-  },
-  "앞으로": {
-    "en": "Move earlier",
-    "ja": "前へ",
-    "zh-Hant": "往前",
-    "zh-Hans": "靠前"
   },
   "언어": {
     "en": "Languages",
@@ -472,6 +454,30 @@ var table = {
     "ja": "ホームフォルダーが見つからないため、保存できませんでした。",
     "zh-Hant": "找不到家目錄（Home 資料夾），因此無法儲存。",
     "zh-Hans": "找不到主文件夹（Home），因此无法保存。"
+  },
+  "%1: 전환 순서 뒤로": {
+    "en": "Move %1 later in the switching order",
+    "ja": "%1 の切り替え順を後ろに移動",
+    "zh-Hant": "將 %1 的切換順序往後移",
+    "zh-Hans": "将 %1 的切换顺序往后移"
+  },
+  "%1: 전환 순서 앞으로": {
+    "en": "Move %1 earlier in the switching order",
+    "ja": "%1 の切り替え順を前に移動",
+    "zh-Hant": "將 %1 的切換順序往前移",
+    "zh-Hans": "将 %1 的切换顺序往前移"
+  },
+  "초": {
+    "en": "seconds",
+    "ja": "秒",
+    "zh-Hant": "秒",
+    "zh-Hans": "秒"
+  },
+  "표시 시간 (초)": {
+    "en": "Display duration (seconds)",
+    "ja": "表示時間（秒）",
+    "zh-Hant": "顯示時間（秒）",
+    "zh-Hans": "显示时间（秒）"
   }
 };
 // END TABLE

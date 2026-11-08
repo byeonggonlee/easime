@@ -188,6 +188,7 @@ Kirigami.ScrollablePage {
                 objectName: "dictionary-status"
                 Kirigami.FormData.label: Tr.t("일본어 사전:")
                 visible: EasimeSettings.dictionaryState !== "unknown"
+                    && EasimeSettings.languages.split(",").indexOf("japanese") >= 0
                 Layout.maximumWidth: Kirigami.Units.gridUnit * 28
                 wrapMode: Text.WordWrap
                 text: {

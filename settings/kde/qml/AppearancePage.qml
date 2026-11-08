@@ -37,10 +37,29 @@ Kirigami.ScrollablePage {
                 enabled: EasimeSettings.indicatorBox
 
                 QQC2.SpinBox {
+                    id: duration
+                    objectName: "indicator-duration"
+                    Accessible.name: Tr.t("표시 시간 (초)")
                     from: 100
                     to: 10000
                     stepSize: 100
                     editable: true
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                    validator: DoubleValidator {
+                        bottom: duration.from / 1000
+                        top: duration.to / 1000
+                        decimals: 3
+                        notation: DoubleValidator.StandardNotation
+                        locale: duration.locale.name
+                    }
+                    // Keep milliseconds on disk, but edit localized seconds.
+                    // Four significant digits preserve every allowed millisecond.
+                    textFromValue: function(value, locale) {
+                        return Number(value / 1000).toLocaleString(locale, "g", 4)
+                    }
+                    valueFromText: function(text, locale) {
+                        return Math.round(Number.fromLocaleString(locale, text) * 1000)
+                    }
                     value: EasimeSettings.indicatorMs
                     onValueModified: {
                         EasimeSettings.applyIndicatorMs(value)
@@ -48,7 +67,7 @@ Kirigami.ScrollablePage {
                     }
                 }
                 QQC2.Label {
-                    text: Tr.t("밀리초 (1000 = 1초)")
+                    text: Tr.t("초")
                 }
             }
 

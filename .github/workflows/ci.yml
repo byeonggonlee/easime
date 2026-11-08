@@ -194,6 +194,9 @@ jobs:
             check grep -q 'enabled = \["japanese"\]' "$cfg"
             check grep -q 'toggle_key = "hangul"' "$cfg"
             check grep -q 'indicator_box = false' "$cfg"
+            check grep -q 'UX-CHECK language-order=korean,japanese' "$log"
+            check grep -q 'UX-CHECK duration-seconds' "$log"
+            if grep -q 'UX-CHECK-FAILED' "$log"; then echo "FAILED ($lang): settings UX regression"; fail=1; fi
             # Every text has a translation.
             if grep -E 'MISSING-TRANSLATION|TRANSLATIONS-INCOMPLETE' "$log"; then
               echo "FAILED ($lang): untranslated text (above)"; fail=1

@@ -14,6 +14,15 @@ Kirigami.ScrollablePage {
         ? []
         : EasimeSettings.languages.split(",")
     readonly property var names: ({ korean: "한국어", japanese: "日本語" })
+    readonly property var orderedCodes: {
+        var codes = enabledCodes.slice()
+        for (var code of ["korean", "japanese"]) {
+            if (codes.indexOf(code) < 0) {
+                codes.push(code)
+            }
+        }
+        return codes
+    }
     readonly property string cycle: {
         var parts = [Tr.t("영어")]
         for (var i = 0; i < enabledCodes.length; ++i) {
@@ -45,50 +54,61 @@ Kirigami.ScrollablePage {
             text: Tr.t("아직 직접 고르지 않아 시스템 언어에 맞춰져 있습니다. 직접 바꾸면 그 선택이 저장됩니다.")
         }
 
-        Repeater {
-            model: [
-                { code: "korean", name: "한국어" },
-                { code: "japanese", name: "日本語" }
-            ]
+        // Keep delegates alive during reordering so keyboard focus and bindings
+        // survive. Explicit grid rows follow the saved cycle, unlike creation order.
+        GridLayout {
+            Layout.fillWidth: true
+            columns: 1
+            rowSpacing: Kirigami.Units.smallSpacing
+            Repeater {
+                model: [
+                    { code: "korean", name: "한국어" },
+                    { code: "japanese", name: "日本語" }
+                ]
 
-            delegate: RowLayout {
-                id: row
+                delegate: RowLayout {
+                    id: row
 
-                required property var modelData
-                readonly property int position: page.enabledCodes.indexOf(modelData.code)
-                readonly property bool on: position >= 0
+                    required property var modelData
+                    readonly property int position: page.enabledCodes.indexOf(modelData.code)
+                    readonly property bool on: position >= 0
 
-                Layout.fillWidth: true
-
-                QQC2.Switch {
-                    objectName: "switch-" + row.modelData.code
-                    text: row.modelData.name
-                    checked: row.on
-                    onToggled: {
-                        EasimeSettings.setLanguageEnabled(row.modelData.code, checked)
-                        checked = Qt.binding(() => row.on)
-                    }
-                }
-                Item {
                     Layout.fillWidth: true
-                }
-                QQC2.ToolButton {
-                    icon.name: "go-up"
-                    text: Tr.t("앞으로")
-                    display: QQC2.AbstractButton.IconOnly
-                    enabled: row.on && row.position > 0
-                    onClicked: EasimeSettings.moveLanguage(row.modelData.code, true)
-                    QQC2.ToolTip.visible: hovered
-                    QQC2.ToolTip.text: text
-                }
-                QQC2.ToolButton {
-                    icon.name: "go-down"
-                    text: Tr.t("뒤로")
-                    display: QQC2.AbstractButton.IconOnly
-                    enabled: row.on && row.position < page.enabledCodes.length - 1
-                    onClicked: EasimeSettings.moveLanguage(row.modelData.code, false)
-                    QQC2.ToolTip.visible: hovered
-                    QQC2.ToolTip.text: text
+                    Layout.row: page.orderedCodes.indexOf(modelData.code)
+                    Layout.column: 0
+
+                    QQC2.Switch {
+                        objectName: "switch-" + row.modelData.code
+                        text: row.modelData.name
+                        checked: row.on
+                        onToggled: {
+                            EasimeSettings.setLanguageEnabled(row.modelData.code, checked)
+                            checked = Qt.binding(() => row.on)
+                        }
+                    }
+                    Item {
+                        Layout.fillWidth: true
+                    }
+                    QQC2.ToolButton {
+                        objectName: "move-up-" + row.modelData.code
+                        icon.name: "go-up"
+                        text: Tr.t("%1: 전환 순서 앞으로").arg(row.modelData.name)
+                        display: QQC2.AbstractButton.IconOnly
+                        enabled: row.on && row.position > 0
+                        onClicked: EasimeSettings.moveLanguage(row.modelData.code, true)
+                        QQC2.ToolTip.visible: hovered || activeFocus
+                        QQC2.ToolTip.text: text
+                    }
+                    QQC2.ToolButton {
+                        objectName: "move-down-" + row.modelData.code
+                        icon.name: "go-down"
+                        text: Tr.t("%1: 전환 순서 뒤로").arg(row.modelData.name)
+                        display: QQC2.AbstractButton.IconOnly
+                        enabled: row.on && row.position < page.enabledCodes.length - 1
+                        onClicked: EasimeSettings.moveLanguage(row.modelData.code, false)
+                        QQC2.ToolTip.visible: hovered || activeFocus
+                        QQC2.ToolTip.text: text
+                    }
                 }
             }
         }

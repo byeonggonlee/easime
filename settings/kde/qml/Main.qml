@@ -79,6 +79,9 @@ Kirigami.ApplicationWindow {
     // The pictures that follow show the result.
     function interact(name, page) {
         if (name === "general") {
+            if (EasimeSettings.languages === "" && find(page, "dictionary-status").visible) {
+                console.error("UX-CHECK-FAILED dictionary notice shown for English-only typing")
+            }
             // Select easime as the input method like a person would: the button
             // asks, "OK" answers. Only where there is something to select.
             console.info("INTERACTION activation-before state=" + EasimeSettings.activationState)
@@ -89,6 +92,9 @@ Kirigami.ApplicationWindow {
                     + " undo=" + EasimeSettings.activationCanUndo + " result=" + EasimeSettings.resultKind)
             }
         } else if (name === "general-undo") {
+            if (EasimeSettings.languages === "japanese" && !find(page, "dictionary-status").visible) {
+                console.error("UX-CHECK-FAILED dictionary notice hidden for Japanese typing")
+            }
             // The end of the tour puts the selection back, also like a person would.
             if (EasimeSettings.activationCanUndo) {
                 page.openUndoDialog()
@@ -104,12 +110,47 @@ Kirigami.ApplicationWindow {
             var after = []
             describe(page, page, 0, after)
             console.info("STRUCTURE-AFTER languages\n" + after.join("\n"))
+        } else if (name === "languages-enable-korean") {
+            find(page, "switch-korean").click()
+        } else if (name === "languages-reorder") {
+            find(page, "move-up-korean").click()
+        } else if (name === "languages-verify") {
+            var korean = find(page, "switch-korean")
+            var japanese = find(page, "switch-japanese")
+            if (EasimeSettings.languages !== "korean,japanese"
+                    || korean.mapToItem(page, 0, 0).y >= japanese.mapToItem(page, 0, 0).y) {
+                console.error("UX-CHECK-FAILED language rows do not follow the saved order")
+            }
+            console.info("UX-CHECK language-order=" + EasimeSettings.languages)
+            korean.click()
         } else if (name === "shortcuts") {
             var hangul = find(page, "choice-hangul")
             hangul.click()
             console.info("INTERACTION toggle-key=" + EasimeSettings.toggleKey
                 + " hangul=" + hangul.checked + " both=" + find(page, "choice-both").checked)
         } else if (name === "appearance") {
+            var duration = find(page, "indicator-duration")
+            for (var localeName of ["en_US", "de_DE", "ko_KR"]) {
+                var locale = Qt.locale(localeName)
+                for (var ms of [100, 1000, 1250, 9999, 10000]) {
+                    var display = duration.textFromValue(ms, locale)
+                    if (duration.valueFromText(display, locale) !== ms
+                            || Number.fromLocaleString(locale, display) !== ms / 1000) {
+                        console.error("UX-CHECK-FAILED seconds round trip " + localeName + " " + ms)
+                    }
+                }
+            }
+            duration.increase()
+            duration.valueModified()
+            if (EasimeSettings.indicatorMs !== 1100) {
+                console.error("UX-CHECK-FAILED duration was not saved")
+            }
+            EasimeSettings.applyIndicatorMs(1250)
+            if (duration.value !== 1250) {
+                console.error("UX-CHECK-FAILED duration binding was lost after editing")
+            }
+            EasimeSettings.applyIndicatorMs(1000)
+            console.info("UX-CHECK duration-seconds")
             var box = find(page, "box")
             box.click()
             console.info("INTERACTION indicator-box=" + EasimeSettings.indicatorBox
@@ -196,6 +237,11 @@ Kirigami.ApplicationWindow {
             plan.push({ kind: "capture", name: name, describe: true })
             if (name === "general" || name === "languages" || name === "shortcuts" || name === "appearance") {
                 plan.push({ kind: "interact", name: name })
+                if (name === "languages") {
+                    plan.push({ kind: "interact", name: "languages-enable-korean" })
+                    plan.push({ kind: "interact", name: "languages-reorder" })
+                    plan.push({ kind: "interact", name: "languages-verify" })
+                }
                 plan.push({ kind: "capture", name: name + "-after", describe: false })
             }
         }
