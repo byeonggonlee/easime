@@ -32,7 +32,8 @@ $userProfiles = "HKCU:\Control Panel\International\User Profile"
 # easime is switched on under the user's first language, so no language is added
 # to their list: the entry the install must make, from the list as it is now.
 function User-Languages { @((Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages) }
-$firstLanguage = (User-Languages)[0]
+# @(...): a function hands back a one-language list as a plain string.
+$firstLanguage = @(User-Languages)[0]
 $firstLangId = "{0:X4}" -f ([System.Globalization.CultureInfo]::GetCultureInfo($firstLanguage).LCID -band 0xFFFF)
 $tip = "$($firstLangId):$clsid$($profile.Profile)"
 
