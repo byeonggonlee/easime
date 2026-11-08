@@ -137,6 +137,20 @@ impl Session {
         (leftover, language)
     }
 
+    /// Move to `language` (the user chose it, for example from the tray menu).
+    /// The text in progress is finished first and returned for committing.
+    /// `None` if nothing changed: it is already the active language, or it is
+    /// not one of the cycle.
+    #[must_use = "the text in progress has to be committed"]
+    pub fn select_language(&mut self, language: Language) -> Option<(String, Language)> {
+        if self.switcher.current() == language || !self.switcher.languages().contains(&language) {
+            return None;
+        }
+        let leftover = self.flush();
+        self.switcher.select(language);
+        Some((leftover, language))
+    }
+
     /// The candidate list could not be shown, and a selection the user cannot
     /// see must never be made: take the conversion back as if Escape had been
     /// pressed. The result replaces the output that carried the candidates.
@@ -311,6 +325,39 @@ mod tests {
         let (leftover, language) = session.switch_language();
         assert_eq!((leftover.as_str(), language), ("", Language::Korean));
         assert_eq!(press(&mut session, "g").unwrap().preedit.text, "ㅎ");
+    }
+
+    #[test]
+    fn a_chosen_language_finishes_the_text_and_becomes_active() {
+        let chosen = config(Some(vec![Language::Korean, Language::Japanese]));
+        let (mut session, _) = start(&chosen, &[]);
+        press(&mut session, "gk");
+        let (leftover, language) = session.select_language(Language::Japanese).unwrap();
+        assert_eq!((leftover.as_str(), language), ("하", Language::Japanese));
+        assert_eq!(session.language(), Language::Japanese);
+        // English is part of every cycle.
+        let (leftover, language) = session.select_language(Language::English).unwrap();
+        assert_eq!((leftover.as_str(), language), ("", Language::English));
+        assert!(session.engine().is_none());
+    }
+
+    #[test]
+    fn choosing_the_active_or_an_unavailable_language_changes_nothing() {
+        let (mut session, _) = start(&config(Some(vec![Language::Korean])), &[]);
+        press(&mut session, "gk");
+        assert_eq!(session.select_language(Language::Korean), None);
+        assert_eq!(
+            session.select_language(Language::Japanese),
+            None,
+            "not in the cycle"
+        );
+        assert_eq!(
+            session.select_language(Language::ChineseSimplified),
+            None,
+            "no engine"
+        );
+        // Nothing was finished by the refused choices.
+        assert_eq!(session.flush(), "하");
     }
 
     #[test]

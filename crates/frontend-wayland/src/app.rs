@@ -12,6 +12,7 @@
 //! language cycle, the switch key) is shared, in `ime-session`. See
 //! `docs/platforms.md` for what another OS has to provide instead.
 
+use crate::control;
 use crate::log;
 use crate::panel::Panel;
 use crate::protocol::client::zwp_input_method_context_v1::{self, ZwpInputMethodContextV1};
@@ -550,6 +551,12 @@ impl App {
     fn toggle_language(&mut self) {
         // Finishes the text in progress before switching.
         let (leftover, language) = self.session.switch_language();
+        self.language_changed(leftover, language);
+    }
+
+    /// The language changed because the user asked: say so, put the text that
+    /// was in progress into the application, and flash the box.
+    fn language_changed(&mut self, leftover: String, language: Language) {
         log!("language -> {language:?}");
         notify_language(&self.session);
         self.apply(EngineOutput {
@@ -557,6 +564,20 @@ impl App {
             ..EngineOutput::default()
         });
         self.show_indicator();
+    }
+
+    /// Things asked of us from another thread (the tray icon).
+    fn on_commands(&mut self) {
+        for command in control::take() {
+            match command {
+                control::Command::Select(language) => {
+                    if let Some((leftover, language)) = self.session.select_language(language) {
+                        self.language_changed(leftover, language);
+                    }
+                }
+                control::Command::Next => self.toggle_language(),
+            }
+        }
     }
 
     fn forward_key(&self, serial: u32, time: u32, key: u32, action: KeyAction) {
@@ -925,7 +946,7 @@ fn event_loop(
         if want_write {
             wayland_flags |= PollFlags::OUT;
         }
-        let (wayland_ready, timer_ready, indicator_ready, settings_ready) = {
+        let (wayland_ready, timer_ready, indicator_ready, settings_ready, commands_ready) = {
             let wayland_fd = guard.connection_fd();
             let timer_fd = app.timer.as_fd();
             let indicator_fd = app.indicator_timer.as_fd();
@@ -935,9 +956,15 @@ fn event_loop(
                 PollFd::new(&indicator_fd, PollFlags::IN),
             ];
             let settings_fd = app.settings.as_ref().map(|s| s.watcher.as_fd());
-            if let Some(fd) = &settings_fd {
+            let settings_at = settings_fd.as_ref().map(|fd| {
                 fds.push(PollFd::new(fd, PollFlags::IN));
-            }
+                fds.len() - 1
+            });
+            let commands_fd = control::wake_fd();
+            let commands_at = commands_fd.as_ref().map(|fd| {
+                fds.push(PollFd::new(fd, PollFlags::IN));
+                fds.len() - 1
+            });
             match poll(&mut fds, None) {
                 Ok(_) => {}
                 Err(Errno::INTR) => continue,
@@ -948,8 +975,8 @@ fn event_loop(
                 fds[0].revents().intersects(ready),
                 fds[1].revents().intersects(PollFlags::IN),
                 fds[2].revents().intersects(PollFlags::IN),
-                fds.get(3)
-                    .is_some_and(|f| f.revents().intersects(PollFlags::IN)),
+                settings_at.is_some_and(|i| fds[i].revents().intersects(PollFlags::IN)),
+                commands_at.is_some_and(|i| fds[i].revents().intersects(PollFlags::IN)),
             )
         };
 
@@ -970,6 +997,9 @@ fn event_loop(
         }
         if settings_ready {
             app.on_settings_event();
+        }
+        if commands_ready {
+            app.on_commands();
         }
     }
 }
