@@ -596,6 +596,7 @@ fn visible_window(class: PCWSTR) -> Option<RECT> {
 
 const VK_BACK: u16 = 0x08;
 const VK_HANJA: u16 = 0x19;
+const VK_RETURN: u16 = 0x0D;
 const VK_SPACE: u16 = 0x20;
 const VK_HANGUL: u16 = 0x15;
 
@@ -654,6 +655,12 @@ struct Underline {
 
 const COMPOSING: Underline = Underline {
     dotted: false,
+    bold: false,
+    converting: false,
+};
+
+const READING: Underline = Underline {
+    dotted: true,
     bold: false,
     converting: false,
 };
@@ -779,13 +786,21 @@ fn hangul_is_typed_through_tsf_into_a_document() {
         eprintln!("SKIPPED: frontend_tsf.dll is not built (cargo build -p frontend-tsf)");
         return;
     };
-    // The DLL logs every key, and where.
+    // The DLL logs every key, and where. Its settings and the user's dictionary
+    // are in a folder of this test (the service reads them from %APPDATA%).
+    let appdata = std::env::temp_dir().join(format!("easime-typing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&appdata);
+    std::fs::create_dir_all(&appdata).unwrap();
     // SAFETY: nothing else reads the environment at the same time in this test.
-    unsafe { std::env::set_var("EASIME_LOG_KEYS", "1") };
+    unsafe {
+        std::env::set_var("EASIME_LOG_KEYS", "1");
+        std::env::set_var("APPDATA", &appdata);
+    }
     registration::unregister().unwrap();
     assert!(regsvr32(&dll, false), "regsvr32 could not register the DLL");
     let result = std::panic::catch_unwind(type_through_tsf);
     regsvr32(&dll, true);
+    let _ = std::fs::remove_dir_all(&appdata);
     if let Err(panic) = result {
         std::panic::resume_unwind(panic);
     }
@@ -1051,6 +1066,44 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
         "a Hanja took the syllable's place: {text}"
     );
     assert_eq!(text.chars().count(), "한글gk하gk하 k한".chars().count());
+    assert!(candidate_box().is_none(), "the window goes away");
+    assert_eq!(compositions(context), 0);
+    assert!(underlines(context, client).is_empty());
+
+    // Japanese: the settings add it to the cycle while typing (the service
+    // looks at the file again two seconds after it last did) and the user's
+    // dictionary knows a word. The reading is dotted, Space converts with the
+    // candidate window, Enter takes the choice and is not typed.
+    let easime = PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("easime");
+    std::fs::create_dir_all(easime.join("dictionary")).unwrap();
+    std::fs::write(
+        easime.join("dictionary").join("words.tsv"),
+        "にほん\t日本\n",
+    )
+    .unwrap();
+    std::fs::write(
+        easime.join("config.toml"),
+        "[languages]\nenabled = [\"korean\", \"japanese\"]\n",
+    )
+    .unwrap();
+    pump(2200);
+    let before = app.text();
+    assert!(app.press(VK_HANGUL, 0x72, None), "Korean to Japanese");
+    app.letters("nihon");
+    assert_eq!(app.text(), format!("{before}にほn"));
+    assert_eq!(underlines(context, client), [("にほn".into(), READING)]);
+    assert!(app.press(VK_SPACE, 0x39, Some(" ")), "Space converts");
+    assert_eq!(app.text(), format!("{before}日本"));
+    assert!(
+        candidate_box().is_some(),
+        "with the candidates on the screen"
+    );
+    assert_eq!(underlines(context, client), [("日本".into(), CONVERTING)]);
+    assert!(
+        app.press(VK_RETURN, 0x1C, Some("\n")),
+        "Enter takes the choice"
+    );
+    assert_eq!(app.text(), format!("{before}日本"));
     assert!(candidate_box().is_none(), "the window goes away");
     assert_eq!(compositions(context), 0);
     assert!(underlines(context, client).is_empty());

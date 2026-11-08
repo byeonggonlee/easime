@@ -94,9 +94,9 @@ pub const HOME: Language = Language::Korean;
 
 /// The languages the text service can type today. A language is added here when
 /// its typing works end to end in a Windows application (composition shown,
-/// text committed), not when its engine exists: Hangul first; Japanese needs the
-/// candidate window too.
-pub const TYPEABLE: [Language; 1] = [Language::Korean];
+/// text committed, candidates chosen in the candidate window), not when its
+/// engine exists: Korean, then Japanese once the candidate window was there.
+pub const TYPEABLE: [Language; 2] = [Language::Korean, Language::Japanese];
 
 /// The settings the cycle runs with: the languages the user chose (or the
 /// system's, until they choose), only those in `typeable`, in their order.
@@ -154,6 +154,20 @@ mod tests {
             assert!(is_guid(guid), "{guid}");
             assert!(seen.insert(guid), "{guid} is used twice");
         }
+    }
+
+    #[test]
+    fn korean_and_japanese_can_be_typed() {
+        assert_eq!(TYPEABLE, [Language::Korean, Language::Japanese]);
+        assert_eq!(
+            cycle(
+                &chosen(Some(vec![Language::Japanese, Language::Korean])),
+                &[],
+                &TYPEABLE
+            ),
+            [Language::Japanese, Language::Korean],
+            "in the order the user chose"
+        );
     }
 
     #[test]
@@ -241,7 +255,11 @@ mod tests {
             "an explicit choice is kept"
         );
         assert_eq!(
-            cycle(&chosen(Some(vec![Language::Japanese])), &[], &TYPEABLE),
+            cycle(
+                &chosen(Some(vec![Language::ChineseSimplified])),
+                &[],
+                &TYPEABLE
+            ),
             [Language::Korean],
             "but a choice that cannot be typed yet does not leave the profile dead"
         );

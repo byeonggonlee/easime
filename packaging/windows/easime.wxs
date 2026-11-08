@@ -121,10 +121,10 @@
                Description="Adds the easime keyboard to your Windows input methods, under Korean (Korean is added to your languages if needed). One key switches between English and the languages you turn on in the easime settings.">
         <ComponentRef Id="KeyboardMarker" />
       </Feature>
-      <!-- On by default; about 36 MB. Typing Japanese on Windows needs the
-           candidate window, which is not there yet (docs/windows-plan-2026-11-08.md). -->
+      <!-- On by default; about 36 MB. Japanese is typed once it is turned on
+           in the settings (config.toml until the settings app exists). -->
       <Feature Id="JapaneseDictionary" Title="Japanese dictionary" Level="1" AllowAdvertise="no"
-               Description="Kanji conversion data for typing Japanese (the Mozc dictionary, about 36 MB). Japanese typing on Windows is not available yet.">
+               Description="Kanji conversion data for typing Japanese (the Mozc dictionary, about 36 MB). Without it, Japanese converts to kana only.">
         <ComponentRef Id="Dictionary" />
         <ComponentRef Id="DictionaryLicense" />
         <ComponentRef Id="DictionaryNotice" />

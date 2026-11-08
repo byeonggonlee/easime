@@ -27,7 +27,7 @@
 //! **Not here yet:** candidates for applications that draw them themselves
 //! (full-screen ones), and sharing the mode
 //! between programs.
-//! Only Korean can be typed ([`profiles::TYPEABLE`]). It has been tested against
+//! Korean and Japanese can be typed ([`profiles::TYPEABLE`]). It has been tested against
 //! a simulated TSF application in CI, not on a real PC. See `docs/platforms.md`,
 //! "Windows", and `docs/status.md`.
 
