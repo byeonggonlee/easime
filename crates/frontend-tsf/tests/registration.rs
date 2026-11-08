@@ -20,7 +20,11 @@ fn the_service_registers_is_listed_and_unregisters() {
         "the COM class is in the registry"
     );
     let wanted = profiles::REGISTERED;
-    assert_eq!(wanted.lang_id, 0xFFFF, "one profile for every language");
+    assert_eq!(
+        wanted.lang_id,
+        profiles::KOREAN,
+        "one profile, under Korean"
+    );
     assert!(
         registration::profile_registered(&wanted),
         "TSF has no registration of the profile"
@@ -28,7 +32,7 @@ fn the_service_registers_is_listed_and_unregisters() {
     // What the TSF interface itself says about it. Informational: whether it
     // lists a profile also depends on the languages the user has set up.
     eprintln!(
-        "TSF GetProfile for every language: {:?}",
+        "TSF GetProfile under Korean: {:?}",
         registration::profile_lookup(&wanted)
     );
     // Nothing an earlier build registered (one profile per language) is left.

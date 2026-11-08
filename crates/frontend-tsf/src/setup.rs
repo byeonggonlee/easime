@@ -26,7 +26,7 @@ pub fn run(step: Step, command_line: &str) -> bool {
     let ignored = command_line.trim().trim_matches('"').trim();
     if !ignored.is_empty() {
         log(&format!(
-            "setup: ignoring '{ignored}': easime has one profile for every language"
+            "setup: ignoring '{ignored}': easime has one profile, under Korean"
         ));
     }
     let outcome = match step {
