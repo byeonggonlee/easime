@@ -47,11 +47,11 @@ crates/
   frontend-wayland/  KWin input-method-v1 (Linux)
   frontend-xim/      XIM 서버 (XWayland, X11)
   frontend-ibus/     IBus 호환 D-Bus 서비스 (GNOME)
-  frontend-tsf/      Windows TSF DLL (키 입력 해석, 키 처리 파이프라인 `typing`(Windows API 없음), 프로필 하나의 등록과 순환 설정 `profiles`, TSF 등록, 한글을 TSF 조합으로 쓰는 텍스트 서비스, 전환 때 커서 옆에 뜨는 모드 상자 `indicator`와 그 위치 규칙 `placement`. 후보창·밑줄은 아직)
+  frontend-tsf/      Windows TSF DLL (키 입력 해석, 키 처리 파이프라인 `typing`(Windows API 없음), 프로필 하나의 등록과 순환 설정 `profiles`, TSF 등록, 한글을 TSF 조합으로 쓰는 텍스트 서비스, 전환 때 커서 옆에 뜨는 모드 상자 `indicator`와 그 위치 규칙 `placement`, 조합 밑줄 `marks`·`display`, 후보창 `candidate`(내용은 `page`)과 후보를 직접 그리는 앱에 넘기는 UI 요소 `element`, DLL 옆 사전 경로 `install`)
   easime/            Linux 데몬 바이너리 (Wayland + XIM + IBus 프론트엔드, 트레이, D-Bus)
 settings/
   kde/               Linux 설정 앱: Rust + cxx-qt + QML + Kirigami
-  windows/           Windows 설정 앱: WinUI 3
+  windows/           Windows 설정 앱: Rust + windows-reactor (WinUI 3)
   macos/             macOS 설정 앱: SwiftUI
 platform/
   macos/             InputMethodKit 앱 번들 껍데기
@@ -77,7 +77,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 - **Linux (KDE Plasma 6)**: Rust + cxx-qt (Qt 6) + QML + **Kirigami**
   - Plasma 시스템 설정과 똑같이 보이고 동작해야 한다 (Breeze, 다크/라이트, 강조색, 글꼴, HiDPI).
   - 단독 앱으로 시작하고, 나중에 KCM으로 옮길 수 있게 만든다. GNOME에서도 동작은 해야 한다.
-- **Windows**: **WinUI 3** (Windows 11 Fluent 디자인)
+- **Windows**: **WinUI 3** (Windows 11 Fluent 디자인). Rust + `windows-reactor`(windows-rs의 Rust용 WinUI 3 라이브러리)로 만들고, Linux 설정 앱의 Qt 없는 저장 로직을 같이 쓴다. Windows App Runtime은 MSI에 함께 넣는다(self-contained). 결정: [decisions.md](decisions.md) "설정 GUI"
 - **macOS**: **SwiftUI**
 - 공통 페이지 구성 (사이드바):
   - **일반**: 입력기 활성화·되돌리기(KDE), 지원·사전 상태, 설정 파일 위치·다시 읽기·초기화, (나중에) 자동 시작·트레이 아이콘 켜기/끄기
