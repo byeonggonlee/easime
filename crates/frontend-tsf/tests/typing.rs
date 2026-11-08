@@ -22,9 +22,11 @@ use windows::Win32::System::Com::{
     IDataObject,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{HKL, SetFocus};
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
+    CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT,
+    GUID_COMPARTMENT_KEYBOARD_DISABLED, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
     IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink,
     ITfCompartmentMgr, ITfContext, ITfContextComposition, ITfInputProcessorProfileMgr,
     ITfKeystrokeMgr, ITfThreadMgr, TEXT_STORE_LOCK_FLAGS, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
@@ -755,7 +757,7 @@ fn type_through_tsf() {
 
     // Run the scenario; whatever happens, show what TSF asked of the document.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        scenario(&application, &context);
+        scenario(&application, &context, client);
     }));
     eprintln!("---- what TSF did to the text store:");
     for call in &field.borrow().trace {
@@ -785,7 +787,7 @@ fn type_through_tsf() {
     }
 }
 
-fn scenario(app: &Application, context: &ITfContext) {
+fn scenario(app: &Application, context: &ITfContext, client: u32) {
     // Hangul: gksrmf is 한글, and only the last syllable is still being composed.
     app.letters("g");
     assert_eq!(app.text(), "ㅎ", "the first jamo shows at once");
@@ -841,4 +843,41 @@ fn scenario(app: &Application, context: &ITfContext) {
     assert!(app.press(VK_HANGUL, 0x72, None));
     assert_eq!(app.text(), "한글gk하");
     assert_eq!(compositions(context), 0);
+
+    // A password field: the application disables the keyboard for text
+    // services, and easime leaves every key to it, even in Korean mode.
+    assert!(app.press(VK_HANGUL, 0x72, None), "back to Korean");
+    set_compartment(context, client, &GUID_COMPARTMENT_KEYBOARD_DISABLED, 1);
+    app.letters("gk");
+    assert_eq!(app.text(), "한글gk하gk", "typed as the keys are");
+    assert_eq!(compositions(context), 0);
+    assert!(
+        !app.press(VK_HANGUL, 0x72, None),
+        "not even the Hangul key is taken there"
+    );
+    set_compartment(context, client, &GUID_COMPARTMENT_KEYBOARD_DISABLED, 0);
+    app.letters("gk");
+    assert_eq!(app.text(), "한글gk하gk하", "Korean again outside it");
+
+    // A place that takes no text (a web page itself): letters are shortcuts.
+    assert!(
+        !app.press(VK_SPACE, 0x39, Some(" ")),
+        "the syllable is finished and the space is the application's"
+    );
+    set_compartment(context, client, &GUID_COMPARTMENT_EMPTYCONTEXT, 1);
+    app.letters("k");
+    assert_eq!(app.text(), "한글gk하gk하 k");
+    set_compartment(context, client, &GUID_COMPARTMENT_EMPTYCONTEXT, 0);
+}
+
+/// What an application sets on its own context, as a number.
+fn set_compartment(context: &ITfContext, client: u32, which: &GUID, value: i32) {
+    let compartments: ITfCompartmentMgr = context.cast().unwrap();
+    // SAFETY: the manager is alive; the GUID and the value live for the calls.
+    unsafe {
+        let compartment = compartments.GetCompartment(which).unwrap();
+        compartment
+            .SetValue(client, &VARIANT::from(value))
+            .expect("setting a compartment of our own context");
+    }
 }

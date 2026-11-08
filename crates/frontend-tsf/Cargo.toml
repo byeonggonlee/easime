@@ -19,9 +19,6 @@ easime-config = { path = "../easime-config" }
 [dev-dependencies]
 engine-japanese = { path = "../engine-japanese" }
 
-# The typing test hosts a text store (an application's document) for TSF to edit.
-[target.'cfg(windows)'.dev-dependencies]
-windows = { version = "0.62", features = ["Win32_System_Variant"] }
 
 # The COM parts talk to Windows through Microsoft's own bindings.
 [target.'cfg(windows)'.dependencies]
@@ -35,6 +32,7 @@ windows = { version = "0.62", features = [
     "Win32_System_Ole",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
+    "Win32_System_Variant",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_TextServices",
     "Win32_UI_WindowsAndMessaging",

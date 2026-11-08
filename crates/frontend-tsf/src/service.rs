@@ -41,6 +41,7 @@ use windows::Win32::Foundation::{CLASS_E_NOAGGREGATION, E_INVALIDARG, E_POINTER,
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardState;
 use windows::Win32::UI::TextServices::{
+    GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED, ITfCompartmentMgr,
     ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext, ITfContextComposition,
     ITfContextView, ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl, ITfInsertAtSelection,
     ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource, ITfTextInputProcessor,
@@ -83,6 +84,32 @@ fn keyboard_state() -> KeyboardState {
     // zeroed: no modifier held.
     let _ = unsafe { GetKeyboardState(&mut state) };
     state
+}
+
+/// Whether the application asks text services to leave this context's keys
+/// alone: a password field (keyboard disabled) or a place that takes no text,
+/// such as a web page itself (an empty context, where letters are shortcuts).
+/// TSF leaves honoring this to the text service.
+fn keys_not_ours(context: Option<&ITfContext>) -> bool {
+    let Some(context) = context else {
+        return false;
+    };
+    let Ok(compartments) = context.cast::<ITfCompartmentMgr>() else {
+        return false;
+    };
+    [
+        GUID_COMPARTMENT_KEYBOARD_DISABLED,
+        GUID_COMPARTMENT_EMPTYCONTEXT,
+    ]
+    .iter()
+    .any(|which| {
+        // SAFETY: the compartment manager is alive; the GUID lives for the call.
+        unsafe { compartments.GetCompartment(which) }
+            .and_then(|compartment| unsafe { compartment.GetValue() })
+            .ok()
+            .and_then(|value| i32::try_from(&value).ok())
+            .is_some_and(|value| value != 0)
+    })
 }
 
 /// What TSF gave the service when it was activated.
@@ -223,9 +250,10 @@ impl TextService_Impl {
         self.activated.borrow().as_ref().map(|a| a.client_id)
     }
 
-    /// Make `outcome`'s edit in the document of `context`. Failures go to the
-    /// log: the key has been dealt with either way.
-    fn perform(&self, context: &ITfContext, outcome: &Outcome) {
+    /// Make `outcome`'s edit in the document of `context`. Returns false if
+    /// the document could not be edited (the failure is in the log).
+    fn perform(&self, context: &ITfContext, outcome: &Outcome) -> bool {
+        let mut edited = true;
         if let Some(edit) = &outcome.edit {
             let composing = self.composing.borrow().is_some();
             let steps = plan(composing, edit);
@@ -233,6 +261,7 @@ impl TextService_Impl {
                 && let Err(e) = self.run(context, steps, true)
             {
                 diag::log(&format!("could not edit the document: {e}"));
+                edited = false;
             }
         }
         // After the edit, so the box sits next to where the cursor is now.
@@ -240,6 +269,7 @@ impl TextService_Impl {
             diag::log(&format!("language -> {language:?}"));
             self.show_indicator(context, language);
         }
+        edited
     }
 
     /// Say which language is on, next to the text cursor, if the user wants it.
@@ -447,11 +477,14 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnTestKeyDown(
         &self,
-        _context: Ref<ITfContext>,
+        context: Ref<ITfContext>,
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Result<BOOL> {
         guarded("OnTestKeyDown", Ok(false.into()), || {
+            if keys_not_ours(context.as_ref()) {
+                return Ok(false.into());
+            }
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
             let wanted = match self.typist.borrow().as_ref() {
                 Some(typist) => typist.test_key_down(key, &keyboard_state()),
@@ -464,11 +497,14 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnTestKeyUp(
         &self,
-        _context: Ref<ITfContext>,
+        context: Ref<ITfContext>,
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Result<BOOL> {
         guarded("OnTestKeyUp", Ok(false.into()), || {
+            if keys_not_ours(context.as_ref()) {
+                return Ok(false.into());
+            }
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
             let wanted = match self.typist.borrow().as_ref() {
                 Some(typist) => typist.test_key_up(key),
@@ -483,6 +519,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             let Some(context) = context.as_ref() else {
                 return Ok(false.into());
             };
+            if keys_not_ours(Some(context)) {
+                return Ok(false.into());
+            }
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
             // First the other field, then new settings (which may finish the
             // composition of this one).
@@ -493,7 +532,15 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 None => return Ok(false.into()),
             };
             diag::log_key(|| format!("key down {key:?} -> {outcome:?}"));
-            self.perform(context, &outcome);
+            if !self.perform(context, &outcome) && outcome.eaten {
+                // The document did not take the text (it may refuse
+                // compositions): give the key to the application rather than
+                // lose it, and start afresh.
+                if let Some(typist) = self.typist.borrow_mut().as_mut() {
+                    typist.forget();
+                }
+                return Ok(false.into());
+            }
             Ok(outcome.eaten.into())
         })
     }
@@ -503,6 +550,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             let Some(context) = context.as_ref() else {
                 return Ok(false.into());
             };
+            if keys_not_ours(Some(context)) {
+                return Ok(false.into());
+            }
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
             self.leave_other_context(context);
             let outcome = match self.typist.borrow_mut().as_mut() {
