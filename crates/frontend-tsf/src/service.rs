@@ -72,7 +72,8 @@ impl TextService_Impl {
         let sink: ITfKeyEventSink = self.to_interface();
         let keystrokes: ITfKeystrokeMgr = thread_manager.cast()?;
         // SAFETY: both interfaces are alive for the call.
-        unsafe { keystrokes.AdviseKeyEventSink(client_id, &sink, true)? };
+        unsafe { keystrokes.AdviseKeyEventSink(client_id, &sink, true) }
+            .map_err(|e| windows::core::Error::new(e.code(), format!("AdviseKeyEventSink: {e}")))?;
         *self.activated.borrow_mut() = Some(Activated {
             thread_manager: thread_manager.clone(),
             client_id,

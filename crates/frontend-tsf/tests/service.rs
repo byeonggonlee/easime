@@ -32,6 +32,8 @@ fn the_service_activates_with_the_real_thread_manager_and_goes_away() {
     // SAFETY: Windows' own in-process COM class.
     let thread_manager: ITfThreadMgr =
         unsafe { CoCreateInstance(&CLSID_TF_ThreadMgr, None, CLSCTX_INPROC_SERVER) }.unwrap();
+    // The thread manager has to be active, as it is inside an application.
+    let application_id = unsafe { thread_manager.Activate() }.expect("thread manager activation");
     let client_id = unsafe {
         thread_manager
             .cast::<ITfClientId>()
@@ -39,6 +41,7 @@ fn the_service_activates_with_the_real_thread_manager_and_goes_away() {
             .GetClientId(&clsid)
     }
     .expect("the thread manager gives the service a client id");
+    eprintln!("application id {application_id}, easime's client id {client_id}");
     unsafe { tip.ActivateEx(&thread_manager, client_id, 0) }.expect("activation");
 
     // TSF now has its key event sink as the foreground one.
@@ -59,6 +62,7 @@ fn the_service_activates_with_the_real_thread_manager_and_goes_away() {
 
     // Everything released: the DLL could be unloaded.
     drop(keystrokes);
+    unsafe { thread_manager.Deactivate() }.expect("thread manager deactivation");
     drop(thread_manager);
     drop(tip);
     drop(factory);
