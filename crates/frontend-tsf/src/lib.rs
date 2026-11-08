@@ -21,7 +21,11 @@
 //! The composition is underlined: which part is which is the portable rule in
 //! [`marks`], and the Windows side is [`display`].
 //!
-//! **Not here yet:** a candidate window (so no conversion), and sharing the mode
+//! A conversion shows its candidates in a window next to the cursor
+//! ([`candidate`], what it shows is the portable [`page`]).
+//!
+//! **Not here yet:** candidates for applications that draw them themselves
+//! (full-screen ones), and sharing the mode
 //! between programs.
 //! Only Korean can be typed ([`profiles::TYPEABLE`]). It has been tested against
 //! a simulated TSF application in CI, not on a real PC. See `docs/platforms.md`,
@@ -35,6 +39,8 @@ pub mod placement;
 pub mod profiles;
 pub mod typing;
 
+#[cfg(windows)]
+pub mod candidate;
 #[cfg(windows)]
 pub mod diag;
 #[cfg(windows)]

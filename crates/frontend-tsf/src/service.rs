@@ -14,7 +14,8 @@
 //! ([`crate::display`]); the service is their provider.
 //!
 //! **What it does not do yet:** show a persistent taskbar/language-bar
-//! indicator, and candidates for conversion. See `docs/platforms.md`.
+//! indicator, and candidates for applications that draw them themselves. See
+//! `docs/platforms.md`.
 //!
 //! One service lives per thread of an application, so each has its own typist,
 //! and its mode (English or Korean) is its own. Everything here runs on that
@@ -24,12 +25,14 @@
 //! A panic must never take the application down with it: every entry point
 //! catches it, writes it to the log and says "not eaten".
 
+use crate::candidate::{self, CandidateWindow};
 use crate::diag;
 use crate::display;
 use crate::indicator::{self, Indicator};
 use crate::install;
 use crate::keys::{KeyInfo, KeyboardState};
 use crate::marks::Mark;
+use crate::page;
 use crate::placement::Rect;
 use crate::profiles;
 use crate::typing::{Outcome, Step, Typist, plan};
@@ -166,6 +169,8 @@ pub struct TextService {
     reloader: RefCell<Option<ConfigReloader>>,
     /// The box that says which language is on, and whether and how long to show it.
     indicator: RefCell<Indicator>,
+    /// The candidates while a conversion is going on.
+    candidates: RefCell<CandidateWindow>,
     appearance: RefCell<Appearance>,
     /// Whether the log already says that no cursor position could be found.
     told_no_caret: Cell<bool>,
@@ -184,6 +189,7 @@ impl TextService {
             typist: RefCell::new(None),
             reloader: RefCell::new(None),
             indicator: RefCell::new(Indicator::default()),
+            candidates: RefCell::new(CandidateWindow::default()),
             appearance: RefCell::new(Appearance::default()),
             told_no_caret: Cell::new(false),
             composing: Rc::new(RefCell::new(None)),
@@ -239,11 +245,11 @@ fn make_typist() -> (Typist, Option<ConfigReloader>, Appearance) {
     );
     let session = Session::new(&cycle, dictionary, Box::new(diag::log));
     let reloader = easime_config::config_path().map(|path| ConfigReloader::new(path, CONFIG_POLL));
-    (
-        Typist::new(session, config.shortcuts.toggle_key),
-        reloader,
-        config.appearance,
-    )
+    let mut typist = Typist::new(session, config.shortcuts.toggle_key);
+    // The service shows candidates itself (`candidate`); a conversion whose
+    // window cannot be shown is taken back (`show_candidates`).
+    typist.set_candidate_window(true);
+    (typist, reloader, config.appearance)
 }
 
 impl TextService_Impl {
@@ -341,6 +347,41 @@ impl TextService_Impl {
     }
 
     /// Where the text cursor is on the screen, as the application's document says.
+    /// Show the candidates the last key left, or hide the window. If it cannot
+    /// be shown, the conversion is taken back: a candidate the user did not
+    /// see is never chosen.
+    fn show_candidates(&self, context: &ITfContext) {
+        let wanted = self.typist.borrow().as_ref().and_then(|typist| {
+            let list = typist.candidates()?;
+            Some((page::page(list, typist.shown())?, typist.language()))
+        });
+        let Some((page, language)) = wanted else {
+            self.candidates.borrow_mut().hide();
+            return;
+        };
+        let caret = self.caret_of(context).or_else(candidate::fallback_anchor);
+        let shown =
+            caret.and_then(|caret| self.candidates.borrow_mut().show(&page, language, caret));
+        if shown.is_some() {
+            diag::log_key(|| format!("candidates at {shown:?}"));
+            return;
+        }
+        diag::log("candidates could not be shown; the conversion is taken back");
+        let edit = self
+            .typist
+            .borrow_mut()
+            .as_mut()
+            .and_then(Typist::candidates_not_shown);
+        if let Some(edit) = edit {
+            let composing = self.composing.borrow().is_some();
+            let parts = self.parts(&edit.marks);
+            if let Err(e) = self.run(context, plan(composing, &edit), parts, true) {
+                diag::log(&format!("could not edit the document: {e}"));
+            }
+        }
+        self.candidates.borrow_mut().hide();
+    }
+
     fn caret_of(&self, context: &ITfContext) -> Option<Rect> {
         let client_id = self.client_id()?;
         let found = Rc::new(Cell::new(None));
@@ -454,6 +495,7 @@ impl TextService_Impl {
         if let Some(typist) = self.typist.borrow_mut().as_mut() {
             typist.forget();
         }
+        self.candidates.borrow_mut().hide();
     }
 
     /// A composition left in another text field (the focus moved without
@@ -512,6 +554,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
         guarded("Deactivate", Ok(()), || {
             self.end_composition();
             self.indicator.borrow_mut().destroy();
+            self.candidates.borrow_mut().destroy();
             // Every step is tried even if one fails: a sink left behind would
             // keep this service alive and keep being called.
             let taken = self.activated.borrow_mut().take();
@@ -613,8 +656,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 if let Some(typist) = self.typist.borrow_mut().as_mut() {
                     typist.forget();
                 }
+                self.candidates.borrow_mut().hide();
                 return Ok(false.into());
             }
+            self.show_candidates(context);
             Ok(outcome.eaten.into())
         })
     }
@@ -635,6 +680,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             };
             diag::log_key(|| format!("key up {key:?} -> {outcome:?}"));
             self.perform(context, &outcome);
+            // A switch on the release finishes a conversion too.
+            self.show_candidates(context);
             Ok(outcome.eaten.into())
         })
     }
@@ -663,6 +710,9 @@ impl ITfCompositionSink_Impl for TextService_Impl {
                 && let Some(typist) = typist.as_mut()
             {
                 typist.forget();
+            }
+            if let Ok(mut candidates) = self.candidates.try_borrow_mut() {
+                candidates.hide();
             }
             Ok(())
         })

@@ -64,7 +64,7 @@ thread_local! {
 }
 
 /// A font that has the glyph of the language, by the names Windows ships with.
-fn face_name(language: Language) -> PCWSTR {
+pub(crate) fn face_name(language: Language) -> PCWSTR {
     match language {
         Language::Korean => w!("Malgun Gothic"),
         Language::Japanese => w!("Yu Gothic UI"),
@@ -242,7 +242,7 @@ impl Drop for Indicator {
 }
 
 /// This DLL's own module handle (a handle found from an address in it).
-fn own_module() -> Option<HMODULE> {
+pub(crate) fn own_module() -> Option<HMODULE> {
     let mut module = HMODULE::default();
     // SAFETY: an address inside this DLL; the reference count is left alone.
     unsafe {
@@ -295,7 +295,7 @@ fn create_window() -> Option<HWND> {
 }
 
 /// The screen's scale in dots per inch (96 is 100%), as this process sees it.
-fn dpi() -> i32 {
+pub(crate) fn dpi() -> i32 {
     // SAFETY: the screen's device context, released at once.
     unsafe {
         let dc = GetDC(None);
@@ -306,7 +306,7 @@ fn dpi() -> i32 {
 }
 
 /// The usable area of the monitor `caret` is on.
-fn work_area_of(caret: Rect) -> Rect {
+pub(crate) fn work_area_of(caret: Rect) -> Rect {
     // SAFETY: plain numbers and a struct we size ourselves.
     unsafe {
         let monitor = MonitorFromPoint(

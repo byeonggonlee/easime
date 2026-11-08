@@ -572,9 +572,19 @@ const CURSOR: RECT = RECT {
 
 /// The mode box, if it is on the screen: its rectangle.
 fn mode_box() -> Option<RECT> {
+    visible_window(w!("EasimeIndicator"))
+}
+
+/// The candidate window, if it is on the screen: its rectangle.
+fn candidate_box() -> Option<RECT> {
+    visible_window(w!("EasimeCandidates"))
+}
+
+/// The rectangle of the window of class `class`, if it is on the screen.
+fn visible_window(class: PCWSTR) -> Option<RECT> {
     // SAFETY: looking a window of our own class up by name.
     unsafe {
-        let window = FindWindowW(w!("EasimeIndicator"), None).ok()?;
+        let window = FindWindowW(class, None).ok()?;
         if !IsWindowVisible(window).as_bool() {
             return None;
         }
@@ -585,6 +595,7 @@ fn mode_box() -> Option<RECT> {
 }
 
 const VK_BACK: u16 = 0x08;
+const VK_HANJA: u16 = 0x19;
 const VK_SPACE: u16 = 0x20;
 const VK_HANGUL: u16 = 0x15;
 
@@ -645,6 +656,12 @@ const COMPOSING: Underline = Underline {
     dotted: false,
     bold: false,
     converting: false,
+};
+
+const CONVERTING: Underline = Underline {
+    dotted: false,
+    bold: true,
+    converting: true,
 };
 
 /// The display attributes over the document, read the way an application
@@ -1013,6 +1030,34 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     app.letters("k");
     assert_eq!(app.text(), "한글gk하gk하 k");
     set_compartment(context, client, &GUID_COMPARTMENT_EMPTYCONTEXT, 0);
+
+    // Hanja: the Hanja key opens the candidate window just under the cursor,
+    // the syllable is marked as being converted, and 1 chooses the first one.
+    app.letters("gks");
+    assert_eq!(app.text(), "한글gk하gk하 k한");
+    assert!(
+        candidate_box().is_none(),
+        "no candidates before the Hanja key"
+    );
+    assert!(app.press(VK_HANJA, 0x71, None), "the Hanja key is taken");
+    let shown = candidate_box().expect("the candidate window is on the screen");
+    assert_eq!(shown.left, CURSOR.left, "starts at the cursor");
+    assert_eq!(shown.top, CURSOR.bottom + 2, "just below the cursor");
+    assert_eq!(underlines(context, client), [("한".into(), CONVERTING)]);
+    assert!(
+        app.press(0x31, 0x02, Some("1")),
+        "1 chooses, it is not typed"
+    );
+    let text = app.text();
+    let chosen = text.chars().last().unwrap();
+    assert!(
+        ('\u{4E00}'..='\u{9FFF}').contains(&chosen),
+        "a Hanja took the syllable's place: {text}"
+    );
+    assert_eq!(text.chars().count(), "한글gk하gk하 k한".chars().count());
+    assert!(candidate_box().is_none(), "the window goes away");
+    assert_eq!(compositions(context), 0);
+    assert!(underlines(context, client).is_empty());
 }
 
 /// What an application sets on its own context, as a number.
