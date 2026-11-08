@@ -7,6 +7,11 @@
 //!
 //! The DLL is built by `cargo build -p frontend-tsf` (the CI does that first and
 //! sets `EASIME_REQUIRE_DLL`); without it this test says so and skips.
+//!
+//! With `EASIME_TEST_EVERY_LANGUAGE=1` the test profile is registered for every
+//! language (`RegisterProfile` with `0xFFFF`) instead of under US English: the
+//! experiment of step 2 of docs/windows-plan-2026-11-08.md, whether TSF then
+//! activates the service and keys reach it.
 #![cfg(windows)]
 
 use frontend_tsf::{profiles, registration};
@@ -27,12 +32,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{HKL, SetFocus};
 use windows::Win32::UI::TextServices::{
     CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT,
     GUID_COMPARTMENT_KEYBOARD_DISABLED, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
-    IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink,
-    ITfCompartmentMgr, ITfContext, ITfContextComposition, ITfInputProcessorProfileMgr,
-    ITfKeystrokeMgr, ITfThreadMgr, TEXT_STORE_LOCK_FLAGS, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
-    TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END,
-    TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC,
-    TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS, TS_TEXTCHANGE,
+    GUID_TFCAT_TIP_KEYBOARD, IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl,
+    ITextStoreACPSink, ITfCompartmentMgr, ITfContext, ITfContextComposition,
+    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfThreadMgr, TEXT_STORE_LOCK_FLAGS,
+    TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE,
+    TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS,
+    TS_LF_SYNC, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE,
+    TS_STATUS, TS_TEXTCHANGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, FindWindowW, GetWindowRect, IsWindowVisible,
@@ -471,6 +477,17 @@ impl ITextStoreACP_Impl for TextStore_Impl {
 /// its default language cycle starts in Korean.
 const TEST_PROFILE: &str = "{3C7E2D91-5B4A-4F08-A6D3-9E1B7C5A2F64}";
 const ENGLISH_US: u16 = 0x0409;
+/// "Every language" as `RegisterProfile` takes it (see the module comment).
+const EVERY_LANGUAGE: u16 = 0xFFFF;
+
+/// The language the test profile is registered under.
+fn profile_language() -> u16 {
+    if std::env::var_os("EASIME_TEST_EVERY_LANGUAGE").is_some() {
+        EVERY_LANGUAGE
+    } else {
+        ENGLISH_US
+    }
+}
 
 /// Removes the test profile again, whatever happens.
 struct TestProfile(ITfInputProcessorProfileMgr);
@@ -480,8 +497,12 @@ impl Drop for TestProfile {
         let clsid = registration::guid(profiles::CLSID);
         // SAFETY: GUID pointers live for the call; an error means "not there".
         let _ = unsafe {
-            self.0
-                .UnregisterProfile(&clsid, ENGLISH_US, &registration::guid(TEST_PROFILE), 0)
+            self.0.UnregisterProfile(
+                &clsid,
+                profile_language(),
+                &registration::guid(TEST_PROFILE),
+                0,
+            )
         };
     }
 }
@@ -705,7 +726,7 @@ fn type_through_tsf() {
     unsafe {
         manager.RegisterProfile(
             &clsid,
-            ENGLISH_US,
+            profile_language(),
             &test_profile,
             &name,
             &[],
@@ -718,17 +739,40 @@ fn type_through_tsf() {
     }
     .expect("registering the test profile");
     let _cleanup = TestProfile(manager.clone());
-    unsafe {
-        manager.ActivateProfile(
-            TF_PROFILETYPE_INPUTPROCESSOR,
-            ENGLISH_US,
-            &clsid,
-            &test_profile,
-            HKL::default(),
-            TF_IPPMF_FORPROCESS | TF_IPPMF_ENABLEPROFILE | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
-        )
-    }
-    .unwrap_or_else(|e| panic!("TSF could not activate easime's service: {e}"));
+    // The user's language first; a profile for every language is listed with
+    // the language 0, so that is tried too.
+    let activated = [ENGLISH_US, 0x0000, EVERY_LANGUAGE]
+        .into_iter()
+        .find_map(|langid| {
+            // SAFETY: the GUID pointers live for the call.
+            let result = unsafe {
+                manager.ActivateProfile(
+                    TF_PROFILETYPE_INPUTPROCESSOR,
+                    langid,
+                    &clsid,
+                    &test_profile,
+                    HKL::default(),
+                    TF_IPPMF_FORPROCESS
+                        | TF_IPPMF_ENABLEPROFILE
+                        | TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
+                )
+            };
+            eprintln!("ActivateProfile under 0x{langid:04X}: {result:?}");
+            result.ok().map(|()| langid)
+        });
+    assert!(
+        activated.is_some(),
+        "TSF could not activate easime's service (profile language 0x{:04X})",
+        profile_language()
+    );
+    let mut active = TF_INPUTPROCESSORPROFILE::default();
+    // SAFETY: the GUID pointer and `active` live for the call.
+    let found = unsafe { manager.GetActiveProfile(&GUID_TFCAT_TIP_KEYBOARD, &mut active) };
+    eprintln!(
+        "active keyboard profile: {found:?}, language 0x{:04X}, ours: {}",
+        active.langid,
+        active.clsid == clsid && active.guidProfile == test_profile
+    );
     let keystrokes: ITfKeystrokeMgr = thread_manager.cast().unwrap();
     pump(100);
     // What TSF says about the setup: to read when no key arrives.

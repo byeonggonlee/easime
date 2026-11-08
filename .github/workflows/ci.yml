@@ -59,6 +59,17 @@ jobs:
         run: |
           cmd /c ver
           cargo test -p frontend-tsf --test languages -- --ignored --nocapture
+      # The same experiment, one step on: does TSF activate a profile registered
+      # for every language, and does the simulated application's typing still
+      # work? A "no" is a result, not a broken build, so it does not fail the job;
+      # the outcome is read from this step's log.
+      - name: "Experiment: typing through a profile for every language"
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        env:
+          EASIME_REQUIRE_DLL: "1"
+          EASIME_TEST_EVERY_LANGUAGE: "1"
+        run: cargo test -p frontend-tsf --test typing -- --nocapture
 
   # The Linux packages (one .rpm, one .deb) are built, installed into a clean
   # Fedora or Debian, and started; each CI run keeps them for download
