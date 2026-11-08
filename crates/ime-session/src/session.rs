@@ -24,6 +24,8 @@ pub struct Session {
     /// The languages that match the system language, read once: it cannot
     /// change while the process runs.
     system: Vec<Language>,
+    /// `Some` for a session that serves one language whatever the settings say.
+    only: Option<Language>,
     log: LogFn,
 }
 
@@ -48,8 +50,27 @@ impl Session {
             switcher,
             dictionary,
             system: system.to_vec(),
+            only: None,
             log,
         }
+    }
+
+    /// A session for one language only, whatever the settings' language list
+    /// says (it does not change when the settings do). The switch key then
+    /// moves between English and that language. This is what a Windows
+    /// profile is: the OS picks the language, easime switches the mode inside
+    /// it (docs/platforms.md). A language without an engine leaves only
+    /// English.
+    pub fn for_language(
+        config: &Config,
+        language: Language,
+        dictionary: JapaneseDictionary,
+        log: LogFn,
+    ) -> Self {
+        let mut session =
+            Self::with_system_languages(&only(config, language), dictionary, log, &[]);
+        session.only = Some(language);
+        session
     }
 
     /// Switch to new settings while running. Text in progress is committed
@@ -59,8 +80,12 @@ impl Session {
     pub fn apply_config(&mut self, config: &Config) -> String {
         let leftover = self.flush();
         let previous = self.switcher.current();
+        let config = match self.only {
+            Some(language) => only(config, language),
+            None => config.clone(),
+        };
         let (engines, mut switcher) =
-            build_engines(config, &mut self.dictionary, &*self.log, &self.system);
+            build_engines(&config, &mut self.dictionary, &*self.log, &self.system);
         switcher.select(previous);
         self.engines = engines;
         self.switcher = switcher;
@@ -118,6 +143,13 @@ impl Session {
     pub fn cancel_conversion(&mut self) -> Option<EngineOutput> {
         self.process_key(KeyEvent::new(Key::Escape))
     }
+}
+
+/// `config` with `language` as the only language.
+fn only(config: &Config, language: Language) -> Config {
+    let mut config = config.clone();
+    config.languages.enabled = Some(vec![language]);
+    config
 }
 
 /// Engines for the enabled languages and the cycle over them.
@@ -326,6 +358,56 @@ mod tests {
         let taken_back = session.cancel_conversion().unwrap();
         assert!(taken_back.candidates.is_none());
         assert_eq!(taken_back.preedit.text, "한", "the Hangul is still there");
+    }
+
+    fn start_only(language: Language, config: &Config) -> Session {
+        Session::for_language(config, language, dictionary(), Box::new(|_| {}))
+    }
+
+    #[test]
+    fn a_profile_session_serves_one_language_and_english() {
+        let both = config(Some(vec![Language::Japanese, Language::Korean]));
+        let mut session = start_only(Language::Korean, &both);
+        assert_eq!(session.cycle(), [Language::English, Language::Korean]);
+        assert_eq!(session.language(), Language::Korean);
+        assert_eq!(press(&mut session, "gk").unwrap().preedit.text, "하");
+        // The switch key goes to English and back, never to Japanese.
+        let (leftover, language) = session.switch_language();
+        assert_eq!((leftover.as_str(), language), ("하", Language::English));
+        assert_eq!(session.switch_language().1, Language::Korean);
+    }
+
+    #[test]
+    fn a_profile_session_ignores_the_languages_in_the_settings() {
+        let mut session = start_only(Language::Japanese, &config(Some(vec![Language::Korean])));
+        assert_eq!(session.cycle(), [Language::English, Language::Japanese]);
+        // New settings with another list change nothing about the language...
+        let leftover = session.apply_config(&config(Some(vec![Language::Korean])));
+        assert_eq!(leftover, "");
+        assert_eq!(session.cycle(), [Language::English, Language::Japanese]);
+        assert_eq!(session.language(), Language::Japanese);
+        // ...and the system language does not matter either.
+        let followed = start_only(Language::Korean, &config(None));
+        assert_eq!(followed.cycle(), [Language::English, Language::Korean]);
+    }
+
+    #[test]
+    fn a_profile_session_still_follows_the_other_settings() {
+        let mut syllable = Config::default();
+        syllable.korean.backspace = easime_config::BackspaceUnit::Syllable;
+        let mut session = start_only(Language::Korean, &Config::default());
+        press(&mut session, "gks");
+        let _ = session.apply_config(&syllable);
+        press(&mut session, "gks");
+        let output = session.process_key(KeyEvent::new(Key::Backspace)).unwrap();
+        assert_eq!(output.preedit.text, "", "a syllable at a time now");
+    }
+
+    #[test]
+    fn a_profile_for_a_language_without_an_engine_is_english_only() {
+        let session = start_only(Language::ChineseSimplified, &Config::default());
+        assert_eq!(session.cycle(), [Language::English]);
+        assert_eq!(session.language(), Language::English);
     }
 
     #[test]

@@ -10,3 +10,4 @@ authors.workspace = true
 [dependencies]
 ime-core = { path = "../ime-core" }
 ime-session = { path = "../ime-session" }
+easime-config = { path = "../easime-config" }

@@ -428,6 +428,7 @@ dependencies = [
 name = "frontend-tsf"
 version = "0.1.0"
 dependencies = [
+ "easime-config",
  "ime-core",
  "ime-session",
 ]
