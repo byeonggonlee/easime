@@ -42,7 +42,14 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy ${{ env.PORTABLE }} --all-targets -- -D warnings
+      # The Windows text service is a DLL; its test registers the built DLL
+      # with regsvr32 and has COM load it, so build it first and insist on it.
+      - name: Build the Windows text service DLL
+        if: runner.os == 'Windows'
+        run: cargo build -p frontend-tsf
       - run: cargo test ${{ env.PORTABLE }}
+        env:
+          EASIME_REQUIRE_DLL: ${{ runner.os == 'Windows' && '1' || '' }}
 
   # The Linux packages (one .rpm, one .deb) are built, installed into a clean
   # Fedora or Debian, and started; each CI run keeps them for download

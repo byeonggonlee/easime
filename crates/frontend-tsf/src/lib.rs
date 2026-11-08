@@ -15,6 +15,8 @@ pub mod profiles;
 
 #[cfg(windows)]
 pub mod registration;
+#[cfg(windows)]
+pub mod service;
 
 /// The DLL's entry points. Windows loads the DLL, asks it to register itself
 /// (`regsvr32`, the installer) and later to unregister. The text service
@@ -26,10 +28,10 @@ mod exports {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicIsize, Ordering};
     use windows::Win32::Foundation::{
-        CLASS_E_CLASSNOTAVAILABLE, E_FAIL, HINSTANCE, HMODULE, S_OK, TRUE,
+        CLASS_E_CLASSNOTAVAILABLE, E_FAIL, E_POINTER, HINSTANCE, HMODULE, S_FALSE, S_OK, TRUE,
     };
     use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
-    use windows::core::{BOOL, GUID, HRESULT};
+    use windows::core::{BOOL, GUID, HRESULT, Interface};
 
     /// This DLL's module handle, saved when it is loaded.
     static MODULE: AtomicIsize = AtomicIsize::new(0);
@@ -71,23 +73,33 @@ mod exports {
         }
     }
 
-    /// Nothing is ever in use yet, so the DLL may be unloaded.
+    /// Windows may unload the DLL only when no text service or lock is alive.
     #[unsafe(no_mangle)]
     pub extern "system" fn DllCanUnloadNow() -> HRESULT {
-        S_OK
+        if crate::service::unloadable() {
+            S_OK
+        } else {
+            S_FALSE
+        }
     }
 
-    /// The text service's class factory is not written yet.
+    /// Hand out the factory for easime's own class, and refuse any other.
     #[unsafe(no_mangle)]
     pub extern "system" fn DllGetClassObject(
-        _class: *const GUID,
-        _interface: *const GUID,
+        class: *const GUID,
+        interface: *const GUID,
         object: *mut *mut c_void,
     ) -> HRESULT {
-        if !object.is_null() {
-            // SAFETY: the caller passes a pointer to write the result to.
-            unsafe { *object = std::ptr::null_mut() };
+        if class.is_null() || interface.is_null() || object.is_null() {
+            return E_POINTER;
         }
-        CLASS_E_CLASSNOTAVAILABLE
+        // SAFETY: the caller passes valid pointers; checked for null above.
+        unsafe {
+            *object = std::ptr::null_mut();
+            if *class != crate::registration::guid(crate::profiles::CLSID) {
+                return CLASS_E_CLASSNOTAVAILABLE;
+            }
+            crate::service::class_factory().query(interface, object)
+        }
     }
 }

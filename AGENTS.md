@@ -31,7 +31,7 @@ Linux builds need `libxkbcommon` and Wayland dev packages (list in `docs/develop
 ## Crates (`crates/`)
 `ime-core` (key events, `InputEngine`, `LanguageSwitcher`), `ime-session` (the `Session` every frontend drives: engines, language cycle, switch-key rules, dictionary), `engine-hangul`, `engine-japanese` (romaji to kana, dictionaries),
 `easime-dict-tool` (Mozc dictionary to binary), `easime-config` (TOML settings, OS paths), `easime-cli` (terminal demo),
-`frontend-wayland` (KWin `zwp_input_method_v1`), `frontend-tsf` (Windows: key handling, the per-language profile list and TSF registration so far; the text service itself does not exist yet), `easime` (Linux daemon, with the task bar icon). Planned crates: `docs/architecture.md`.
+`frontend-wayland` (KWin `zwp_input_method_v1`), `frontend-tsf` (Windows: key handling, the per-language profile list and TSF registration so far; the text service so far only activates and takes no key), `easime` (Linux daemon, with the task bar icon). Planned crates: `docs/architecture.md`.
 Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-session`, `frontend-tsf`, `engine-hangul`, `engine-japanese`, `easime-dict-tool`, `easime-config`, `easime-cli`.
 
 ## Rules

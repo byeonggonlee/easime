@@ -432,6 +432,7 @@ dependencies = [
  "ime-core",
  "ime-session",
  "windows",
+ "windows-core",
 ]
 
 [[package]]

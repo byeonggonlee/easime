@@ -18,10 +18,13 @@ easime-config = { path = "../easime-config" }
 
 # The COM parts talk to Windows through Microsoft's own bindings.
 [target.'cfg(windows)'.dependencies]
+# The `implement` macro names this crate in the code it writes.
+windows-core = "0.62"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Com",
+    "Win32_System_Ole",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_UI_Input_KeyboardAndMouse",
