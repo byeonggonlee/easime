@@ -63,7 +63,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 |---|---|---|---|
 | 1 | OS 키를 `KeyEvent`(+`Modifiers`)로 바꾼다 | `ime_core::Key` | `translate.rs` (X keysym) |
 | 2 | 각 키가 전환 키인지 분류한다 | `KeyRole` → `ToggleTracker` | `translate.rs`의 `toggle_role` |
-| 3 | 엔진이 소비한 키와 소비하지 않은 키를 OS에 알맞게 처리한다 (`handled == false`면 앱에 돌려준다. 소비한 키의 뗌 이벤트도 처리한다) | `EngineOutput::handled` | `app.rs`의 `on_key`, `Swallowed` |
+| 3 | 엔진이 소비한 키와 소비하지 않은 키를 OS에 알맞게 처리한다 (`handled == false`면 앱에 돌려준다. 소비한 키의 뗌 이벤트도 처리한다). 키를 가져갈지 **먼저 묻는** OS(Windows TSF)는 부작용 없이 답한다 | `EngineOutput::handled`, `Session::wants_key` | `app.rs`의 `on_key`, `Swallowed` (Windows: `frontend-tsf::typing`) |
 | 4 | 확정할 글자와 조합 중인 글자를 앱에 넣는다 | `EngineOutput::commit`, `preedit` | `app.rs`의 `apply` |
 | 5 | 포커스가 들어오면 `Session::reset`, 나가면 `Session::flush` 결과를 확정한다 | `Session` | `activate`, `release_focus` |
 | 6 | 후보 목록을 화면에 띄운다. **띄울 수 없으면 `Session::cancel_conversion`** | `CandidateList`, `Session` | `candidate.rs`, `panel.rs` |

@@ -13,11 +13,11 @@
 8. **일본어 1단계** — 로마자 → 가나, 언어 순환에 추가.
 9. **후보창** → **일본어 2단계** (Mozc 사전, 학습).
 10. **GNOME** — IBus 호환 D-Bus 서비스 (조사 먼저).
-11. **Windows** — TSF 프론트엔드, WinUI 3 설정 앱, MSI.
+11. **Windows** — TSF 프론트엔드, WinUI 3 설정 앱, MSI. (2026-11-08: MSI, 등록, 한글 타자까지 있음, 실제 PC 미시험. 남은 것: 모드 표시, 조합 밑줄, 후보창과 일본어, 설정 앱)
 12. **중국어** (장기) — 병음 엔진, 간체/번체.
 13. **macOS** — InputMethodKit, SwiftUI 설정 앱, pkg.
 
-## 현재 상태 (2026-11-07)
+## 현재 상태 (2026-11-08 갱신)
 - 완료
   - `ime-core`(키 이벤트, `InputEngine`, `Language`/`LanguageSwitcher`), `easime-config`(TOML 설정, OS별 경로, 원자적 저장)
   - Windows 준비(2026-11-07): 새 크레이트 `frontend-tsf`에 TSF 연결 없이 되는 부분 — 가상 키·스캔 코드를 `KeyEvent`와 전환 키 분류로 바꾸는 순수 함수(물리 키 기준 US 글자라 자판 배열과 무관) — 를 만들었다. 시스템 언어는 `GetUserPreferredUILanguages`로 읽고(CI Windows 러너에서 호출 확인), 설정 변경은 포터블 `ConfigReloader`로 감지하며, 설정·로그·사전 경로는 `Os`를 인자로 받는 하나의 코드다. 등록 방식은 **언어별 프로필**로 정해졌다(사용자 결정, 2026-11-08): `frontend-tsf::profiles`에 프로필 목록(언어, LANGID, 고정 GUID, 이름)이 있고, `ime-session`의 `Session::for_language`가 프로필 하나의 동작(그 언어와 영어만 오감, 설정의 언어 목록과 무관)을 맡는다. TSF 등록(레지스트리의 COM 클래스, 언어별 프로필, DLL의 `DllRegisterServer`/`DllUnregisterServer` 내보내기)은 만들었고, CI의 Windows 러너가 실제 Windows에서 등록 → TSF의 프로필 등록 기록 확인 → 제거 → 다시 제거를 시험한다(Windows가 언어 설정 화면에 나열하는지는 확인하지 못했다). **텍스트 서비스 1·2단계**(2026-11-08): COM 클래스 팩터리, 활성화, 키 이벤트 싱크에 더해 **한글 타자**를 만들었다. 키를 가져갈지 묻는 `OnTestKeyDown`과 가져가는 `OnKeyDown`은 `frontend-tsf::typing::Typist`(Windows API가 없어 모든 OS의 CI가 시험)가 답하고, 둘이 어긋나지 않음을 모든 키 종류·모든 상태로 시험한다. 이를 위해 엔진에 부작용 없이 "이 키가 내 일인가"를 답하는 `InputEngine::wants_key`를 더했고(`ime_core::contract`가 모든 엔진을 시험), 한/영 키(누르고 있어도 한 번만)와 오른쪽 Alt 탭(Windows에서는 누름을 통과시키고 탭의 뗌에서 전환)으로 영어↔한국어를 오간다. TSF 쪽은 결과를 편집 세션 안에서 TSF 조합으로 문서에 쓰고, 포커스 이동·응용 프로그램의 조합 종료에서는 그 자리에서 끝낸다. 언어는 사용자가 고른 프로필이, 설정은 실행 중 `ConfigReloader`가 따른다. 패닉은 항목마다 잡고 로그(`easime.log`, `EASIME_LOG_KEYS=1`이면 모든 키)에 남긴다.
@@ -75,5 +75,6 @@
 - `settings-gui-kde`: 형님 로컬에만 있는 Kirigami 설정 앱 중간본. `main`에 같은 경로(`settings/kde`)로 새 구현이 들어갔으므로 합치지 말고, 필요한 부분(화면 구성, 스크린샷)만 비교해서 가져올 것.
 - `candidate-window`: 형님 로컬에만 있는 후보창 중간본. `main`에는 이미 후보창이 있다(`frontend-wayland/src/candidate.rs`, 한국어 한자와 일본어 공용). 합치기 전에 비교할 것.
 - 병합 방법: `git cherry-pick <첫커밋>^..<마지막커밋>` 후 `fmt`/`clippy -D warnings`/`test --workspace` 확인, 푸시, CI 확인.
+- Windows 다음 후보 작업: 실제 PC에서 설치·타자 시험(메모장, 브라우저, 메신저), 영어/한국어 모드 표시(커서 옆 박스, 어댑터가 `GetTextExt`로 위치를 얻음), 조합 밑줄(display attribute), 일본어를 위한 후보창, 응용 프로그램 사이 모드 공유.
 - 다음 후보 작업: 클립보드 기록(`Super+V`)과 이모지 선택기(`Super+.`) ([concept.md](concept.md), [decisions.md](decisions.md)), 시스템 색상 연동, XIM, 실제 KWin 시험.
 
