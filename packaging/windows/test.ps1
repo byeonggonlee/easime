@@ -7,10 +7,13 @@
 param(
     [Parameter(Mandatory)][string]$Msi,
     # An older build of the same installer, to try the upgrade.
-    [Parameter(Mandatory)][string]$OldMsi
+    [Parameter(Mandatory)][string]$OldMsi,
+    # The dictionary the MSI was built with, to compare with what it installs.
+    [string]$Dictionary = "target\dictionary\mozc.bin"
 )
 
 $ErrorActionPreference = "Stop"
+$Dictionary = (Resolve-Path $Dictionary).Path
 $dir = Join-Path $env:ProgramFiles "easime"
 $logs = Join-Path (Get-Location) "msi-logs"
 New-Item -ItemType Directory -Force $logs | Out-Null
@@ -101,6 +104,14 @@ Assert ((Invoke-Msi "install" @("/i", "`"$Msi`"")) -eq 0) "the MSI installs"
 foreach ($file in "easime-cli.exe", "easime_tsf.dll", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.md") {
     Assert (Test-Path (Join-Path $dir $file)) "$file is installed"
 }
+# The Japanese dictionary is next to the DLL (where the text service looks for
+# it), the very file that was built, with Mozc's own license files.
+$installedDictionary = Join-Path $dir "dictionary\mozc.bin"
+Assert (Test-Path $installedDictionary) "the Japanese dictionary is installed next to the text service"
+Assert ((Get-FileHash $installedDictionary).Hash -eq (Get-FileHash $Dictionary).Hash) "it is the dictionary that was built ($((Get-Item $installedDictionary).Length) bytes)"
+foreach ($file in "mozc-LICENSE.txt", "mozc-dictionary_oss-README.txt") {
+    Assert (Test-Path (Join-Path $dir "dictionary\$file")) "the dictionary's $file is installed"
+}
 Assert ((Entries).Count -eq 1) "Apps & features lists easime once"
 Assert (-not ((Machine-Path) -contains $dir)) "the PATH is left alone by default"
 Show-State "after the install"
@@ -134,6 +145,7 @@ Assert (-not (Test-Path "HKLM:\SOFTWARE\easime\Input\Korean")) "the record of th
 Assert ((Invoke-Msi "install-no-input" @("/i", "`"$Msi`"", "ADDLOCAL=Main")) -eq 0) "the MSI installs without the Korean feature"
 Assert-Registered "without the Korean feature"
 Assert ((User-Tips).Count -eq 0) "nothing is switched on for this user"
+Assert (-not (Test-Path (Join-Path $dir "dictionary"))) "without its feature the dictionary is not installed"
 Assert ((Invoke-Msi "uninstall-no-input" @("/x", "`"$Msi`"")) -eq 0) "the MSI uninstalls"
 Assert-Unregistered "after removing the install without the Korean feature"
 

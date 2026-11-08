@@ -1,0 +1,4 @@
+# Shell scripts run with sh on every OS (the Windows CI builds the Japanese
+# dictionary with Git's bash), so they keep LF line endings in a Windows
+# checkout too.
+*.sh text eol=lf

@@ -5,7 +5,7 @@
 
     wix build -arch x64 -ext WixToolset.UI.wixext \
       -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d TsfDll=<frontend_tsf.dll, built with the dll profile> \
-      -d Root=<repository root> \
+      -d Dictionary=<mozc.bin from scripts/build-dictionary.sh mozc> -d Root=<repository root> \
       -o easime.msi packaging/windows/easime.wxs
 
   WHAT IT INSTALLS
@@ -16,6 +16,8 @@
       nobody has to add anything by hand in Windows' settings. The features are
       the confirmation (the setup window shows them; a silent install takes the
       defaults) and uninstalling is the undo: it takes the profiles away again;
+    - the Japanese dictionary (Mozc) with its license files, in "dictionary"
+      next to the DLL (a feature that can be left out);
     - the terminal demo (easime-cli.exe) and the licenses.
 
   OTHER USERS of the same PC see the registered profiles under "Add a keyboard"
@@ -69,6 +71,21 @@
         <Component Id="ThirdParty">
           <File Id="ThirdParty" Source="$(Root)/THIRD_PARTY_LICENSES.md" />
         </Component>
+        <!-- The Japanese dictionary (Mozc, converted by easime-dict-tool) and its
+             original license files. The text service reads the "dictionary"
+             folder next to its DLL, wherever the user installs easime
+             (crates/frontend-tsf/src/install.rs). -->
+        <Directory Id="DictionaryFolder" Name="dictionary">
+          <Component Id="Dictionary">
+            <File Id="MozcDictionary" Name="mozc.bin" Source="$(Dictionary)" />
+          </Component>
+          <Component Id="DictionaryLicense">
+            <File Id="MozcLicense" Name="mozc-LICENSE.txt" Source="$(Root)/data/mozc/LICENSE" />
+          </Component>
+          <Component Id="DictionaryNotice">
+            <File Id="MozcNotice" Name="mozc-dictionary_oss-README.txt" Source="$(Root)/data/mozc/dictionary_oss-README.txt" />
+          </Component>
+        </Directory>
         <!-- Only with ADDLOCAL=ALL (or ADDLOCAL=Main,AddToPath): the folder is
              added to the system PATH so `easime-cli` runs from any terminal.
              Left off by default because it changes a system setting. -->
@@ -102,6 +119,14 @@
       <Feature Id="InputKorean" Title="easime keyboard (listed under Korean)" Level="1" AllowAdvertise="no"
                Description="Adds the easime keyboard to your Windows language settings (under Korean). One key switches between English and the languages you turn on in the easime settings.">
         <ComponentRef Id="InputKoreanMarker" />
+      </Feature>
+      <!-- On by default; about 36 MB. Typing Japanese on Windows needs the
+           candidate window, which is not there yet (docs/windows-plan-2026-11-08.md). -->
+      <Feature Id="JapaneseDictionary" Title="Japanese dictionary" Level="1" AllowAdvertise="no"
+               Description="Kanji conversion data for typing Japanese (the Mozc dictionary, about 36 MB). Japanese typing on Windows is not available yet.">
+        <ComponentRef Id="Dictionary" />
+        <ComponentRef Id="DictionaryLicense" />
+        <ComponentRef Id="DictionaryNotice" />
       </Feature>
       <Feature Id="AddToPath" Title="Add easime to the PATH" Level="2" AllowAdvertise="no"
                Description="Lets you run the terminal demo (easime-cli) from any terminal.">

@@ -5,14 +5,17 @@
 # Run from anywhere on Windows: pwsh packaging\windows\build.ps1 [-Version 0.1.0]
 #
 # The installer holds the text service (the 64-bit DLL), registers it with Windows,
-# switches the chosen languages on for the installing user, and has the terminal
-# demo and the licenses; see packaging\windows\easime.wxs.
+# switches the chosen languages on for the installing user, and has the Japanese
+# dictionary, the terminal demo and the licenses; see packaging\windows\easime.wxs.
 param(
     # The MSI version. Defaults to the version of the easime-cli crate. It must
     # be numeric (major.minor.build), so a pre-release tag needs a number here.
     [string]$Version,
     # Where the .msi goes (relative paths are relative to the repository).
-    [string]$OutDir = "target"
+    [string]$OutDir = "target",
+    # The Japanese dictionary to install. Build it first, in Git's bash:
+    #   sh scripts/build-dictionary.sh mozc
+    [string]$Dictionary = "target\dictionary\mozc.bin"
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +40,11 @@ if ($LASTEXITCODE -ne 0) { throw "cargo build of the text service failed" }
 $tsfDll = Join-Path $root "target\dll\frontend_tsf.dll"
 if (-not (Test-Path $tsfDll)) { throw "frontend_tsf.dll was not built" }
 
+if (-not [System.IO.Path]::IsPathRooted($Dictionary)) { $Dictionary = Join-Path $root $Dictionary }
+if (-not (Test-Path $Dictionary)) {
+    throw "the Japanese dictionary $Dictionary is missing; build it with: sh scripts/build-dictionary.sh mozc"
+}
+
 $wix = Join-Path $env:USERPROFILE ".dotnet\tools\wix.exe"
 if (-not (Test-Path $wix)) { $wix = "wix" }
 
@@ -53,7 +61,7 @@ New-Item -ItemType Directory -Force $OutDir | Out-Null
 $out = Join-Path $OutDir "easime-$Version-x64.msi"
 $binaries = Join-Path $root "target\release"
 $source = Join-Path $root "packaging\windows\easime.wxs"
-& $wix build -arch x64 -ext $uiExtension -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Root=$root" -o $out $source
+& $wix build -arch x64 -ext $uiExtension -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Dictionary=$Dictionary" -d "Root=$root" -o $out $source
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 
 Write-Host "built $out"

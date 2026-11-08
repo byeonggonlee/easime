@@ -69,8 +69,8 @@ jobs:
     uses: ./.github/workflows/packages.yml
 
   # The Windows installer (MSI, WiX): the text service (TSF), registered with
-  # Windows and switched on for the installing user, the terminal demo and the
-  # licenses. The job builds it, installs it on the runner, checks what Windows
+  # Windows and switched on for the installing user, the Japanese dictionary,
+  # the terminal demo and the licenses. The job builds it, installs it on the runner, checks what Windows
   # and the user's language settings say, uses what was installed, upgrades it and
   # removes it again, leaving nothing behind. The MSI is kept as an artifact for
   # trying it on a real PC (it is not published as a release: docs/status.md).
@@ -83,6 +83,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install WiX
         run: dotnet tool install --global wix --version 5.0.2
+      # The real Mozc dictionary, built on Windows the way the Linux packages
+      # build theirs (the pinned files are cached, checksums verified).
+      - uses: actions/cache@v4
+        with:
+          path: target/mozc-src
+          key: mozc-src-${{ hashFiles('scripts/fetch-mozc-dictionary.sh') }}
+      - name: Build the Japanese dictionary (Mozc)
+        shell: bash
+        run: |
+          sh scripts/build-dictionary.sh mozc
+          found="$(cargo run -q --release --locked -p easime-dict-tool -- lookup target/dictionary/mozc.bin おおさか)"
+          echo "$found"
+          echo "$found" | grep -q '大阪'
       - name: Build the installer, and an older one for the upgrade test
         run: |
           $version = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object { $_.name -eq "easime-cli" }).version

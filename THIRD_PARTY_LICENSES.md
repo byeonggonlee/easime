@@ -39,7 +39,9 @@ DEALINGS IN THE SOFTWARE.
   stored in this repository. `scripts/fetch-mozc-dictionary.sh` downloads exactly these files and
   refuses to continue unless their SHA-256 checksums match; release packages ship the
   converted binary dictionary `/usr/share/easime/dictionary/mozc.bin` built from them with
-  `crates/easime-dict-tool`.
+  `crates/easime-dict-tool`. The Windows installer installs the same file as
+  `dictionary\mozc.bin` in its install folder, with verbatim copies of the two files above
+  (`dictionary\mozc-LICENSE.txt`, `dictionary\mozc-dictionary_oss-README.txt`).
 - Not used: `connection_single_column.txt`, `id.def`, `aux_dictionary.tsv`, the evaluation and
   filter files, and `src/data/dictionary_manual/`.
 - The small test fixture `crates/easime-dict-tool/tests/fixtures/mozc-sample.txt` consists of a
@@ -63,7 +65,8 @@ data can be shipped in packages of a MIT OR Apache-2.0 project as a separate dat
 its own notices. What easime must do: (1) keep the three notices below with every package that
 contains the converted dictionary (the `.deb` installs this file as
 `/usr/share/doc/easime/THIRD_PARTY_LICENSES.md`, the `.rpm` as
-`/usr/share/licenses/easime/THIRD_PARTY_LICENSES.md`); (2) never use the name of Google for
+`/usr/share/licenses/easime/THIRD_PARTY_LICENSES.md`, the Windows installer in its install
+folder); (2) never use the name of Google for
 endorsement. The converted file also embeds a short attribution text. This is a summary of the
 license texts as the project understood them, not legal advice.
 
