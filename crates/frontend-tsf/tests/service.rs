@@ -19,26 +19,34 @@ fn the_factory_makes_counted_services_that_can_be_released() {
     assert!(service::unloadable(), "nothing of the service exists yet");
 
     let factory = service::class_factory();
+    assert!(
+        !service::unloadable(),
+        "the factory itself keeps the DLL: COM may hold it without a lock"
+    );
     // SAFETY: an ordinary COM call on a live factory.
     let extended: ITfTextInputProcessorEx = unsafe { factory.CreateInstance(None) }.unwrap();
-    assert!(!service::unloadable(), "a service is alive");
 
     // The same object answers for the base interface too.
     let base: ITfTextInputProcessor = extended.cast().unwrap();
     // Deactivating a service that was never activated is harmless.
     unsafe { base.Deactivate() }.expect("deactivating an inactive service");
-
-    // A lock on the factory also keeps the DLL in memory.
     drop(base);
     drop(extended);
-    assert!(service::unloadable(), "the services are gone");
+    assert!(!service::unloadable(), "the factory is still there");
+
+    // A lock on the factory also keeps the DLL in memory, after the factory.
     unsafe { factory.LockServer(true) }.unwrap();
-    assert!(!service::unloadable(), "a locked factory is in use");
-    unsafe { factory.LockServer(false) }.unwrap();
-    assert!(service::unloadable(), "unlocked again");
+    let locker = factory.clone();
+    drop(factory);
+    assert!(!service::unloadable(), "a locked server is in use");
+    unsafe { locker.LockServer(false) }.unwrap();
     assert!(
-        unsafe { factory.LockServer(false) }.is_err(),
+        unsafe { locker.LockServer(false) }.is_err(),
         "more unlocks than locks is refused"
     );
-    assert!(service::unloadable(), "and does not break the count");
+    drop(locker);
+    assert!(
+        service::unloadable(),
+        "no service, no factory, no lock: the DLL may go"
+    );
 }

@@ -51,13 +51,15 @@ use windows::Win32::UI::TextServices::{
 };
 use windows::core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
-/// How many text services and factory locks are alive, for
-/// `DllCanUnloadNow`: Windows may only unload the DLL when this is zero.
+/// How many objects of this DLL are alive (text services and their factories),
+/// for `DllCanUnloadNow`.
 static IN_USE: AtomicIsize = AtomicIsize::new(0);
+/// How many `LockServer(TRUE)` calls are not yet undone.
+static LOCKS: AtomicIsize = AtomicIsize::new(0);
 
-/// Whether nothing of this DLL is in use.
+/// Whether nothing of this DLL is in use: Windows may unload it only then.
 pub fn unloadable() -> bool {
-    IN_USE.load(Ordering::SeqCst) == 0
+    IN_USE.load(Ordering::SeqCst) == 0 && LOCKS.load(Ordering::SeqCst) == 0
 }
 
 /// How often the settings file is looked at for changes.
@@ -187,10 +189,23 @@ impl TextService_Impl {
             .map_err(|e| windows::core::Error::new(e.code(), format!("AdviseKeyEventSink: {e}")))?;
 
         let thread_sink: ITfThreadMgrEventSink = self.to_interface();
-        let source: ITfSource = thread_manager.cast()?;
-        // SAFETY: the sink is alive for the call.
-        let cookie = unsafe { source.AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink) }
-            .map_err(|e| windows::core::Error::new(e.code(), format!("AdviseSink(thread): {e}")))?;
+        let advised = thread_manager.cast::<ITfSource>().and_then(|source| {
+            // SAFETY: the sink is alive for the call.
+            unsafe { source.AdviseSink(&ITfThreadMgrEventSink::IID, &thread_sink) }
+        });
+        let cookie = match advised {
+            Ok(cookie) => cookie,
+            Err(e) => {
+                // Activation fails: TSF will not call Deactivate, so the key
+                // sink must not stay behind holding this service.
+                // SAFETY: the interface is alive for the call.
+                let _ = unsafe { keystrokes.UnadviseKeyEventSink(client_id) };
+                return Err(windows::core::Error::new(
+                    e.code(),
+                    format!("AdviseSink(thread): {e}"),
+                ));
+            }
+        };
 
         let (typist, reloader, appearance) = make_typist();
         *self.typist.borrow_mut() = Some(typist);
@@ -337,6 +352,20 @@ impl TextService_Impl {
         }
     }
 
+    /// A composition left in another text field (the focus moved without
+    /// telling us) is finished there before a key of this one is handled, so
+    /// no edit of this field ever touches the other field's composition.
+    fn leave_other_context(&self, context: &ITfContext) {
+        let elsewhere = self
+            .composing
+            .borrow()
+            .as_ref()
+            .is_some_and(|c| c.context != *context);
+        if elsewhere {
+            self.end_composition();
+        }
+    }
+
     /// Settings changed on disk: use them. What is being composed is finished
     /// first.
     fn reload_settings(&self, context: Option<&ITfContext>) {
@@ -376,18 +405,26 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
     }
 
     fn Deactivate(&self) -> Result<()> {
-        self.end_composition();
-        if let Some(activated) = self.activated.borrow_mut().take() {
-            let keystrokes: ITfKeystrokeMgr = activated.thread_manager.cast()?;
-            // SAFETY: the interface is alive for the call.
-            unsafe { keystrokes.UnadviseKeyEventSink(activated.client_id)? };
-            let source: ITfSource = activated.thread_manager.cast()?;
-            // SAFETY: as above.
-            let _ = unsafe { source.UnadviseSink(activated.thread_sink_cookie) };
-        }
-        *self.typist.borrow_mut() = None;
-        *self.reloader.borrow_mut() = None;
-        Ok(())
+        guarded("Deactivate", Ok(()), || {
+            self.end_composition();
+            self.indicator.borrow_mut().hide();
+            // Every step is tried even if one fails: a sink left behind would
+            // keep this service alive and keep being called.
+            let taken = self.activated.borrow_mut().take();
+            if let Some(activated) = taken {
+                if let Ok(keystrokes) = activated.thread_manager.cast::<ITfKeystrokeMgr>() {
+                    // SAFETY: the interface is alive for the call.
+                    let _ = unsafe { keystrokes.UnadviseKeyEventSink(activated.client_id) };
+                }
+                if let Ok(source) = activated.thread_manager.cast::<ITfSource>() {
+                    // SAFETY: as above.
+                    let _ = unsafe { source.UnadviseSink(activated.thread_sink_cookie) };
+                }
+            }
+            *self.typist.borrow_mut() = None;
+            *self.reloader.borrow_mut() = None;
+            Ok(())
+        })
     }
 }
 
@@ -447,16 +484,10 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 return Ok(false.into());
             };
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
+            // First the other field, then new settings (which may finish the
+            // composition of this one).
+            self.leave_other_context(context);
             self.reload_settings(Some(context));
-            // A composition left in another text field is finished there first.
-            let elsewhere = self
-                .composing
-                .borrow()
-                .as_ref()
-                .is_some_and(|c| c.context != *context);
-            if elsewhere {
-                self.end_composition();
-            }
             let outcome = match self.typist.borrow_mut().as_mut() {
                 Some(typist) => typist.key_down(key, &keyboard_state()),
                 None => return Ok(false.into()),
@@ -473,6 +504,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 return Ok(false.into());
             };
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
+            self.leave_other_context(context);
             let outcome = match self.typist.borrow_mut().as_mut() {
                 Some(typist) => typist.key_up(key),
                 None => return Ok(false.into()),
@@ -612,13 +644,18 @@ impl EditSession_Impl {
             },
         };
         // SAFETY: the selection holds a live range; TSF takes its own reference.
-        let result = unsafe {
+        let moved = unsafe {
             self.context
                 .SetSelection(cookie, std::slice::from_ref(&selection))
         };
         // SAFETY: the range was put there above and is released once.
         unsafe { ManuallyDrop::drop(&mut selection.range) };
-        result
+        // The text is written; a cursor that could not be moved must not stop
+        // the steps after this one (ending the composition, for one).
+        if let Err(e) = moved {
+            diag::log(&format!("could not move the cursor after the text: {e}"));
+        }
+        Ok(())
     }
 
     /// End the composition; its text stays in the document.
@@ -678,9 +715,23 @@ impl ITfEditSession_Impl for CaretQuery_Impl {
     }
 }
 
-/// Makes text services.
+/// Makes text services. Counted like the services: COM may hold a factory
+/// without locking the server, and the DLL must not go away under it.
 #[implement(IClassFactory)]
 pub struct ClassFactory;
+
+impl ClassFactory {
+    fn new() -> Self {
+        IN_USE.fetch_add(1, Ordering::SeqCst);
+        ClassFactory
+    }
+}
+
+impl Drop for ClassFactory {
+    fn drop(&mut self) {
+        IN_USE.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 impl IClassFactory_Impl for ClassFactory_Impl {
     // The signature, raw pointers included, is COM's: the caller owns them.
@@ -706,10 +757,10 @@ impl IClassFactory_Impl for ClassFactory_Impl {
 
     fn LockServer(&self, lock: BOOL) -> Result<()> {
         if lock.as_bool() {
-            IN_USE.fetch_add(1, Ordering::SeqCst);
-        } else if IN_USE.fetch_sub(1, Ordering::SeqCst) <= 0 {
+            LOCKS.fetch_add(1, Ordering::SeqCst);
+        } else if LOCKS.fetch_sub(1, Ordering::SeqCst) <= 0 {
             // More unlocks than locks: a bug of the caller. Keep the count sane.
-            IN_USE.fetch_add(1, Ordering::SeqCst);
+            LOCKS.fetch_add(1, Ordering::SeqCst);
             return Err(E_INVALIDARG.into());
         }
         Ok(())
@@ -718,7 +769,7 @@ impl IClassFactory_Impl for ClassFactory_Impl {
 
 /// The factory, as `DllGetClassObject` hands it out.
 pub fn class_factory() -> IClassFactory {
-    ClassFactory.into()
+    ClassFactory::new().into()
 }
 
 /// What `ITfTextInputProcessor` a created service is. Kept for tests that make
