@@ -14,8 +14,11 @@
 //! service itself, which writes what [`typing`] decides into TSF compositions
 //! ([`service`]).
 //!
-//! **Not here yet:** a mode indicator, an underline for the composition, a
-//! candidate window (so no conversion), and sharing the mode between programs.
+//! Switching a language shows a small box next to the text cursor ([`indicator`];
+//! where it goes is the portable rule in [`placement`]).
+//!
+//! **Not here yet:** an underline for the composition, a candidate window (so no
+//! conversion), and sharing the mode between programs.
 //! Only Korean can be typed ([`profiles::TYPEABLE`]). It has been tested against
 //! a simulated TSF application in CI, not on a real PC. See `docs/platforms.md`,
 //! "Windows", and `docs/status.md`.

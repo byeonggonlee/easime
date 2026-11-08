@@ -15,7 +15,7 @@
 8. **일본어 1단계** — 로마자 → 가나, 언어 순환에 추가.
 9. **후보창** → **일본어 2단계** (Mozc 사전, 학습).
 10. **GNOME** — IBus 호환 D-Bus 서비스 (조사 먼저).
-11. **Windows** — TSF 프론트엔드, WinUI 3 설정 앱, MSI. (2026-11-08: MSI, 등록, 한글 타자까지 있음, 실제 PC 미시험. 남은 것: 모드 표시, 조합 밑줄, 후보창과 일본어, 설정 앱)
+11. **Windows** — TSF 프론트엔드, WinUI 3 설정 앱, MSI. (2026-11-08: MSI, 등록, 한글 타자까지 있음, 실제 PC 미시험. 남은 것: 조합 밑줄, 상시 모드 확인 경로, 후보창과 일본어, 설정 앱)
 12. **중국어** (장기) — 병음 엔진, 간체/번체.
 13. **macOS** — InputMethodKit, SwiftUI 설정 앱, pkg.
 
@@ -24,7 +24,8 @@
   - `ime-core`(키 이벤트, `InputEngine`, `Language`/`LanguageSwitcher`), `easime-config`(TOML 설정, OS별 경로, 원자적 저장)
   - Windows 준비(2026-11-07): 새 크레이트 `frontend-tsf`에 TSF 연결 없이 되는 부분 — 가상 키·스캔 코드를 `KeyEvent`와 전환 키 분류로 바꾸는 순수 함수(물리 키 기준 US 글자라 자판 배열과 무관) — 를 만들었다. 시스템 언어는 `GetUserPreferredUILanguages`로 읽고(CI Windows 러너에서 호출 확인), 설정 변경은 포터블 `ConfigReloader`로 감지하며, 설정·로그·사전 경로는 `Os`를 인자로 받는 하나의 코드다. 등록 방식은 **언어별 프로필**로 정해졌다(사용자 결정, 2026-11-08): `frontend-tsf::profiles`에 프로필 목록(언어, LANGID, 고정 GUID, 이름)이 있고, `ime-session`의 `Session::for_language`가 프로필 하나의 동작(그 언어와 영어만 오감, 설정의 언어 목록과 무관)을 맡는다. TSF 등록(레지스트리의 COM 클래스, 언어별 프로필, DLL의 `DllRegisterServer`/`DllUnregisterServer` 내보내기)은 만들었고, CI의 Windows 러너가 실제 Windows에서 등록 → TSF의 프로필 등록 기록 확인 → 제거 → 다시 제거를 시험한다(Windows가 언어 설정 화면에 나열하는지는 확인하지 못했다). **텍스트 서비스 1·2단계**(2026-11-08): COM 클래스 팩터리, 활성화, 키 이벤트 싱크에 더해 **한글 타자**를 만들었다. 키를 가져갈지 묻는 `OnTestKeyDown`과 가져가는 `OnKeyDown`은 `frontend-tsf::typing::Typist`(Windows API가 없어 모든 OS의 CI가 시험)가 답하고, 둘이 어긋나지 않음을 모든 키 종류·모든 상태로 시험한다. 이를 위해 엔진에 부작용 없이 "이 키가 내 일인가"를 답하는 `InputEngine::wants_key`를 더했고(`ime_core::contract`가 모든 엔진을 시험), 한/영 키(누르고 있어도 한 번만)와 오른쪽 Alt 탭(Windows에서는 누름을 통과시키고 탭의 뗌에서 전환)으로 영어↔한국어를 오간다. TSF 쪽은 결과를 편집 세션 안에서 TSF 조합으로 문서에 쓰고, 포커스 이동·응용 프로그램의 조합 종료에서는 그 자리에서 끝낸다. 언어는 사용자가 고른 프로필이, 설정은 실행 중 `ConfigReloader`가 따른다. 패닉은 항목마다 잡고 로그(`easime.log`, `EASIME_LOG_KEYS=1`이면 모든 키)에 남긴다.
     **CI에서 확인한 것**: 실제 Windows의 TSF로 활성화한 서비스에, 포커스가 있는 창과 문서(`ITextStoreACP`)로 흉내 낸 응용 프로그램이 `TestKeyDown`/`KeyDown`으로 키를 보내 `gksrmf`가 `한글`(조합 하나), Space가 음절을 확정하고 응용 프로그램의 것이 됨, Backspace가 조합을 줄이다 응용 프로그램의 것이 됨, 한/영 키가 영어↔한국어(조합 중인 음절을 먼저 확정)를 확인한다(`frontend-tsf/tests/typing.rs`).
-    **아직 없는 것**: 영어/한국어 모드 표시(커서 옆 박스·언어 바), 조합 글자의 밑줄(display attribute), 후보창(한자·일본어 변환), 응용 프로그램 사이의 모드 공유. **실제 PC에서는 시험하지 않았다**: 메모장·브라우저·메신저 같은 실제 응용 프로그램에서 "OnTestKeyDown은 가져가고 OnKeyDown은 통과시키는 키"(조합 확정 뒤 Space·Enter·숫자)가 키를 잃지 않는지가 가장 큰 미확인이다. MSI가 한국어를 켜 주므로 이 설치 파일로 시험할 수 있다. 일본어·중국어 프로필은 후보창이 생길 때까지 등록하지 않는다.
+    **모드 표시(2026-11-08)**: 한/영 전환 직후 커서 옆에 `A`/`한` 상자를 잠깐 띄운다(Linux와 같은 결정과 설정, 가짜 응용 프로그램으로 위치와 사라짐을 CI에서 확인, 실제 응용 프로그램 미시험; 커서 위치를 모르는 프로그램에서는 표시하지 않음).
+    **아직 없는 것**: 언어 바 단추 같은 상시 모드 확인 경로, 조합 글자의 밑줄(display attribute), 후보창(한자·일본어 변환), 응용 프로그램 사이의 모드 공유. **실제 PC에서는 시험하지 않았다**: 메모장·브라우저·메신저 같은 실제 응용 프로그램에서 "OnTestKeyDown은 가져가고 OnKeyDown은 통과시키는 키"(조합 확정 뒤 Space·Enter·숫자)가 키를 잃지 않는지가 가장 큰 미확인이다. MSI가 한국어를 켜 주므로 이 설치 파일로 시험할 수 있다. 일본어·중국어 프로필은 후보창이 생길 때까지 등록하지 않는다.
   - 공통 코어 정리(2026-11-07): OS와 무관한 로직을 `frontend-wayland`에서 새 포터블 크레이트 `ime-session`으로 옮겼다(`Session`: 엔진 구성·언어 순환·전환 시 글자 확정·설정 적용·후보 못 띄울 때 취소, `ToggleTracker`: 한/영 키와 오른쪽 Alt 단독 탭 판정(키 식별을 어댑터가 `KeyRole`로 알려 주는 일반형), `JapaneseDictionary`, `language_glyph`). 후보 페이지 계산은 `ime-core::CandidateList`로, 사전 폴더는 OS별 함수(`engine-japanese::loader::Os`, Linux·Windows·macOS 규칙을 모든 OS에서 단위 테스트)로 옮겼다. Wayland 쪽 동작은 그대로이며 가짜 KWin 테스트 전체가 통과한다. **어디까지가 코어이고 OS마다 무엇이 다른지**는 [platforms.md](platforms.md)에 정리했다. 아직 코어 밖에 있는 OS 의존 항목(Windows·macOS의 시스템 언어 읽기, 설정 파일 감시, 키 코드 표 등)은 그 문서의 표에 "없음/계획"으로 적혀 있다.
   - 입력 언어 기본값(2026-11-07 사용자 결정): 설정 파일에 `languages.enabled`가 없으면 **영어 + 시스템 언어**. 한국어 시스템이면 한국어, 일본어 시스템이면 일본어만 켜고, 그 밖의 시스템(영어, 프랑스어, 중국어 등)은 모두 꺼 영어만 입력된다. 한 번 고르면(`enabled = [...]`, 빈 목록 포함) 그 선택이 우선한다. 시스템 언어는 `LANGUAGE`(C/POSIX 로케일이면 무시), `LC_ALL`, `LC_MESSAGES`, `LANG` 순으로 읽는다(`easime-config/src/locale.rs`, 단위 테스트). 데몬은 시작할 때와 설정을 다시 읽을 때 어느 쪽인지 로그에 남긴다. Windows·macOS는 환경 변수가 아니라 OS의 언어 설정을 읽어야 하므로 해당 프론트엔드를 만들 때 붙인다.
   - 중국어는 간체(`chinese_simplified`)와 번체(`chinese_traditional`)가 별개의 입력 언어다(2026-11-07 사용자 결정). 시스템 로케일 대응: `zh_TW`/`zh_HK`/`zh_MO`/`Hant` → 번체, `zh_CN`/`zh_SG`/`Hans`/`zh` → 간체. 엔진은 아직 없어 기본으로 켜지지 않고 설정 창에서도 켤 수 없다("준비 중"). 예전 이름 `chinese`는 이제 알 수 없는 값이다(어떤 버전도 쓴 적이 없다).
@@ -79,6 +80,6 @@
 - `settings-gui-kde`: 형님 로컬에만 있는 Kirigami 설정 앱 중간본. `main`에 같은 경로(`settings/kde`)로 새 구현이 들어갔으므로 합치지 말고, 필요한 부분(화면 구성, 스크린샷)만 비교해서 가져올 것.
 - `candidate-window`: 형님 로컬에만 있는 후보창 중간본. `main`에는 이미 후보창이 있다(`frontend-wayland/src/candidate.rs`, 한국어 한자와 일본어 공용). 합치기 전에 비교할 것.
 - 병합 방법: `git cherry-pick <첫커밋>^..<마지막커밋>` 후 `fmt`/`clippy -D warnings`/`test --workspace` 확인, 푸시, CI 확인.
-- Windows 다음 후보 작업: 실제 PC에서 설치·타자 시험(메모장, 브라우저, 메신저), 영어/한국어 모드 표시(커서 옆 박스, 어댑터가 `GetTextExt`로 위치를 얻음), 조합 밑줄(display attribute), 일본어를 위한 후보창, 응용 프로그램 사이 모드 공유.
+- Windows 다음 후보 작업: 실제 PC에서 설치·타자 시험(메모장, 브라우저, 메신저), 실제 앱에서 모드 상자가 뜨는지(자체 캐럿 앱 포함), 조합 밑줄(display attribute), 일본어를 위한 후보창, 응용 프로그램 사이 모드 공유.
 - 다음 후보 작업: 클립보드 기록(`Super+V`)과 이모지 선택기(`Super+.`) ([concept.md](concept.md), [decisions.md](decisions.md)), 시스템 색상 연동, XIM, 실제 KWin 시험.
 
