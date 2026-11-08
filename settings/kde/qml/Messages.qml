@@ -48,7 +48,10 @@ ColumnLayout {
         target: EasimeSettings
 
         function onResultKindChanged() {
-            messages.announce()
+            // Several saves can finish in one event turn (for example an
+            // editor commit followed by a step button). Announce the final
+            // result once, after Kirigami can finish creating its popup.
+            Qt.callLater(messages.announce)
         }
     }
 
