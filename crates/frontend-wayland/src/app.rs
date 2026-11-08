@@ -256,7 +256,7 @@ impl App {
 
     /// The settings file changed: reload it and apply the result.
     fn on_settings_event(&mut self) {
-        let Some(settings) = &self.settings else {
+        let Some(settings) = &mut self.settings else {
             return;
         };
         match settings.watcher.take_changed() {

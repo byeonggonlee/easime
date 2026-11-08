@@ -707,6 +707,47 @@ fn saving_settings_changes_the_toggle_key_without_a_restart() {
 }
 
 #[test]
+fn saving_settings_through_a_link_to_another_folder_is_seen_without_a_restart() {
+    // Dotfile managers link config.toml to a file in their repository. Saving
+    // keeps the link and writes into that folder, which the daemon must watch.
+    let path = settings_file("linked");
+    let repository = path.parent().unwrap().join("repository");
+    std::fs::create_dir_all(&repository).unwrap();
+    let real = repository.join("easime.toml");
+    let config = korean_only();
+    config.save_to(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &path).unwrap();
+    let mut fake = Fake::start_watching(config.clone(), Some(path.clone()));
+    fake.activate();
+
+    fake.tap_all(&[KEY_HANGEUL]);
+    assert_eq!(forwarded(&fake.settle()), []);
+    fake.tap_all(&[KEY_HANGEUL]);
+
+    let mut updated = config;
+    updated.shortcuts.toggle_key = easime_config::ToggleKey::RightAlt;
+    updated.save_to(&path).unwrap();
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "saving keeps the link"
+    );
+    fake.barrier();
+    fake.take_requests();
+
+    fake.tap_all(&[KEY_HANGEUL]);
+    let requests = fake.settle();
+    assert_eq!(
+        forwarded(&requests),
+        [(KEY_HANGEUL, 1), (KEY_HANGEUL, 0)],
+        "{requests:#?}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
 fn saving_settings_can_enable_japanese_and_keeps_the_current_language() {
     let path = settings_file("languages");
     let config = korean_only();

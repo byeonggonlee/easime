@@ -85,7 +85,7 @@ fn set_default(key: HKEY, value: &str) -> Result<()> {
 
 fn set_named(key: HKEY, name: &str, value: &str) -> Result<()> {
     let (name, data) = (wide(name), wide(value));
-    // SAFETY: both are NUL-terminated UTF-16 strings that outlives the call.
+    // SAFETY: both are NUL-terminated UTF-16 strings that outlive the call.
     unsafe {
         RegSetValueExW(
             key,

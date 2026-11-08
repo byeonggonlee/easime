@@ -130,7 +130,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 |---|---|---|---|---|
 | 설정 파일 위치 | `easime-config/src/store.rs` | **있음** `~/.config/easime/config.toml` (`XDG_CONFIG_HOME`) | **있음(미검증)** `%APPDATA%\easime\config.toml` | **있음(미검증)** `~/Library/Application Support/easime/config.toml` |
 | 설정 저장(임시 파일 후 교체) | `easime-config/src/store.rs` | **있음** | **있음(미검증)**: 다른 프로세스가 파일을 열고 있을 때의 교체 실패는 조사 필요 | **있음(미검증)** |
-| 설정 변경 감지 | `frontend-wayland/src/watch.rs`, `ime-session/src/reload.rs` | **있음** inotify(즉시) | **있음(미검증)** `ConfigReloader`: 키·포커스 같은 일이 있을 때 파일 시각을 한 번씩 본다(앱마다 감시자를 두지 않으려고). 단위 테스트만 | **있음(미검증)** 같은 `ConfigReloader`(FSEvents로 바꿀지는 조사 필요) |
+| 설정 변경 감지 | `frontend-wayland/src/watch.rs`, `ime-session/src/reload.rs` | **있음** inotify(즉시; 설정 파일이 링크이면 가리키는 폴더도 감시) | **있음(미검증)** `ConfigReloader`: 키·포커스 같은 일이 있을 때 파일 시각을 한 번씩 본다(앱마다 감시자를 두지 않으려고). 단위 테스트만 | **있음(미검증)** 같은 `ConfigReloader`(FSEvents로 바꿀지는 조사 필요) |
 | 사전 폴더 | `engine-japanese/src/loader.rs` (`Os`) | **있음** `~/.local/share/easime/dictionary`, `/usr/share/easime/dictionary` (패키지가 설치) | **있음(코드·테스트만)** `%APPDATA%\easime\dictionary`, `%ProgramW6432%\easime\dictionary` (MSI는 아직 사전을 설치하지 않음) | **있음(코드·테스트만)** `~/Library/Application Support/easime/dictionary`, `/Library/Application Support/easime/dictionary` (설치 없음) |
 | 사전 읽기 | `engine-japanese/src/file_dict.rs` | **있음** 파일 전체를 메모리로 | 프로세스마다 읽으면 비싸다. **조사 필요** | 프로세스 하나라 Linux와 같을 것(예상) |
 | 시스템 언어 읽기 | `easime-config/src/locale.rs` | **있음** `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG` | **있음** `GetUserPreferredUILanguages`. CI의 Windows 러너에서 호출이 되는 것만 확인했고 한국어·일본어 Windows에서는 돌려 보지 않았다 | **없음**: 환경 변수가 비어 있어 영어만(안전한 폴백). 선호 언어 API가 필요 |
