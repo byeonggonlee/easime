@@ -37,8 +37,8 @@
   - Windows 설치 프로그램(MSI, WiX 5, `packaging/windows`): **터미널 데모와 라이선스만 담는다. Windows 입력기(TSF)가 없으므로 입력기를 설치하지 않는다.** CI의 Windows 러너에서 설치 → `easime-cli` 실행 → 제거 → PATH 옵션 → 업그레이드·다운그레이드 거부까지 시험한다. 릴리스에는 올리지 않는다. 사전과 설정 앱(WinUI 3)은 아직 넣지 않았다.
   - `frontend-wayland` + `easime` 데몬: KWin `zwp_input_method_v1` 클라이언트, 키 반복(자체 타이머와 컴포지터 `repeated`),
     한/영 키와 오른쪽 Alt 탭 전환, Caps Lock 무시, 언어 순환, 설정 읽기
-  - **태스크바 트레이 아이콘**(2026-11-07 사용자 요청, 이미 정한 결정 "트레이 아이콘 + 커서 옆 박스"의 구현): 현재 언어를 커서 옆 박스와 같은 모양의 글자(`A`/`한`/`あ`)로 StatusNotifierItem에 보이고, 툴팁은 언어 이름(`English`/`한국어`/`日本語`), 우클릭 메뉴는 "easime 설정"(설정 창 열기, 표시 언어는 시스템 언어를 따름). 입력 스레드는 채널에 소식만 보내고 D-Bus는 별도 스레드가 맡아 입력이 느려지지 않는다(`crates/easime/src/tray.rs`, 입력기 쪽 훅은 `frontend_wayland::observe_language`). 로그인 직후 셸이 아직 태스크바를 갖기 전에 시작해도 계속 시도한다.
-    **검증 범위**: 실제 D-Bus에서 가짜 StatusNotifierWatcher(셸 역할)와 호스트 역할로 등록·속성·언어 변경에 따른 툴팁·아이콘 갱신을 시험한다(CI의 Linux 잡). 가짜 KWin 테스트로 언어 변경 알림이 시작과 모든 전환에서 오는지 확인한다. **실제 Plasma의 태스크바에서 보이는 모습(크기, 밝은·어두운 테마에서의 가독성)은 확인하지 않았다.** 아이콘은 고정 다크 박스이므로 시스템 색상 연동 전까지 테마를 따르지 않는다. 클릭·메뉴로 언어를 바꾸는 기능은 아직 없다.
+  - **태스크바 트레이 아이콘**(2026-11-07 사용자 요청, 이미 정한 결정 "트레이 아이콘 + 커서 옆 박스"의 구현): 현재 언어를 커서 옆 박스와 같은 모양의 글자(`A`/`한`/`あ`)로 StatusNotifierItem에 보이고, 툴팁은 언어 이름(`English`/`한국어`/`日本語`). **아이콘을 클릭하면 다음 언어로**(한/영 키와 같은 동작) 바뀌고, 우클릭 메뉴에는 켠 언어 목록(라디오, 고른 언어로 바로 전환)과 "easime 설정"(설정 창 열기, 표시 언어는 시스템 언어를 따름)이 있다. 전환 요청은 입력기에 다른 스레드의 요청 채널(`frontend_wayland::select_language`/`next_language`, eventfd로 poll을 깨움)로 가서 입력 스레드가 직접 처리하므로, 조합 중인 글자는 전환 전에 확정되고 세션에는 입력 스레드만 손댄다. 입력 스레드는 채널에 소식만 보내고 D-Bus는 별도 스레드가 맡아 입력이 느려지지 않는다(`crates/easime/src/tray.rs`, 입력기 쪽 훅은 `frontend_wayland::observe_language`). 로그인 직후 셸이 아직 태스크바를 갖기 전에 시작해도 계속 시도한다.
+    **검증 범위**: 실제 D-Bus에서 가짜 StatusNotifierWatcher(셸 역할)와 호스트 역할로 등록·속성·언어 변경에 따른 툴팁·아이콘 갱신을 시험한다(CI의 Linux 잡). 가짜 KWin 테스트로 언어 변경 알림이 시작과 모든 전환에서 오는지, 다른 스레드의 언어 선택·다음 언어 요청이 조합 중인 글자를 확정하고 언어를 바꾸며(이미 그 언어이거나 켜지 않은 언어는 무시) 처리되는지 확인한다. D-Bus 위에서는 셸이 보내는 `Activate`(클릭)가 "다음 언어" 요청이 되는 것까지 시험하고, 메뉴 항목의 동작은 단위 테스트로 확인한다(메뉴를 D-Bus로 눌러 보지는 않았다). **실제 Plasma의 태스크바에서 보이는 모습(크기, 밝은·어두운 테마에서의 가독성)은 확인하지 않았다.** 아이콘은 고정 다크 박스이므로 시스템 색상 연동 전까지 테마를 따르지 않는다.
   - 커서 옆 상태 박스(`frontend-wayland/src/{indicator,font,panel}.rs`): 사용자가 언어를 전환할 때만 `A`/`한`/`あ`/`中`
     48x48 박스를 `indicator_ms`(기본 1000) 동안 표시. `zwp_input_panel_surface_v1.set_overlay_panel`(KWin이 커서 사각형 바로 아래에 배치,
     키보드 포커스 안 가짐, 빈 input region), 표시/숨김은 버퍼 attach/null attach, `[appearance] indicator_box`로 끄기.
@@ -63,7 +63,7 @@
   검증). 실제 KWin이 없어도 프로토콜 흐름을 시험할 수 있고, 이미 실제 버그(`KeyState::Repeated` 처리)를 잡았다.
 - **실사용 보고(2026-11-07)**: Fedora 최신 + `107bb4bbcc24bfc83b063cfd69c4a052b44fb616`에서 사용자가 한·영 입력 동작을 확인했다. 앱별 범위는 미확인이다. 하단 패널 전체 이동은 KWin bug 527067 경로와 일치했고, 재부팅 전에는 박스 등장/퇴장 때 DBus visible=true/false 변화가 확인됐다. 이후 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용하자 문제가 재현되지 않는다고 사용자가 확인했다. 재부팅 후 DBus 속성은 재측정하지 않았다. 구버전 easime의 포커스 표시 문제와 새 한자 기능은 수정본 설치 후 검증이 남아 있다. [진단과 한자 재검증](kde-testing.md). 일반 클라이언트에는 `zwp_input_method_v1`이 노출되지 않아
   (KWin 6.8.2 확인: 입력기로 등록된 프로세스에게만 제공) 가상 키보드로 등록해야 시험할 수 있다.
-- 알려진 미구현: 트레이 아이콘에서 언어 바꾸기(지금은 표시와 설정 열기만), 일본어 변환의 실제 KDE 검증과 사전 상태 안내 문구, 설정 창의 자동 실행·초보자용, XIM, 문절 변환, 중국어, GNOME/Windows/macOS
+- 알려진 미구현: 일본어 변환의 실제 KDE 검증과 사전 상태 안내 문구, 설정 창의 자동 실행·초보자용, XIM, 문절 변환, 중국어, GNOME/Windows/macOS
 - 알려진 한계: 상태 박스와 후보창은 고정 다크 테마다. Plasma 색상 연동은 아직 없다.
 - 알려진 한계: 한글 자판은 활성 키보드 레이아웃의 keysym을 따른다(물리 키 위치 기준 아님). 레이아웃이 US가 아니면 어긋날 수 있다.
 
@@ -73,5 +73,5 @@
 - `settings-gui-kde`: 형님 로컬에만 있는 Kirigami 설정 앱 중간본. `main`에 같은 경로(`settings/kde`)로 새 구현이 들어갔으므로 합치지 말고, 필요한 부분(화면 구성, 스크린샷)만 비교해서 가져올 것.
 - `candidate-window`: 형님 로컬에만 있는 후보창 중간본. `main`에는 이미 후보창이 있다(`frontend-wayland/src/candidate.rs`, 한국어 한자와 일본어 공용). 합치기 전에 비교할 것.
 - 병합 방법: `git cherry-pick <첫커밋>^..<마지막커밋>` 후 `fmt`/`clippy -D warnings`/`test --workspace` 확인, 푸시, CI 확인.
-- 다음 후보 작업: 클립보드 기록(`Super+V`)과 이모지 선택기(`Super+.`) ([concept.md](concept.md), [decisions.md](decisions.md)), 시스템 색상 연동, 트레이 아이콘에서 언어 바꾸기, XIM, 실제 KWin 시험.
+- 다음 후보 작업: 클립보드 기록(`Super+V`)과 이모지 선택기(`Super+.`) ([concept.md](concept.md), [decisions.md](decisions.md)), 시스템 색상 연동, XIM, 실제 KWin 시험.
 

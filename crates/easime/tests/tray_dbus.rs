@@ -141,7 +141,17 @@ fn the_icon_registers_shows_the_language_and_follows_it() {
         .unwrap();
 
     // The daemon's side.
-    let news = easime::tray::start();
+    let (asked_sender, asked) = std::sync::mpsc::channel();
+    let (select, next) = (asked_sender.clone(), asked_sender);
+    let news = easime::tray::start_with(easime::tray::Actions {
+        open_settings: Box::new(|| {}),
+        select_language: Box::new(move |language| {
+            let _ = select.send(format!("select {language:?}"));
+        }),
+        next_language: Box::new(move || {
+            let _ = next.send("next".to_owned());
+        }),
+    });
     news.send((Language::Korean, vec![Language::English, Language::Korean]))
         .unwrap();
     wait_until("the icon to register", || !items.lock().unwrap().is_empty());
@@ -184,6 +194,10 @@ fn the_icon_registers_shows_the_language_and_follows_it() {
     let biggest = &korean[3].2;
     assert!(biggest.chunks(4).any(|px| px[0] == 0), "clear corners");
     assert!(biggest.chunks(4).any(|px| px[0] > 0), "drawn box");
+
+    // A click on the icon, as the shell sends it, asks for the next language.
+    item.call_method("Activate", &(10i32, 20i32)).unwrap();
+    assert_eq!(asked.recv_timeout(TIMEOUT).unwrap(), "next");
 
     // A language change changes what the shell sees.
     news.send((

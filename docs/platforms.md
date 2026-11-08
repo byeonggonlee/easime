@@ -136,7 +136,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 | 후보창 | `frontend-wayland/src/candidate.rs`, `panel.rs` | **있음** 입력 패널 + 직접 그림 | **계획** | **계획** |
 | 언어 표시 글자 | `ime-session/src/indicator.rs` | **있음(공통)** | 공통 | 공통 |
 | 표시 글꼴 | `frontend-wayland/src/font.rs` | **있음** Noto Sans CJK 등 | **계획** OS의 CJK 글꼴 | **계획** OS의 CJK 글꼴 |
-| 상태 표시 방식 | `panel.rs`(박스), `crates/easime/src/tray.rs`(트레이) | **있음** 커서 옆 박스, 트레이 아이콘(StatusNotifierItem; 실제 Plasma 미검증, D-Bus 위의 가짜 셸로 시험) | **계획** 알림 영역 아이콘 또는 언어 바 | **계획** 메뉴 막대 입력 소스 |
+| 상태 표시 방식 | `panel.rs`(박스), `crates/easime/src/tray.rs`(트레이) | **있음** 커서 옆 박스, 트레이 아이콘(StatusNotifierItem, 클릭·메뉴로 언어 전환; 실제 Plasma 미검증, D-Bus 위의 가짜 셸로 시험) | **계획** 알림 영역 아이콘 또는 언어 바 | **계획** 메뉴 막대 입력 소스 |
 | 프로세스 구조와 등록 | `data/easime.desktop` 등 | **있음** KWin 가상 키보드 | **계획** TSF DLL 등록 | **계획** `~/Library/Input Methods` |
 | 설정 앱 | `settings/` | **있음** `settings/kde` (Kirigami) | **계획** WinUI 3 | **계획** SwiftUI |
 | 패키지 | `crates/easime`, `settings/kde`, `packaging/` | **있음** `.deb`, `.rpm` | **틀만** MSI (입력기 없음) | **계획** `.pkg` |

@@ -16,7 +16,7 @@ use frontend_wayland::font::Fonts;
 use frontend_wayland::indicator::{Bitmap, render};
 use ime_core::Language;
 use ime_session::indicator::{language_glyph, language_native_name};
-use ksni::menu::StandardItem;
+use ksni::menu::{RadioGroup, RadioItem, StandardItem};
 use ksni::{Category, Icon, MenuItem, Status, ToolTip, Tray};
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
@@ -124,27 +124,59 @@ pub fn labels_for(tags: &[String]) -> &'static Labels {
     &ENGLISH
 }
 
+/// What the user can ask of easime from the tray. Each is handed to the input
+/// method (or the system) and returns at once.
+pub struct Actions {
+    /// "easime Settings".
+    pub open_settings: Box<dyn Fn() + Send>,
+    /// A language chosen from the menu.
+    pub select_language: Box<dyn Fn(Language) + Send>,
+    /// A click on the icon: the next language, as the switch key does.
+    pub next_language: Box<dyn Fn() + Send>,
+}
+
+impl Actions {
+    /// The real ones: the input method is asked through its request channel.
+    pub fn real() -> Self {
+        Self {
+            open_settings: Box::new(open_settings_window),
+            select_language: Box::new(frontend_wayland::select_language),
+            next_language: Box::new(frontend_wayland::next_language),
+        }
+    }
+}
+
 /// The StatusNotifierItem.
 pub struct LanguageTray {
     language: Language,
+    /// The languages the switch key goes through, English first.
+    cycle: Vec<Language>,
     icons: Icons,
     labels: &'static Labels,
-    open_settings: Box<dyn Fn() + Send>,
+    actions: Actions,
 }
 
 impl LanguageTray {
     pub fn new(
         language: Language,
+        cycle: Vec<Language>,
         icons: Icons,
         labels: &'static Labels,
-        open_settings: Box<dyn Fn() + Send>,
+        actions: Actions,
     ) -> Self {
         Self {
             language,
+            cycle,
             icons,
             labels,
-            open_settings,
+            actions,
         }
+    }
+
+    /// The input method switched language.
+    pub fn set_language(&mut self, language: Language, cycle: Vec<Language>) {
+        self.language = language;
+        self.cycle = cycle;
     }
 }
 
@@ -177,16 +209,51 @@ impl Tray for LanguageTray {
         }
     }
 
+    /// A click on the icon: the next language.
+    fn activate(&mut self, _x: i32, _y: i32) {
+        (self.actions.next_language)();
+    }
+
+    /// The languages to choose from (when there is more than English), then
+    /// the settings.
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        vec![
+        let mut menu: Vec<MenuItem<Self>> = Vec::new();
+        if self.cycle.len() > 1 {
+            menu.push(
+                RadioGroup {
+                    selected: self
+                        .cycle
+                        .iter()
+                        .position(|&language| language == self.language)
+                        .unwrap_or(0),
+                    select: Box::new(|tray: &mut Self, index| {
+                        if let Some(&language) = tray.cycle.get(index) {
+                            (tray.actions.select_language)(language);
+                        }
+                    }),
+                    options: self
+                        .cycle
+                        .iter()
+                        .map(|&language| RadioItem {
+                            label: language_native_name(language).into(),
+                            ..RadioItem::default()
+                        })
+                        .collect(),
+                }
+                .into(),
+            );
+            menu.push(MenuItem::Separator);
+        }
+        menu.push(
             StandardItem {
                 label: self.labels.settings.into(),
                 icon_name: "configure".into(),
-                activate: Box::new(|tray: &mut Self| (tray.open_settings)()),
+                activate: Box::new(|tray: &mut Self| (tray.actions.open_settings)()),
                 ..StandardItem::default()
             }
             .into(),
-        ]
+        );
+        menu
     }
 }
 
@@ -216,6 +283,11 @@ pub type LanguageNews = (Language, Vec<Language>);
 /// set up on a worker thread (finding fonts, talking to D-Bus), and a desktop
 /// without a task bar just means the news goes nowhere.
 pub fn start() -> Sender<LanguageNews> {
+    start_with(Actions::real())
+}
+
+/// [`start`] with the actions given (tests watch them).
+pub fn start_with(actions: Actions) -> Sender<LanguageNews> {
     let (sender, receiver) = mpsc::channel::<LanguageNews>();
     let spawned = std::thread::Builder::new()
         .name("easime-tray".into())
@@ -225,9 +297,10 @@ pub fn start() -> Sender<LanguageNews> {
             let labels = labels_for(&easime_config::system_language_tags());
             let tray = LanguageTray::new(
                 Language::English,
+                vec![Language::English],
                 icons,
                 labels,
-                Box::new(open_settings_window),
+                actions,
             );
             // `assume_sni_available`: at login the daemon may start before the
             // desktop shell has a task bar; keep trying instead of giving up.
@@ -240,8 +313,11 @@ pub fn start() -> Sender<LanguageNews> {
                 }
             };
             frontend_wayland::log!("tray: icon registered");
-            for (language, _cycle) in receiver.iter() {
-                if handle.update(|tray| tray.language = language).is_none() {
+            for (language, cycle) in receiver.iter() {
+                if handle
+                    .update(|tray| tray.set_language(language, cycle.clone()))
+                    .is_none()
+                {
                     frontend_wayland::log!("tray: the icon service stopped");
                     break;
                 }
@@ -257,21 +333,35 @@ pub fn start() -> Sender<LanguageNews> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
-    fn tray(language: Language) -> (LanguageTray, Arc<AtomicUsize>) {
-        let opened = Arc::new(AtomicUsize::new(0));
-        let counter = opened.clone();
+    /// What the user asked of easime through the tray, in order.
+    type Asked = Arc<Mutex<Vec<String>>>;
+
+    fn tray_with(language: Language, cycle: Vec<Language>) -> (LanguageTray, Asked) {
+        let asked: Asked = Arc::default();
+        let (settings, select, next) = (asked.clone(), asked.clone(), asked.clone());
         let tray = LanguageTray::new(
             language,
+            cycle,
             Icons::draw(&Fonts::empty()),
             &KOREAN,
-            Box::new(move || {
-                counter.fetch_add(1, Ordering::SeqCst);
-            }),
+            Actions {
+                open_settings: Box::new(move || settings.lock().unwrap().push("settings".into())),
+                select_language: Box::new(move |language| {
+                    select.lock().unwrap().push(format!("select {language:?}"));
+                }),
+                next_language: Box::new(move || next.lock().unwrap().push("next".into())),
+            },
         );
-        (tray, opened)
+        (tray, asked)
+    }
+
+    fn tray(language: Language) -> (LanguageTray, Asked) {
+        tray_with(
+            language,
+            vec![Language::English, Language::Korean, Language::Japanese],
+        )
     }
 
     fn bitmap_with(pixel: [u8; 4]) -> Bitmap {
@@ -357,16 +447,62 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_opens_the_settings() {
-        let (mut tray, opened) = tray(Language::Korean);
+    fn the_menu_lists_the_languages_and_the_settings() {
+        let (mut tray, asked) = tray(Language::Korean);
         let menu = tray.menu();
-        assert_eq!(menu.len(), 1);
-        let MenuItem::Standard(item) = &menu[0] else {
-            panic!("a plain item");
+        assert_eq!(menu.len(), 3, "languages, a separator, settings: {menu:?}");
+        let MenuItem::RadioGroup(group) = &menu[0] else {
+            panic!("the languages come first");
+        };
+        let names: Vec<&str> = group.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(names, ["English", "한국어", "日本語"]);
+        assert_eq!(group.selected, 1, "Korean is the active one");
+        assert!(matches!(menu[1], MenuItem::Separator));
+        let MenuItem::Standard(item) = &menu[2] else {
+            panic!("the settings come last");
         };
         assert_eq!(item.label, "easime 설정");
+
+        // Choosing a language asks for exactly that language; the settings open.
+        (group.select)(&mut tray, 2);
+        (group.select)(&mut tray, 0);
         (item.activate)(&mut tray);
-        assert_eq!(opened.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *asked.lock().unwrap(),
+            ["select Japanese", "select English", "settings"]
+        );
+    }
+
+    #[test]
+    fn the_menu_follows_the_active_language() {
+        let (mut tray, _) = tray(Language::Korean);
+        tray.set_language(
+            Language::Japanese,
+            vec![Language::English, Language::Japanese],
+        );
+        let menu = tray.menu();
+        let MenuItem::RadioGroup(group) = &menu[0] else {
+            panic!("languages");
+        };
+        let names: Vec<&str> = group.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(names, ["English", "日本語"]);
+        assert_eq!(group.selected, 1);
+    }
+
+    #[test]
+    fn with_only_english_there_is_nothing_to_choose() {
+        let (tray, _) = tray_with(Language::English, vec![Language::English]);
+        let menu = tray.menu();
+        assert_eq!(menu.len(), 1, "only the settings");
+        assert!(matches!(menu[0], MenuItem::Standard(_)));
+    }
+
+    #[test]
+    fn a_click_asks_for_the_next_language() {
+        let (mut tray, asked) = tray(Language::Korean);
+        tray.activate(10, 20);
+        tray.activate(10, 20);
+        assert_eq!(*asked.lock().unwrap(), ["next", "next"]);
     }
 
     fn tags(list: &[&str]) -> Vec<String> {
