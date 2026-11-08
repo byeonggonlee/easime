@@ -21,18 +21,23 @@ use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, FORMATETC,
     IDataObject,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{HKL, SetFocus};
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, IEnumITfCompositionView, ITextStoreACP,
-    ITextStoreACP_Impl, ITextStoreACPSink, ITfContext, ITfContextComposition,
-    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfThreadMgr, TEXT_STORE_LOCK_FLAGS,
-    TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS,
-    TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
-    TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS,
-    TS_TEXTCHANGE,
+    CLSID_TF_InputProcessorProfiles, CLSID_TF_ThreadMgr, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
+    IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink,
+    ITfCompartmentMgr, ITfContext, ITfContextComposition, ITfInputProcessorProfileMgr,
+    ITfKeystrokeMgr, ITfThreadMgr, TEXT_STORE_LOCK_FLAGS, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
+    TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END,
+    TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC,
+    TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS, TS_TEXTCHANGE,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
+    SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 use windows::core::{
-    BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement,
+    BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement, w,
 };
 
 /// `target/<profile>/frontend_tsf.dll`, next to the test's own folder.
@@ -540,6 +545,51 @@ const VK_BACK: u16 = 0x08;
 const VK_SPACE: u16 = 0x20;
 const VK_HANGUL: u16 = 0x15;
 
+/// Let the thread's windows handle their messages for a while: TSF learns about
+/// focus through them.
+fn pump(milliseconds: u64) {
+    let end = std::time::Instant::now() + std::time::Duration::from_millis(milliseconds);
+    while std::time::Instant::now() < end {
+        let mut message = MSG::default();
+        // SAFETY: plain message loop of this thread.
+        while unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.as_bool() {
+            unsafe {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// A window of this thread that has the focus, as an application's would, so
+/// that TSF counts the thread as focused and sends keys to its text services.
+fn focused_window() -> HWND {
+    // SAFETY: "STATIC" is a window class every process has; the rest are plain
+    // numbers and strings.
+    unsafe {
+        let instance = GetModuleHandleW(None).unwrap();
+        let window = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("STATIC"),
+            w!("easime typing test"),
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0,
+            0,
+            300,
+            120,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .expect("a window");
+        let _ = SetForegroundWindow(window);
+        let _ = SetFocus(Some(window));
+        window
+    }
+}
+
 /// How many compositions the context has going on.
 fn compositions(context: &ITfContext) -> usize {
     let composer: ITfContextComposition = context.cast().unwrap();
@@ -608,7 +658,12 @@ fn type_through_tsf() {
         .expect("a context over the text store");
     let context: ITfContext = context.expect("the context");
     unsafe { document.Push(&context) }.expect("pushing the context");
+    // The way an application does it: a window with the focus, tied to the document.
+    let window = focused_window();
+    pump(200);
+    let _ = unsafe { thread_manager.AssociateFocus(window, &document) };
     unsafe { thread_manager.SetFocus(&document) }.expect("focusing the document");
+    pump(200);
 
     // easime's text service, activated by TSF for this process only.
     let manager: ITfInputProcessorProfileMgr =
@@ -645,6 +700,25 @@ fn type_through_tsf() {
     }
     .unwrap_or_else(|e| panic!("TSF could not activate easime's service: {e}"));
     let keystrokes: ITfKeystrokeMgr = thread_manager.cast().unwrap();
+    pump(100);
+    // What TSF says about the setup: to read when no key arrives.
+    eprintln!("thread has focus: {:?}", unsafe {
+        thread_manager.IsThreadFocus()
+    });
+    eprintln!("foreground key sink: {:?}", unsafe {
+        keystrokes.GetForeground()
+    });
+    eprintln!(
+        "focused document is ours: {:?}",
+        unsafe { thread_manager.GetFocus() }.map(|focus| focus == document)
+    );
+    let compartments: ITfCompartmentMgr = thread_manager.cast().unwrap();
+    if let Ok(open) = unsafe { compartments.GetCompartment(&GUID_COMPARTMENT_KEYBOARD_OPENCLOSE) } {
+        eprintln!(
+            "keyboard open/close: {:?}",
+            unsafe { open.GetValue() }.map(|v| i32::try_from(&v).ok())
+        );
+    }
     let application = Application {
         keystrokes,
         field: field.clone(),
@@ -659,8 +733,9 @@ fn type_through_tsf() {
         eprintln!("  {call}");
     }
     eprintln!("---- final text: {:?}", application.text());
-    // SAFETY: the thread manager is alive.
+    // SAFETY: the thread manager and the window are alive.
     unsafe { thread_manager.Deactivate() }.expect("thread manager deactivation");
+    let _ = unsafe { DestroyWindow(window) };
     if let Some(log) = easime_config::log_path()
         && let Ok(text) = std::fs::read_to_string(log)
     {

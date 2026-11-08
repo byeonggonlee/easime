@@ -21,7 +21,7 @@ engine-japanese = { path = "../engine-japanese" }
 
 # The typing test hosts a text store (an application's document) for TSF to edit.
 [target.'cfg(windows)'.dev-dependencies]
-windows = { version = "0.62", features = ["Win32_System_Variant"] }
+windows = { version = "0.62", features = ["Win32_System_Variant", "Win32_UI_WindowsAndMessaging"] }
 
 # The COM parts talk to Windows through Microsoft's own bindings.
 [target.'cfg(windows)'.dependencies]
