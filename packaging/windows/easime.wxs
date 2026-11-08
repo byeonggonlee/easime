@@ -24,6 +24,14 @@
   OTHER USERS of the same PC find easime under "Add a keyboard" of Korean;
   only the installing user gets it switched on.
 
+  PROGRAMS USING EASIME ARE NEVER CLOSED (docs/decisions.md, "사용 중 제거·업그레이드").
+  While someone types, the DLL is loaded in their programs. Windows Installer's
+  Restart Manager would close those programs to replace or remove it, without
+  asking in a silent install, and unsaved text would be lost. It is switched off
+  below: a file in use is replaced or removed at the next restart, and the
+  installer says a restart is needed (msiexec exits with 3010; the setup window
+  lists the programs and offers to go on without closing them).
+
   The DLL is 64-bit: 32-bit programs cannot use the input method (docs/platforms.md).
   Everything the custom actions do is in crates/frontend-tsf (registration.rs,
   setup.rs, the exports in lib.rs).
@@ -41,6 +49,8 @@
          with its custom actions); installing an older one over a newer one is
          refused. -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of easime is already installed." />
+    <!-- No Restart Manager: programs using easime are not closed (see the top). -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Setup window: welcome, license, the features below, then install. -->

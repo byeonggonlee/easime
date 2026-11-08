@@ -45,6 +45,33 @@ function Assert([bool]$condition, [string]$message) {
     Write-Host "ok: $message"
 }
 
+# A program the user is typing in: it has the text service loaded (COM creates it
+# from the installed DLL) and keeps running. Returns the process once the DLL is in it.
+function Start-Holder {
+    $code = "`$t = [type]::GetTypeFromCLSID([guid]'$clsid'); `$o = [Activator]::CreateInstance(`$t); if (`$null -eq `$o) { exit 3 }; Start-Sleep -Seconds 900"
+    $holder = Start-Process (Get-Process -Id $PID).Path -PassThru -WindowStyle Hidden -ArgumentList @("-NoProfile", "-Command", "`"$code`"")
+    $deadline = (Get-Date).AddSeconds(60)
+    do {
+        Start-Sleep -Milliseconds 500
+        $loaded = -not $holder.HasExited -and @((Get-Process -Id $holder.Id -ErrorAction SilentlyContinue).Modules | Where-Object { $_.ModuleName -eq "easime_tsf.dll" }).Count -gt 0
+    } until ($loaded -or $holder.HasExited -or (Get-Date) -gt $deadline)
+    Assert $loaded "a program is using easime (process $($holder.Id) has the text service loaded)"
+    return $holder
+}
+
+# Whether Windows Installer kept away from Restart Manager in the operation that
+# wrote this log (it would close the programs using easime).
+function Restart-Manager-Off([string]$what) {
+    $log = Join-Path $logs ("$what.log" -replace '[^\w.-]', '_')
+    @(Get-Content $log | Where-Object { $_ -match "RESTART MANAGER: Disabled" }).Count -gt 0
+}
+
+# Files Windows will rename or delete at the next restart.
+function Pending-At-Restart {
+    $key = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+    if ($key) { @($key.PendingFileRenameOperations) } else { @() }
+}
+
 function Entries {
     @(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
         Where-Object { $_.DisplayName -eq "easime" })
@@ -169,26 +196,45 @@ Assert (-not (Test-Path $dir)) "the install folder is gone"
 Assert-Unregistered "after the uninstall with the PATH entry"
 Assert ((User-Tips).Count -eq 0) "easime is switched off again"
 
-# 5. A newer version replaces an older one, and an older one does not replace a newer one.
+# 5. A newer version replaces an older one, and an older one does not replace a newer
+# one, while a program is using easime: it is never closed (silent installs too);
+# the file it uses is replaced, and finally removed, at the next restart.
 Assert ((Invoke-Msi "install-old" @("/i", "`"$OldMsi`"")) -eq 0) "the older MSI installs"
 $old = (Entries)[0].DisplayVersion
 $languagesBefore = (Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages -join ","
 $disablesBefore = Setup-Lines "disable"
-Assert ((Invoke-Msi "upgrade" @("/i", "`"$Msi`"")) -eq 0) "the newer MSI installs over it"
-Assert ((Setup-Lines "disable") -eq $disablesBefore) "the upgrade does not take the user's input method away in between"
-Assert (((Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages -join ",") -eq $languagesBefore) "the user's language list keeps its order ($languagesBefore)"
-$entries = Entries
-Assert ($entries.Count -eq 1) "still one entry after the upgrade"
-Assert ($entries[0].DisplayVersion -ne $old) "the version changed from $old to $($entries[0].DisplayVersion)"
-Assert ((Test-Path (Join-Path $dir "easime-cli.exe"))) "the program is still there"
-Show-State "after the upgrade"
-Assert-Registered "after the upgrade"
-Assert ((User-Tips) -contains $tip) "easime is still switched on after the upgrade"
-Assert ((Invoke-Msi "downgrade" @("/i", "`"$OldMsi`"")) -ne 0) "the older MSI is refused"
-Assert ((Entries)[0].DisplayVersion -eq $entries[0].DisplayVersion) "the newer version is still installed"
-Assert-Registered "after the refused downgrade"
-Assert ((Invoke-Msi "final-uninstall" @("/x", "`"$Msi`"")) -eq 0) "the MSI uninstalls"
+$holder = Start-Holder
+try {
+    $upgraded = Invoke-Msi "upgrade" @("/i", "`"$Msi`"")
+    Assert ($upgraded -in 0, 3010) "the newer MSI installs over it (exit code $upgraded; 3010 asks for a restart)"
+    Assert (Restart-Manager-Off "upgrade") "the upgrade did not use Restart Manager"
+    Assert (-not $holder.HasExited) "the program using easime is still running after the silent upgrade"
+    Assert ((Setup-Lines "disable") -eq $disablesBefore) "the upgrade does not take the user's input method away in between"
+    Assert (((Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages -join ",") -eq $languagesBefore) "the user's language list keeps its order ($languagesBefore)"
+    $entries = Entries
+    Assert ($entries.Count -eq 1) "still one entry after the upgrade"
+    Assert ($entries[0].DisplayVersion -ne $old) "the version changed from $old to $($entries[0].DisplayVersion)"
+    Assert ((Test-Path (Join-Path $dir "easime-cli.exe"))) "the program is still there"
+    Show-State "after the upgrade"
+    Assert-Registered "after the upgrade"
+    Assert ((User-Tips) -contains $tip) "easime is still switched on after the upgrade"
+    Assert ((Invoke-Msi "downgrade" @("/i", "`"$OldMsi`"")) -ne 0) "the older MSI is refused"
+    Assert ((Entries)[0].DisplayVersion -eq $entries[0].DisplayVersion) "the newer version is still installed"
+    Assert-Registered "after the refused downgrade"
+    $removed = Invoke-Msi "final-uninstall" @("/x", "`"$Msi`"")
+    Assert ($removed -in 0, 3010) "the MSI uninstalls while the program uses easime (exit code $removed)"
+    Assert (Restart-Manager-Off "final-uninstall") "the uninstall did not use Restart Manager"
+    Assert (-not $holder.HasExited) "the program using easime is still running after the silent uninstall"
+    Assert-Unregistered "after the final uninstall"
+    Assert ((User-Tips).Count -eq 0) "easime is switched off again at the end"
+    $dll = Join-Path $dir "easime_tsf.dll"
+    if (Test-Path $dll) {
+        Assert (@(Pending-At-Restart | Where-Object { $_ -like "*easime*" }).Count -gt 0) "the DLL still in use is removed at the next restart"
+    }
+} finally {
+    if (-not $holder.HasExited) { Stop-Process -Id $holder.Id -Force }
+}
+# What waited for a restart can go now that nothing uses it.
+if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
 Assert (-not (Test-Path $dir)) "the install folder is gone"
-Assert-Unregistered "after the final uninstall"
-Assert ((User-Tips).Count -eq 0) "easime is switched off again at the end"
 Write-Host "all installer checks passed"
