@@ -227,6 +227,19 @@ try {
     Assert (-not $holder.HasExited) "the program using easime is still running after the silent uninstall"
     Assert-Unregistered "after the final uninstall"
     Assert ((User-Tips).Count -eq 0) "easime is switched off again at the end"
+    # What Windows Installer did with the DLL the program still has loaded:
+    # printed, so the docs say what happens rather than what was expected.
+    Write-Host "---- after the uninstall, with the program still running"
+    Write-Host "install folder: $(Test-Path $dir); left in it: $((Get-ChildItem $dir -Recurse -ErrorAction SilentlyContinue | ForEach-Object Name) -join ', ')"
+    Write-Host "to do at the next restart: $(@(Pending-At-Restart | Where-Object { $_ -match 'easime|Config\.Msi' }) -join ' | ')"
+    $held = @((Get-Process -Id $holder.Id).Modules | Where-Object { $_.FileName -match 'easime|Config\.Msi' } | ForEach-Object FileName)
+    Write-Host "the program has loaded: $($held -join ', ')"
+    foreach ($what in "upgrade", "final-uninstall") {
+        Write-Host "$what log, files in use:"
+        Get-Content (Join-Path $logs "$what.log") | Where-Object { $_ -match 'in use|InUse|Config\.Msi|REBOOT|\.rbf' } |
+            Select-Object -First 25 | ForEach-Object { Write-Host "  $_" }
+    }
+    Write-Host "----"
     $dll = Join-Path $dir "easime_tsf.dll"
     if (Test-Path $dll) {
         Assert (@(Pending-At-Restart | Where-Object { $_ -like "*easime*" }).Count -gt 0) "the DLL still in use is removed at the next restart"
