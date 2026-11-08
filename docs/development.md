@@ -48,7 +48,18 @@ pwsh packaging\windows\build.ps1                       # target\easime-<버전>-
 pwsh packaging\windows\build.ps1 -Version 0.0.1 -OutDir target\upgrade-test
 pwsh packaging\windows\test.ps1 -Msi target\easime-<버전>-x64.msi -OldMsi target\upgrade-test\easime-0.0.1-x64.msi
 ```
-지금의 MSI는 터미널 데모와 라이선스만 설치한다. 입력기(TSF)는 아직 없다.
+MSI는 텍스트 서비스 DLL(`easime_tsf.dll`)을 설치하고 Windows에 등록하며, 설치한 사용자의 언어 목록에 한국어를 켠다(`rundll32 easime_tsf.dll,EnableForCurrentUser korean`). 터미널 데모와 라이선스도 담는다. 만들려면 Rust와 WiX가 필요하고 `build.ps1`이 WiX UI 확장(설치 창)을 WiX에 더한다.
+
+**실제 Windows PC에서 시험하기** (CI의 `easime-windows-installer-<commit>` 아티팩트를 받거나 위처럼 직접 만든다):
+```powershell
+msiexec /i easime-<버전>-x64.msi            # 설치 창이 뜬다. "Korean input"이 기본으로 켜져 있다
+msiexec /i easime-<버전>-x64.msi /l*v install.log   # 무엇이 일어났는지 기록
+```
+- 설치가 끝나면 설정 → 시간 및 언어 → 언어 및 지역에 한국어가 생기고 키보드에 `easime (한국어)`가 있어야 한다. 작업 표시줄의 언어 표시(또는 Win+Space)로 고른다. **텍스트 서비스는 아직 키를 처리하지 않는다.**
+- 문제가 생기면 `%LOCALAPPDATA%\easime\easime.log`(설치가 언어를 켠 결과: `setup: enable korean: done` 또는 `FAILED: 이유`)와 `install.log`를 본다.
+- 언어를 손으로 켜고 끄기(관리자 권한 없이, 현재 사용자만): `rundll32 "C:\Program Files\easime\easime_tsf.dll",EnableForCurrentUser korean` / `...,DisableForCurrentUser korean`.
+- 제거: 설정 → 앱에서 easime를 지우거나 `msiexec /x easime-<버전>-x64.msi`. 켜 둔 언어와 Windows 등록이 함께 사라진다.
+- 설치 창에서 Korean input을 끄면 등록만 되고(다른 사용자도 쓸 수 있게) 현재 사용자의 언어 목록은 그대로다.
 
 ### 설정 창의 표시 언어와 번역
 표시 언어는 시스템 언어를 따르고, 시험할 때는 `--ui-language=ko|en|ja|zh-Hant|zh-Hans`(또는 `LANGUAGE=ja`)로 바꾼다.

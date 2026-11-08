@@ -30,7 +30,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 ├───────────────────────────────────────────────────────────────┤
 │ OS 고유     코어 밖. 설정 앱, 설치·등록, 트레이, 프로세스 구조    │
 │   settings/kde (있음)  settings/windows  settings/macos        │
-│   deb/rpm (있음)  MSI (틀만)  pkg                              │
+│   deb/rpm (있음)  MSI (있음)  pkg                              │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -91,7 +91,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 - 예상: 키는 IBus가 전달하므로 키 반복은 우리 몫이 아니다(조사 필요). 상태 표시는 GNOME 입력 소스 표시기에 기댄다. 트레이가 없다.
 - Wayland 어댑터와 달라지는 것: 프로토콜, 키 코드 해석, 창 표시. 전환 키 판정·세션·엔진은 같다.
 
-### Windows (TSF): 계획 (설치 프로그램의 틀만 있음)
+### Windows (TSF): 일부 있음 (등록·설치는 있고, 타자는 아직)
 
 - 코어: 전부 쓴다. 코어는 `frontend-tsf`(`cdylib` DLL)에 정적으로 링크된다.
 - 어댑터가 하는 일: TSF 텍스트 서비스 등록, 키 이벤트 싱크(키 코드는 가상 키 코드), 조합 중인 글자는 TSF composition, 후보창, 언어 표시.
@@ -101,7 +101,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
   - 32비트 앱을 지원하려면 32비트 DLL도 필요하고, 사전·프로그램 파일 위치는 `ProgramW6432`(64비트 Program Files)로 찾는다(코드에 반영됨).
   - 오른쪽 Alt: 일부 자판에서는 AltGr(Ctrl+Alt)로 동작한다. 그런 자판은 어댑터가 `KeyRole::Other`로 알려야 한다(예상, 조사 필요).
   - 키 반복은 OS가 한다(예상). `repeat.rs`에 해당하는 코드는 필요 없을 것이다.
-- 코어 바깥(OS 고유): WinUI 3 설정 앱(계획), MSI + TSF 등록. **MSI는 틀만 있다**: `packaging/windows`가 터미널 데모와 라이선스만 설치하고 입력기는 설치하지 않는다. CI의 Windows 러너에서 설치·제거·업그레이드를 시험한다.
+- 코어 바깥(OS 고유): WinUI 3 설정 앱(계획), MSI + TSF 등록. **MSI가 있다**(`packaging/windows`): 텍스트 서비스 DLL을 Windows에 등록하고, 설치한 사용자의 언어 목록에 타자할 수 있는 언어의 프로필을 켠다(언어를 직접 추가하지 않아도 되게 하려는 것). 제거하면 둘 다 되돌린다. 키는 아직 처리하지 않는다. 설치 동작과 한계는 [architecture.md](architecture.md)의 "패키징과 배포". CI의 Windows 러너에서 설치·언어 켜짐·제거·업그레이드를 시험한다.
 - 지금 Windows 쪽에 있는 것(모두 CI의 Windows 러너에서 빌드·테스트): 코어 다섯 크레이트, 키 입력 해석(`frontend-tsf::keys`: 가상 키·스캔 코드 → `KeyEvent`, 전환 키 분류), 시스템 언어 읽기, 설정 변경 감지(`ConfigReloader`), 설정·로그·사전 경로 규칙. TSF **등록**(COM 클래스 레지스트리 키와 언어별 TSF 프로필, `DllRegisterServer`/`DllUnregisterServer`)은 있고, CI의 Windows 러너가 실제로 등록 → TSF가 기록한 프로필 등록(레지스트리의 `CTF\TIP`)이 있는지 확인 → 제거까지 시험한다(`frontend-tsf/tests/registration.rs`). TSF 인터페이스(`GetProfile`)의 조회 결과는 사용자가 설정한 언어에 달려 있어 러너에서는 정보로만 남긴다. **텍스트 서비스 1단계**(COM 클래스 팩터리, 활성화, TSF에 키 이벤트 싱크 등록)는 있고 CI의 Windows 러너가 확인한다: `regsvr32`가 빌드된 DLL을 등록하고, COM이 레지스트리의 그 DLL에서 서비스를 만들고, TSF가 프로필을 이 프로세스에 활성화해(`ActivateProfile`, 이 프로세스에만 적용되어 사용자 설정은 바뀌지 않음) DLL을 불러 서비스를 만들고 활성화해 스레드 관리자가 easime의 싱크를 포그라운드 키 싱크로 보고하는 것(러너에는 한국어가 설치되어 있지 않고 TSF는 설치되지 않은 언어의 프로필 활성화를 거부하므로, 시험은 미국 영어 아래 시험 전용 프로필로 한다. 한국어 프로필을 실제로 쓰려면 Windows 언어 설정에서 그 언어가 있어야 할 것으로 보이며 확인하지 않았다), 팩터리가 서비스를 세고 놓아 주는 것(`frontend-tsf/tests/{dll,service}.rs`). **그러나 어떤 키도 먹지 않는다**(조합, 후보창, 전환 키 없음): 등록돼도 입력은 되지 않는다. 그래서 MSI는 아직 등록하지 않는다(아무것도 안 하는 입력기를 Windows 언어 목록에 보이지 않기 위해). 이것은 Windows에서 입력이 된다는 뜻이 **아니다**.
 - **등록 방식(사용자 결정, 2026-11-08)**: 언어마다 TSF 프로필(한국어, 日本語, 繁體中文, 简体中文)로 등록한다. 언어는 OS(Win+Space, 작업 표시줄 언어 표시)가 고르고, easime 안에서는 한/영 키가 "영어 ↔ 그 프로필의 언어"만 바꾼다. 그러므로 프로필 하나는 **언어 하나만 켠 `Session`**이다(`Session::for_language`: 설정 파일의 언어 목록과 순서, 시스템 언어와 무관하게 그 언어와 영어만 오가고, 설정이 바뀌어도 그대로다. 나머지 설정은 따른다). 엔진이 있는 언어의 프로필만 등록한다(`frontend-tsf::profiles`: 프로필 목록, LANGID ko-KR 0x0412·ja-JP 0x0411·zh-TW 0x0404·zh-CN 0x0804, 고정 GUID, 이름 `easime (한국어)` 식. 지금은 한국어와 日本語). Linux의 "한 키로 영어→한국어→일본어 순환"은 Windows에서 다르게 동작한다.
 
@@ -139,7 +139,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 | 상태 표시 방식 | `panel.rs`(박스), `crates/easime/src/tray.rs`(트레이) | **있음** 커서 옆 박스, 트레이 아이콘(StatusNotifierItem, 클릭·메뉴로 언어 전환; 실제 Plasma 미검증, D-Bus 위의 가짜 셸로 시험) | **계획** 알림 영역 아이콘 또는 언어 바 | **계획** 메뉴 막대 입력 소스 |
 | 프로세스 구조와 등록 | `data/easime.desktop` 등 | **있음** KWin 가상 키보드 | **계획** TSF DLL 등록 | **계획** `~/Library/Input Methods` |
 | 설정 앱 | `settings/` | **있음** `settings/kde` (Kirigami) | **계획** WinUI 3 | **계획** SwiftUI |
-| 패키지 | `crates/easime`, `settings/kde`, `packaging/` | **있음** `.deb`, `.rpm` | **틀만** MSI (입력기 없음) | **계획** `.pkg` |
+| 패키지 | `crates/easime`, `settings/kde`, `packaging/` | **있음** `.deb`, `.rpm` | **있음(타자 미완)** MSI (DLL 등록 + 사용자 언어 켜기) | **계획** `.pkg` |
 | 어댑터 테스트 | `frontend-wayland/tests/` | **있음** 가짜 KWin | **계획** 새 방법 필요 | **계획** 새 방법 필요 |
 
 설정 앱은 OS마다 따로 만들지만 **같은 설정 파일과 같은 페이지 구성**을 쓴다. 설정 앱을 코어에 합치지 않는다.

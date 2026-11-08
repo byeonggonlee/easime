@@ -33,7 +33,7 @@ Linux first (KDE Plasma 6, then GNOME), followed by Windows (TSF) and macOS (Inp
 Linux packages (`.deb` / `.rpm`) are built by CI and will be published on GitHub Releases when a `v*` tag is pushed:
 one package per distribution (`.rpm` for Fedora, `.deb` for Debian 13) with the input method daemon, the settings window (listed in the app menu as "easime Settings") and the Japanese dictionary.
 CI installs each into a clean Fedora or Debian 13 container and starts the daemon and the settings window from the installed package. After installing, select easime in System Settings > Keyboard > Virtual Keyboard.
-A Windows installer (MSI) is built and tested in CI too, but it only contains a terminal demo: there is no Windows input method yet, so it is not published.
+A Windows installer (MSI) is built and tested in CI too (each CI run keeps it as an artifact): it registers the text service with Windows and adds Korean to the language settings of the user who installs it; uninstalling takes both away. The text service does not handle keys yet, so it cannot type Hangul, and it has never been tried on a real PC; it is not published.
 
 ## License
 Licensed under either of
