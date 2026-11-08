@@ -5,8 +5,9 @@
 //! Windows reports about a key press into the OS-independent
 //! [`ime_core::KeyEvent`] and the switch-key role ([`keys`]); the single TSF
 //! profile registered with Windows and the default language cycle ([`profiles`]);
-//! and what happens to a key, which keys the service takes, what text and
-//! composition result, when the language switches ([`typing`]).
+//! what happens to a key, which keys the service takes, what text and
+//! composition result, when the language switches ([`typing`]); and where the
+//! installed files are, next to the DLL ([`install`]).
 //!
 //! **The part that talks to Windows** (Windows only): registering the COM class
 //! and the profile ([`registration`], run by `regsvr32` and the installer),
@@ -23,6 +24,7 @@
 //! a simulated TSF application in CI, not on a real PC. See `docs/platforms.md`,
 //! "Windows", and `docs/status.md`.
 
+pub mod install;
 pub mod keys;
 pub mod placement;
 pub mod profiles;
@@ -69,7 +71,8 @@ mod exports {
     }
 
     /// Where this DLL is, as Windows loaded it.
-    fn dll_path() -> Option<PathBuf> {
+    /// Where this DLL is (the install folder holds its other files).
+    pub(crate) fn dll_path() -> Option<PathBuf> {
         let module = HMODULE(MODULE.load(Ordering::SeqCst) as *mut c_void);
         let mut buffer = vec![0u16; 1024];
         // SAFETY: `buffer` is writable for its whole length.

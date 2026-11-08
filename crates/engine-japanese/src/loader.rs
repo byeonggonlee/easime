@@ -15,10 +15,12 @@
 //! | macOS | `~/Library/Application Support/easime/dictionary` | `/Library/Application Support/easime/dictionary` |
 //! | Windows | `%APPDATA%\easime\dictionary` | `%ProgramW6432%\easime\dictionary` (else `%ProgramFiles%`) |
 //!
-//! Only Linux is in use today. The macOS and Windows rows are the planned
-//! places (the Windows one is the folder the MSI installs into) and are
-//! checked by unit tests on every OS, but no installer puts a dictionary
-//! there yet. See `docs/platforms.md`.
+//! Only Linux uses these today. The macOS row is the planned place. The
+//! Windows text service does not use the Windows system directory: the user
+//! chooses where to install, so it reads the `dictionary` folder next to its
+//! DLL (`frontend-tsf::install`), mapped and only when a word is first
+//! converted. The rows are checked by unit tests on every OS. See
+//! `docs/platforms.md`.
 //!
 //! In each directory `*.tsv` files (the [`MemoryDictionary`] text format)
 //! and `*.bin` files (the [`FileDictionary`] binary format) are loaded in

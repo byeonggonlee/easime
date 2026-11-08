@@ -15,8 +15,6 @@ crate-type = ["cdylib", "rlib"]
 ime-core = { path = "../ime-core" }
 ime-session = { path = "../ime-session" }
 easime-config = { path = "../easime-config" }
-
-[dev-dependencies]
 engine-japanese = { path = "../engine-japanese" }
 
 

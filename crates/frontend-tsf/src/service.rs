@@ -24,11 +24,13 @@
 
 use crate::diag;
 use crate::indicator::{self, Indicator};
+use crate::install;
 use crate::keys::{KeyInfo, KeyboardState};
 use crate::placement::Rect;
 use crate::profiles;
 use crate::typing::{Outcome, Step, Typist, plan};
 use easime_config::{Appearance, Config};
+use engine_japanese::loader::Access;
 use ime_session::{ConfigReloader, JapaneseDictionary, Session};
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
@@ -196,7 +198,17 @@ fn make_typist() -> (Typist, Option<ConfigReloader>, Appearance) {
         cycle.languages.enabled.clone().unwrap_or_default(),
         config.shortcuts.toggle_key
     ));
-    let session = Session::new(&cycle, JapaneseDictionary::installed(), Box::new(diag::log));
+    // Opened when a word is first converted, mapped so that every application
+    // using it shares one copy, from the folder next to this DLL.
+    let dictionary = JapaneseDictionary::on_first_lookup(
+        install::dictionary_dirs(
+            engine_japanese::loader::user_dictionary_dir(),
+            crate::exports::dll_path().as_deref(),
+        ),
+        Access::Map,
+        diag::log,
+    );
+    let session = Session::new(&cycle, dictionary, Box::new(diag::log));
     let reloader = easime_config::config_path().map(|path| ConfigReloader::new(path, CONFIG_POLL));
     (
         Typist::new(session, config.shortcuts.toggle_key),
