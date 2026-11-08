@@ -3,9 +3,10 @@
 
 mod activation;
 mod backend;
-mod dictionary;
-mod model;
 mod view;
+
+// Shared with the other OSes' settings apps (crates/easime-settings-model).
+use easime_settings_model::{dictionary, model};
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QQuickStyle, QString, QUrl};
 

@@ -43,6 +43,7 @@ crates/
   easime-dict-tool/  Mozc 사전 → easime 이진 사전 변환 도구 (OS 독립)
   engine-chinese/    (장기) 병음 → 간체 / 번체 (두 입력 언어)
   easime-config/     설정 스키마 + TOML 읽기/쓰기 + OS별 경로 (모든 프론트엔드와 GUI가 공유)
+  easime-settings-model/ 설정 앱이 보여 주는 값과 변경을 저장하는 규칙, 일본어 사전 상태 (UI 툴킷 없음, 모든 OS의 설정 앱이 공유)
   easime-ffi/        Swift/C#용 바인딩 (UniFFI 검토) — 네이티브 설정 앱과 macOS 프론트엔드가 사용
   frontend-wayland/  KWin input-method-v1 (Linux)
   frontend-xim/      XIM 서버 (XWayland, X11)
@@ -90,7 +91,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - **앱 호환성** (Linux, 나중에): Electron/Chromium 플래그 안내, XIM 상태 확인
 - **단계 (2026-11-07 결정)**: 목표는 초보자용과 전문가용을 나누는 것이고, 단기에는 **전문가용만** 만든다. 전문가용은 아래 페이지에서 모든 옵션을 바로 바꾸고, 변경은 즉시 저장한다. 일본어·중국어 페이지는 실제 옵션이 생길 때 추가한다(빈 페이지를 만들지 않는다).
 - **Linux 구현** (`settings/kde`, 메인 워크스페이스와 별개의 cargo 프로젝트: Qt 6와 Kirigami가 필요하므로):
-  - `src/model.rs`: Qt 없는 상태·저장 로직(단위 테스트). `src/view.rs`: QML이 묶는 값. `src/backend.rs`: cxx-qt QObject(`EasimeSettings`, QML 싱글톤). `qml/`: Kirigami 화면(페이지마다 파일 하나).
+  - `crates/easime-settings-model`(메인 워크스페이스, 모든 OS에서 테스트): UI 툴킷 없는 상태·저장 로직(`model`)과 사전 상태(`dictionary`). Windows 설정 앱도 같은 것을 쓴다. `src/activation.rs`: KDE의 입력기 선택(kwinrc)과 되돌리기. `src/view.rs`: QML이 묶는 값. `src/backend.rs`: cxx-qt QObject(`EasimeSettings`, QML 싱글톤). `qml/`: Kirigami 화면(페이지마다 파일 하나).
   - 저장은 **바뀐 키만** `toml_edit`으로 고친다. 직접 고친 파일의 주석, 키 순서, 모르는 키가 남는다. 읽을 수 없는 파일은 절대 덮어쓰지 않고(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다.
   - 화면의 문구는 모두 `qml/tr.js`의 `Tr.t(...)`를 거친다(한국어 원문을 키로 한 5개 언어 번역표). 한국어 외의 번역은 원어민 검토 전 초안이며 일반 페이지에서 이를 알린다.
 - 설정 파일 위치: Linux `~/.config/easime/config.toml`, Windows `%APPDATA%\easime\config.toml`,

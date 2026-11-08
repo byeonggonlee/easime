@@ -261,6 +261,16 @@ dependencies = [
  "cxx-qt-build",
  "cxx-qt-lib",
  "easime-config",
+ "easime-settings-model",
+ "ime-core",
+ "toml_edit",
+]
+
+[[package]]
+name = "easime-settings-model"
+version = "0.1.0"
+dependencies = [
+ "easime-config",
  "engine-japanese",
  "ime-core",
  "toml_edit",

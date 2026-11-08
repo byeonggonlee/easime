@@ -1,5 +1,6 @@
-//! What the settings window shows and what a change does to the settings
-//! file. No Qt in here, so all of it is tested without a display.
+//! What the settings apps show and what a change does to the settings
+//! file. No UI toolkit in here, so all of it is tested without a display, on
+//! every OS.
 //!
 //! The settings file is also edited by hand, so a change rewrites only the
 //! keys that differ from the file: comments, key order and keys this version

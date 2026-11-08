@@ -1,4 +1,5 @@
-//! Whether the Japanese dictionary is there, for the General page.
+//! Whether the Japanese dictionary is there, for the General page of the
+//! settings apps.
 //!
 //! Without a dictionary Japanese conversion offers only kana, and until now the
 //! only place that said so was the log. The page needs the state (found,
@@ -62,7 +63,10 @@ pub fn inspect(dirs: &[PathBuf]) -> DictionaryState {
     }
 }
 
-/// The state in the folders easime uses on this OS.
+/// The state in the folders easime's Linux input method uses (and the default
+/// folders of other OSes). The Windows text service looks in its own folders,
+/// next to its DLL (`frontend_tsf::install`): the Windows settings app passes
+/// those to [`inspect`].
 pub fn inspect_installed() -> DictionaryState {
     inspect(&engine_japanese::loader::default_dictionary_dirs())
 }

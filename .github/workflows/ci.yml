@@ -34,7 +34,7 @@ jobs:
         os: [windows-latest, macos-latest]
     env:
       # Crates that must build on every OS (no Wayland/X11/Qt dependencies).
-      PORTABLE: -p ime-core -p ime-session -p frontend-tsf -p engine-hangul -p engine-japanese -p easime-dict-tool -p easime-config -p easime-cli
+      PORTABLE: -p ime-core -p ime-session -p frontend-tsf -p engine-hangul -p engine-japanese -p easime-dict-tool -p easime-config -p easime-settings-model -p easime-cli
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

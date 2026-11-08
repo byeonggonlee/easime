@@ -1,0 +1,16 @@
+[package]
+name = "easime-settings-model"
+description = "What the easime settings apps show and how a change is saved, shared by every OS's settings app (no UI toolkit)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+easime-config = { path = "../easime-config" }
+ime-core = { path = "../ime-core" }
+engine-japanese = { path = "../engine-japanese" }
+# Edits only the keys that change, so comments and unknown keys in a
+# hand-edited settings file survive.
+toml_edit = "0.25"

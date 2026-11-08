@@ -30,9 +30,9 @@ Linux builds need `libxkbcommon` and Wayland dev packages (list in `docs/develop
 
 ## Crates (`crates/`)
 `ime-core` (key events, `InputEngine`, `LanguageSwitcher`), `ime-session` (the `Session` every frontend drives: engines, language cycle, switch-key rules, dictionary), `engine-hangul`, `engine-japanese` (romaji to kana, dictionaries),
-`easime-dict-tool` (Mozc dictionary to binary), `easime-config` (TOML settings, OS paths), `easime-cli` (terminal demo),
+`easime-dict-tool` (Mozc dictionary to binary), `easime-config` (TOML settings, OS paths), `easime-settings-model` (what the settings apps show and how a change is saved, no UI toolkit; used by `settings/kde` and the planned `settings/windows`), `easime-cli` (terminal demo),
 `frontend-wayland` (KWin `zwp_input_method_v1`), `frontend-tsf` (Windows: key handling and the key pipeline that needs no Windows API, the TSF profile and language cycle, TSF registration, a text service that types Korean and Japanese into underlined TSF compositions, the cursor-adjacent mode box, and candidates in its own window or handed to applications that draw them; not yet tried on a real PC), `easime` (Linux daemon, with the task bar icon). Planned crates: `docs/architecture.md`.
-Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-session`, `frontend-tsf`, `engine-hangul`, `engine-japanese`, `easime-dict-tool`, `easime-config`, `easime-cli`.
+Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-session`, `frontend-tsf`, `engine-hangul`, `engine-japanese`, `easime-dict-tool`, `easime-config`, `easime-settings-model`, `easime-cli`.
 
 ## Rules
 - Engine crates (`ime-core`, `ime-session`, `engine-*`) have no OS or UI dependencies (Wayland, X11, Qt, Win32). OS-specific code goes in its own crate or under `#[cfg(target_os = ...)]`.
