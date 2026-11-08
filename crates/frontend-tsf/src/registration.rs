@@ -258,23 +258,6 @@ pub fn profile_lookup(profile: &profiles::Profile) -> Result<()> {
     }
 }
 
-/// The language of easime's profile that is active on this thread, if the
-/// active input method is one of easime's. (The user picks the language in
-/// Windows; easime types that language.)
-pub fn active_profile_language() -> Option<ime_core::Language> {
-    let manager = profile_manager().ok()?;
-    let mut active = TF_INPUTPROCESSORPROFILE::default();
-    // SAFETY: the GUID pointer and `active` live for the call.
-    unsafe { manager.GetActiveProfile(&GUID_TFCAT_TIP_KEYBOARD, &mut active) }.ok()?;
-    if active.clsid != guid(CLSID) {
-        return None;
-    }
-    profiles::ALL
-        .iter()
-        .find(|profile| guid(profile.guid) == active.guidProfile)
-        .map(|profile| profile.language)
-}
-
 /// Where TSF keeps the machine-wide registration of a profile.
 fn profile_key(profile: &profiles::Profile) -> String {
     format!(

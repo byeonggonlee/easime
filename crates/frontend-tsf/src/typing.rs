@@ -266,6 +266,7 @@ mod tests {
     use super::*;
     use crate::keys::{VK_BACK, VK_CONTROL, VK_ESCAPE, VK_HANGUL, VK_HANJA, VK_MENU, VK_RETURN};
     use crate::keys::{VK_RMENU, VK_SHIFT, VK_SPACE};
+    use crate::profiles::effective_config;
     use easime_config::{Config, Languages};
     use ime_session::JapaneseDictionary;
 
@@ -281,9 +282,8 @@ mod tests {
     }
 
     fn korean() -> Typist {
-        let session = Session::for_language(
+        let session = Session::new(
             &config(Language::Korean),
-            Language::Korean,
             JapaneseDictionary::installed(),
             Box::new(|_| {}),
         );
@@ -488,6 +488,51 @@ mod tests {
     }
 
     #[test]
+    fn one_key_goes_english_korean_japanese_english_in_one_profile() {
+        use engine_japanese::dictionary::MemoryDictionary;
+        let words = std::sync::Arc::new(MemoryDictionary::parse("にほん\t日本\n").0);
+        let mut chosen = Config::default();
+        chosen.languages.enabled = Some(vec![Language::Korean, Language::Japanese]);
+        // What the Windows service builds from the settings once Japanese can be typed.
+        let config = effective_config(
+            &chosen,
+            &[],
+            &[Language::Korean, Language::Japanese],
+            Language::Korean,
+        );
+        let session = Session::new(&config, JapaneseDictionary::fixed(words), Box::new(|_| {}));
+        let mut field = Field::new(Typist::new(session, ToggleKey::Both));
+        let hangul = named(VK_HANGUL, 0x72);
+        assert_eq!(
+            field.typist.language(),
+            Language::Korean,
+            "starts typing Korean"
+        );
+        field.type_letters("gk");
+        assert_eq!(field.text, "하");
+
+        // Korean -> Japanese: what was being composed is finished first.
+        assert!(field.press(hangul, &NO_KEYS, None));
+        assert_eq!(field.typist.language(), Language::Japanese);
+        assert_eq!(field.text, "하");
+        field.type_letters("nihon");
+        assert_eq!(field.text, "하にほn");
+
+        // Japanese -> English: the kana are finished, the next keys are the application's.
+        assert!(field.press(hangul, &NO_KEYS, None));
+        assert_eq!(field.typist.language(), Language::English);
+        assert_eq!(field.text, "하にほん");
+        field.type_letters("gk");
+        assert_eq!(field.text, "하にほんgk");
+
+        // English -> Korean again.
+        assert!(field.press(hangul, &NO_KEYS, None));
+        assert_eq!(field.typist.language(), Language::Korean);
+        field.type_letters("gk");
+        assert_eq!(field.text, "하にほんgk하");
+    }
+
+    #[test]
     fn holding_the_hangul_key_switches_once() {
         let mut typist = korean();
         let hangul = named(VK_HANGUL, 0x72);
@@ -539,9 +584,8 @@ mod tests {
     #[test]
     fn the_setting_chooses_the_switch_keys() {
         let session = |language| {
-            Session::for_language(
+            Session::new(
                 &config(language),
-                language,
                 JapaneseDictionary::installed(),
                 Box::new(|_| {}),
             )
@@ -576,9 +620,8 @@ mod tests {
     fn a_conversion_that_cannot_be_shown_is_taken_back() {
         use engine_japanese::dictionary::MemoryDictionary;
         let words = std::sync::Arc::new(MemoryDictionary::parse("にほん\t日本,二本\n").0);
-        let session = Session::for_language(
+        let session = Session::new(
             &config(Language::Japanese),
-            Language::Japanese,
             JapaneseDictionary::fixed(words),
             Box::new(|_| {}),
         );

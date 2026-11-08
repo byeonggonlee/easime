@@ -1,20 +1,22 @@
-//! What easime registers with Windows: one text service, with one profile per
-//! language (decision of 2026-11-08, `docs/decisions.md`).
+//! What easime registers with Windows: one text service with **one profile**
+//! (decision of 2026-11-08, `docs/decisions.md`; it replaced "one profile per
+//! language" the same day).
 //!
-//! Windows lists input methods per language, and a profile belongs to exactly
-//! one. So the user picks the language with the OS (Win+Space, the language
-//! indicator of the task bar) and easime only switches between English and that
-//! language inside it: a profile is a `ime_session::Session` for one language
-//! ([`ime_session::Session::for_language`]).
+//! A Windows profile is listed under exactly one language, the *home* language
+//! ([`HOME`], Korean). Inside it easime cycles through the languages the user
+//! chose with the one switch key, English, Korean, Japanese, English, ... like
+//! the Linux version, so nobody has to add several Windows languages by hand and
+//! the cycle and the settings are the same everywhere. The Windows language
+//! indicator keeps showing the home language whichever one is typed; the box next
+//! to the cursor says which one is on.
 //!
-//! Only languages that this frontend can really type get a profile, so Windows
-//! never offers an input method that does nothing (DESIGN.md 3.1): the language
-//! needs an engine ([`easime_config::AVAILABLE_LANGUAGES`]) and the text
-//! service must be able to drive it ([`TYPEABLE`]). The GUIDs are fixed for
-//! ever: Windows remembers the user's choice by them.
+//! Only languages the text service can really type are in the cycle
+//! ([`TYPEABLE`]), so Windows never offers an input method that does nothing
+//! (DESIGN.md 3.1). The GUIDs are fixed for ever: Windows remembers the user's
+//! choice by them.
 
+use easime_config::Config;
 use ime_core::Language;
-use ime_session::indicator::language_native_name;
 
 /// The class id of the easime text service.
 pub const CLSID: &str = "{CFC09673-DDBA-4C84-B57F-CF0B0DDC262C}";
@@ -31,14 +33,18 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// The name Windows shows for it: easime, then the language in its own
-    /// script (`easime (한국어)`).
+    /// The name Windows shows for it.
     pub fn name(&self) -> String {
-        format!("easime ({})", language_native_name(self.language))
+        "easime".to_owned()
     }
 }
 
-/// Every profile easime will have, whether or not its engine exists yet.
+/// The language the one profile is listed under in Windows' language settings.
+pub const HOME: Language = Language::Korean;
+
+/// A profile for each language Windows could list easime under. Only the
+/// [`HOME`] one is registered ([`registered`]); the others are kept so that
+/// removing easime also removes anything an earlier build registered.
 pub const ALL: [Profile; 4] = [
     Profile {
         language: Language::Korean,
@@ -91,16 +97,36 @@ pub fn tip_spec(profile: &Profile) -> String {
 /// candidate window too.
 pub const TYPEABLE: [Language; 1] = [Language::Korean];
 
-/// The profiles to register: those whose language has an engine and that the
-/// text service can type.
+/// The profiles to register: the one under the home language.
 pub fn registered() -> Vec<Profile> {
-    ALL.iter()
-        .filter(|profile| {
-            easime_config::AVAILABLE_LANGUAGES.contains(&profile.language)
-                && TYPEABLE.contains(&profile.language)
-        })
-        .cloned()
-        .collect()
+    profile_of(HOME).cloned().into_iter().collect()
+}
+
+/// The settings the cycle runs with: the languages the user chose (or the
+/// system's, until they choose), only those in `typeable`, in their order.
+///
+/// If that leaves nothing because the system language is not one easime can type
+/// (or everything chosen is not typeable yet), the home language is used: the
+/// user picked easime in Windows' language settings to type with it. A user who
+/// chose *no* language gets English only, as asked.
+pub fn effective_config(
+    config: &Config,
+    system: &[Language],
+    typeable: &[Language],
+    home: Language,
+) -> Config {
+    let wanted = config.languages.resolved(system);
+    let mut kept: Vec<Language> = wanted
+        .iter()
+        .copied()
+        .filter(|language| typeable.contains(language))
+        .collect();
+    if kept.is_empty() && (config.languages.follows_system() || !wanted.is_empty()) {
+        kept.push(home);
+    }
+    let mut config = config.clone();
+    config.languages.enabled = Some(kept);
+    config
 }
 
 #[cfg(test)]
@@ -147,17 +173,8 @@ mod tests {
     }
 
     #[test]
-    fn profiles_are_named_after_their_language() {
-        let names: Vec<String> = ALL.iter().map(Profile::name).collect();
-        assert_eq!(
-            names,
-            [
-                "easime (한국어)",
-                "easime (日本語)",
-                "easime (繁體中文)",
-                "easime (简体中文)"
-            ]
-        );
+    fn the_profile_is_simply_called_easime() {
+        assert!(ALL.iter().all(|profile| profile.name() == "easime"));
     }
 
     #[test]
@@ -188,22 +205,85 @@ mod tests {
     }
 
     #[test]
-    fn only_languages_with_an_engine_that_can_be_typed_are_registered() {
-        let languages: Vec<Language> = registered().iter().map(|p| p.language).collect();
-        assert_eq!(languages, [Language::Korean]);
+    fn one_profile_is_registered_under_the_home_language() {
+        let registered = registered();
+        assert_eq!(registered.len(), 1, "one profile, not one per language");
+        assert_eq!(registered[0].language, HOME);
+        assert_eq!(registered[0].lang_id, 0x0412);
         for language in TYPEABLE {
             assert!(
                 easime_config::AVAILABLE_LANGUAGES.contains(&language),
                 "{language:?} is typeable but has no engine"
             );
         }
-        assert!(
-            !languages.contains(&Language::Japanese),
-            "Japanese needs the candidate window first"
+    }
+
+    fn chosen(languages: Option<Vec<Language>>) -> Config {
+        let mut config = Config::default();
+        config.languages.enabled = languages;
+        config
+    }
+
+    fn cycle(config: &Config, system: &[Language], typeable: &[Language]) -> Vec<Language> {
+        effective_config(config, system, typeable, Language::Korean)
+            .languages
+            .enabled
+            .unwrap()
+    }
+
+    #[test]
+    fn the_cycle_is_what_the_user_chose_among_what_can_be_typed() {
+        use Language::*;
+        let both = [Korean, Japanese];
+        assert_eq!(
+            cycle(&chosen(Some(vec![Japanese, Korean])), &[], &both),
+            [Japanese, Korean],
+            "their order"
         );
-        assert!(
-            !languages.contains(&Language::ChineseSimplified),
-            "no Chinese engine yet, so no Chinese profile"
+        assert_eq!(
+            cycle(&chosen(Some(vec![Korean, Japanese])), &[], &[Korean]),
+            [Korean],
+            "what cannot be typed yet is left out"
         );
+    }
+
+    #[test]
+    fn until_the_user_chooses_the_system_language_decides_and_the_home_language_backs_it_up() {
+        use Language::*;
+        let unchosen = chosen(None);
+        assert_eq!(cycle(&unchosen, &[Korean], &[Korean]), [Korean]);
+        assert_eq!(
+            cycle(&unchosen, &[], &[Korean]),
+            [Korean],
+            "an English system: the user picked easime to type Korean with"
+        );
+        assert_eq!(
+            cycle(&unchosen, &[Japanese], &[Korean]),
+            [Korean],
+            "a Japanese system, Japanese not typeable yet"
+        );
+    }
+
+    #[test]
+    fn choosing_no_language_means_english_only() {
+        assert_eq!(
+            cycle(&chosen(Some(vec![])), &[Language::Korean], &TYPEABLE),
+            [],
+            "an explicit choice is kept"
+        );
+        assert_eq!(
+            cycle(&chosen(Some(vec![Language::Japanese])), &[], &TYPEABLE),
+            [Language::Korean],
+            "but a choice that cannot be typed yet does not leave the profile dead"
+        );
+    }
+
+    #[test]
+    fn nothing_but_the_language_list_changes() {
+        let mut config = chosen(None);
+        config.appearance.indicator_ms = 2500;
+        let effective = effective_config(&config, &[], &TYPEABLE, HOME);
+        assert_eq!(effective.appearance.indicator_ms, 2500);
+        assert_eq!(effective.shortcuts, config.shortcuts);
     }
 }

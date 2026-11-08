@@ -47,7 +47,7 @@ crates/
   frontend-wayland/  KWin input-method-v1 (Linux)
   frontend-xim/      XIM 서버 (XWayland, X11)
   frontend-ibus/     IBus 호환 D-Bus 서비스 (GNOME)
-  frontend-tsf/      Windows TSF DLL (키 입력 해석, 키 처리 파이프라인 `typing`(Windows API 없음), 언어별 프로필 목록, TSF 등록, 한글을 TSF 조합으로 쓰는 텍스트 서비스, 전환 때 커서 옆에 뜨는 모드 상자 `indicator`와 그 위치 규칙 `placement`. 후보창·밑줄은 아직)
+  frontend-tsf/      Windows TSF DLL (키 입력 해석, 키 처리 파이프라인 `typing`(Windows API 없음), 프로필 하나의 등록과 순환 설정 `profiles`, TSF 등록, 한글을 TSF 조합으로 쓰는 텍스트 서비스, 전환 때 커서 옆에 뜨는 모드 상자 `indicator`와 그 위치 규칙 `placement`. 후보창·밑줄은 아직)
   easime/            Linux 데몬 바이너리 (Wayland + XIM + IBus 프론트엔드, 트레이, D-Bus)
 settings/
   kde/               Linux 설정 앱: Rust + cxx-qt + QML + Kirigami
@@ -105,7 +105,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - 패키지를 설치해도 easime가 입력기로 **선택되지는 않는다**: 시스템 설정 → 키보드 → 가상 키보드에서 고르고 다시 로그인해야 한다. 사용자의 데스크톱 설정을 설치 스크립트가 몰래 바꾸지 않기 때문이다(AGENTS.md). 확인과 되돌리기를 갖춘 활성화 화면은 초보자용 첫 실행 안내의 몫이다.
 - **Windows**: **MSI(WiX 5)**, `packaging/windows/easime.wxs`. `build.ps1`이 만들고 `test.ps1`이 CI의 Windows 러너에 실제로 설치·사용·업그레이드·제거를 시험한다.
   담는 것: 텍스트 서비스 DLL(`easime_tsf.dll`, 64비트), 터미널 데모(`easime-cli.exe`), 라이선스.
-  - **설치 때** DLL을 Windows에 등록하고(`regsvr32`, 실패하면 설치가 멈추고 뒤에서 실패하면 등록을 되돌린다), **설치한 사용자의** 언어 목록에 그 언어의 easime 프로필을 켠다(DLL의 `rundll32` 내보내기 `EnableForCurrentUser <언어>`가 `InstallLayoutOrTip`을 부른다. 그 언어가 목록에 없으면 언어도 함께 추가된다). 설치 창(WiX UI의 기능 트리)에서 언어를 기능("Korean input")으로 고르게 하므로 그 화면이 확인이고, 무인 설치(`/qn`)는 기본값(한국어)을 따른다. 기본 설치 폴더는 `C:\Program Files\easime`.
+  - **설치 때** DLL을 Windows에 등록하고(`regsvr32`, 실패하면 설치가 멈추고 뒤에서 실패하면 등록을 되돌린다), **설치한 사용자의** 언어 목록에 그 언어의 easime 프로필을 켠다(DLL의 `rundll32` 내보내기 `EnableForCurrentUser <언어>`가 `InstallLayoutOrTip`을 부른다. 그 언어가 목록에 없으면 언어도 함께 추가된다). 설치 창(WiX UI의 기능 트리)에서 언어를 기능("easime keyboard (listed under Korean)")으로 고르게 하므로 그 화면이 확인이고, 무인 설치(`/qn`)는 기본값(한국어)을 따른다. 기본 설치 폴더는 `C:\Program Files\easime`.
   - **제거 때** 그 사용자의 켠 프로필을 끄고(`DisableForCurrentUser`; 설치가 언어까지 더했다면 그 언어도 목록에서 사라지는 것을 CI에서 확인했다. 설치 전에 이미 있던 언어는 남을 것으로 예상하며 확인하지 않았다) Windows 등록을 푼 다음 파일을 지운다. 되돌리기는 제거다. 업그레이드는 옛 버전을 먼저 제거하고(이 과정이 위와 같다) 새 버전을 설치한다.
   - **같은 PC의 다른 사용자**는 등록된 프로필을 Windows 설정의 "키보드 추가"에서 직접 켠다(등록은 기계 전체, 켜기는 설치한 사용자만).
   - **타자할 수 있는 언어만** 켠다: `frontend-tsf::profiles::TYPEABLE`(지금은 한국어). 일본어·중국어는 후보창 등이 생겨 실제로 입력되면 기능과 프로필을 함께 더한다.

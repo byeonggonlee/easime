@@ -11,8 +11,8 @@
   WHAT IT INSTALLS
     - the text service (easime_tsf.dll), registered with Windows (regsvr32) so
       the languages it offers are listed in the language settings;
-    - for the user who installs it, the profile of each chosen language (the
-      "Input methods" features below) is switched on in their language list, so
+    - for the user who installs it, easime's one profile (listed under Korean) is
+      switched on in their language list (the "Input method" feature below), so
       nobody has to add anything by hand in Windows' settings. The features are
       the confirmation (the setup window shows them; a silent install takes the
       defaults) and uninstalling is the undo: it takes the profiles away again;
@@ -93,8 +93,8 @@
       <!-- The languages to switch on in the language settings of the installing
            user. Only languages that can be typed are listed (frontend-tsf,
            profiles::TYPEABLE); Japanese and Chinese are added when they work. -->
-      <Feature Id="InputKorean" Title="Korean input" Level="1" AllowAdvertise="no"
-               Description="Adds Korean (easime) to your language settings. English typing stays as it is; the Hangul key switches.">
+      <Feature Id="InputKorean" Title="easime keyboard (listed under Korean)" Level="1" AllowAdvertise="no"
+               Description="Adds the easime keyboard to your Windows language settings (under Korean). One key switches between English and the languages you turn on in the easime settings.">
         <ComponentRef Id="InputKoreanMarker" />
       </Feature>
       <Feature Id="AddToPath" Title="Add easime to the PATH" Level="2" AllowAdvertise="no"

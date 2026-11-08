@@ -27,7 +27,6 @@ use crate::indicator::{self, Indicator};
 use crate::keys::{KeyInfo, KeyboardState};
 use crate::placement::Rect;
 use crate::profiles;
-use crate::registration;
 use crate::typing::{Outcome, Step, Typist, plan};
 use easime_config::{Appearance, Config};
 use ime_session::{ConfigReloader, JapaneseDictionary, Session};
@@ -145,24 +144,30 @@ impl Drop for TextService {
     }
 }
 
-/// The input method this thread starts with: the language of the profile the
-/// user picked in Windows, and the user's settings.
+/// The settings the cycle runs with (see [`profiles::effective_config`]).
+fn cycle_config(config: &Config) -> Config {
+    profiles::effective_config(
+        config,
+        &easime_config::system_languages(),
+        &profiles::TYPEABLE,
+        profiles::HOME,
+    )
+}
+
+/// The input method this thread starts with: the user's settings, with the
+/// languages of the one easime profile as the cycle (English, then each language).
 fn make_typist() -> (Typist, Option<ConfigReloader>, Appearance) {
-    let language = registration::active_profile_language().unwrap_or(profiles::TYPEABLE[0]);
     let config = Config::load().unwrap_or_else(|why| {
         diag::log(&format!("settings not read, using the defaults: {why}"));
         Config::default()
     });
+    let cycle = cycle_config(&config);
     diag::log(&format!(
-        "start: {language:?}, switch key {:?}",
+        "start: languages {:?}, switch key {:?}",
+        cycle.languages.enabled.clone().unwrap_or_default(),
         config.shortcuts.toggle_key
     ));
-    let session = Session::for_language(
-        &config,
-        language,
-        JapaneseDictionary::installed(),
-        Box::new(diag::log),
-    );
+    let session = Session::new(&cycle, JapaneseDictionary::installed(), Box::new(diag::log));
     let reloader = easime_config::config_path().map(|path| ConfigReloader::new(path, CONFIG_POLL));
     (
         Typist::new(session, config.shortcuts.toggle_key),
@@ -351,7 +356,7 @@ impl TextService_Impl {
                     .typist
                     .borrow_mut()
                     .as_mut()
-                    .and_then(|typist| typist.apply_config(&config));
+                    .and_then(|typist| typist.apply_config(&cycle_config(&config)));
                 if let (Some(edit), Some(context)) = (edit, context) {
                     let steps = plan(self.composing.borrow().is_some(), &edit);
                     if let Err(e) = self.run(context, steps, true) {
