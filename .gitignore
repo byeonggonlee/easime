@@ -17,6 +17,7 @@
 # Claude Code agent worktrees
 .claude/worktrees/
 
-# The settings app is its own cargo project (it needs Qt 6 and Kirigami)
+# The settings apps are their own cargo projects (Qt 6 and Kirigami; WinUI 3)
 /settings/kde/target/
+/settings/windows/target/
 /settings/kde/.qmlls.ini

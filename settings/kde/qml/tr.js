@@ -490,6 +490,18 @@ var table = {
     "ja": "表示時間を長くする",
     "zh-Hant": "延長顯示時間",
     "zh-Hans": "延长显示时间"
+  },
+  "확인": {
+    "en": "OK",
+    "ja": "OK",
+    "zh-Hant": "確定",
+    "zh-Hans": "确定"
+  },
+  "취소": {
+    "en": "Cancel",
+    "ja": "キャンセル",
+    "zh-Hant": "取消",
+    "zh-Hans": "取消"
   }
 };
 // END TABLE

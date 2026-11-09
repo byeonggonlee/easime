@@ -94,6 +94,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - `crates/easime-settings-model`(메인 워크스페이스, 모든 OS에서 테스트): UI 툴킷 없는 상태·저장 로직(`model`)과 사전 상태(`dictionary`). Windows 설정 앱도 같은 것을 쓴다. `src/activation.rs`: KDE의 입력기 선택(kwinrc)과 되돌리기. `src/view.rs`: QML이 묶는 값. `src/backend.rs`: cxx-qt QObject(`EasimeSettings`, QML 싱글톤). `qml/`: Kirigami 화면(페이지마다 파일 하나).
   - 저장은 **바뀐 키만** `toml_edit`으로 고친다. 직접 고친 파일의 주석, 키 순서, 모르는 키가 남는다. 읽을 수 없는 파일은 절대 덮어쓰지 않고(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다.
   - 화면의 문구는 모두 `qml/tr.js`의 `Tr.t(...)`를 거친다(한국어 원문을 키로 한 5개 언어 번역표). 한국어 외의 번역은 원어민 검토 전 초안이며 일반 페이지에서 이를 알린다.
+- **Windows 구현** (`settings/windows`, 별개의 cargo 프로젝트): `src/app.rs`(windows-reactor 컴포넌트: NavigationView와 페이지, 메시지마다 공유 모델로 저장), `src/tr.rs`(KDE의 `qml/tr.js` 번역표를 빌드 때 읽어 같은 언어 선택 규칙으로 번역), `build.rs`(Windows App Runtime을 실행 파일 옆에 둠). 입력기 켜기 화면은 없다(설치 프로그램 몫).
 - 설정 파일 위치: Linux `~/.config/easime/config.toml`, Windows `%APPDATA%\easime\config.toml`,
   macOS `~/Library/Application Support/easime/config.toml`. 변경되면 재시작 없이 다시 읽는다.
 

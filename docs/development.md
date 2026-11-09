@@ -57,7 +57,7 @@ msiexec /i easime-<버전>-x64.msi /l*v install.log   # 무엇이 일어났는�
 ```
 - 설치가 끝나면 설정 → 시간 및 언어 → 언어 및 지역에 한국어가 생기고 키보드에 `easime`가 있어야 한다(프로필은 하나이고 한국어 아래에 있다). 작업 표시줄의 언어 표시(또는 Win+Space)로 고른다. 쳐 보면 한글이 나와야 한다(한/영 키 또는 오른쪽 Alt를 눌렀다 떼면 영어와 한국어가 바뀐다. 전환하면 커서 아래에 `A`/`한` 상자가 잠깐 뜬다. 커서 위치를 알려 주지 않는 프로그램에서는 뜨지 않는다).
 - 문제가 생기면 `%LOCALAPPDATA%\easime\easime.log`(설치가 언어를 켠 결과: `setup: enable korean: done` 또는 `FAILED: 이유`)와 `install.log`를 본다.
-- 언어를 손으로 켜고 끄기(관리자 권한 없이, 현재 사용자만): `rundll32 "C:\Program Files\easime\easime_tsf.dll",EnableForCurrentUser korean` / `...,DisableForCurrentUser korean`.
+- easime를 손으로 켜고 끄기(관리자 권한 없이, 현재 사용자만, 한국어 아래): `rundll32 "C:\Program Files\easime\easime_tsf.dll",EnableForCurrentUser` / `...,DisableForCurrentUser`.
 - 제거: 설정 → 앱에서 easime를 지우거나 `msiexec /x easime-<버전>-x64.msi`. 켜 둔 언어와 Windows 등록이 함께 사라진다.
 - 설치 창에서 그 기능을 끄면 등록만 되고(다른 사용자도 쓸 수 있게) 현재 사용자의 언어 목록은 그대로다.
 
@@ -68,4 +68,14 @@ cargo run --manifest-path settings/kde/Cargo.toml -- --ui-language=ja
 python3 settings/kde/tests/check_translations.py          # 번역표와 QML 문구 대조 (Qt 필요 없음)
 QT_QPA_PLATFORM=offscreen /usr/lib64/qt6/bin/qmltestrunner -input settings/kde/tests/tst_tr.qml   # 언어 선택 로직
 ```
-화면의 문구는 `Tr.t("한국어 원문")`으로 쓰고, 같은 원문을 `settings/kde/qml/tr.js`의 표에 네 언어로 넣는다(원문을 고치면 표의 키도 고친다). 한국어 외의 번역은 원어민이 검토하기 전까지 초안이다.
+화면의 문구는 `Tr.t("한국어 원문")`으로 쓰고, 같은 원문을 `settings/kde/qml/tr.js`의 표에 네 언어로 넣는다(원문을 고치면 표의 키도 고친다). 한국어 외의 번역은 원어민이 검토하기 전까지 초안이다. Windows 설정 앱도 같은 표를 쓴다(아래).
+
+## Windows 설정 앱 (settings/windows)
+Rust + `windows-reactor`(windows-rs의 WinUI 3 라이브러리)로 만든 별도 cargo 프로젝트다. 페이지·저장 규칙·문구는 KDE 설정 창과 같다(`crates/easime-settings-model`, `settings/kde/qml/tr.js`). Windows에서 빌드하면 `build.rs`가 Windows App Runtime을 NuGet에서 받아 실행 파일 옆에 둔다.
+```sh
+cargo run  --manifest-path settings/windows/Cargo.toml -- --ui-language=ja    # Windows에서 창 열기
+cargo test --manifest-path settings/windows/Cargo.toml                         # 번역(어느 OS에서나)
+cargo clippy --manifest-path settings/windows/Cargo.toml --target x86_64-pc-windows-msvc --all-targets -- -D warnings   # Linux에서 타입 검사만
+pwsh settings\windows\tests\open-window.ps1 -Exe settings\windows\target\debug\easime-settings.exe   # 다섯 언어로 열어 PNG로 저장
+```
+화면의 한국어 문자열은 모두 공유 번역표에 있어야 한다(`tr.rs`의 테스트와 `check_translations.py`가 확인한다).

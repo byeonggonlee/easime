@@ -1,0 +1,37 @@
+[package]
+name = "easime-settings-windows"
+description = "easime settings app for Windows (WinUI 3 through windows-reactor)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/byeonggonlee/easime"
+publish = false
+
+# Its own workspace, like settings/kde: WinUI 3 and the Windows App Runtime
+# are for this app only, and the OS independent CI jobs must not need them.
+[workspace]
+
+[lib]
+name = "easime_settings_windows"
+path = "src/lib.rs"
+
+[[bin]]
+name = "easime-settings"
+path = "src/main.rs"
+
+[dependencies]
+easime-config = { path = "../../crates/easime-config" }
+# What the pages show and how a change is saved, the same as the KDE app.
+easime-settings-model = { path = "../../crates/easime-settings-model" }
+engine-japanese = { path = "../../crates/engine-japanese" }
+ime-core = { path = "../../crates/ime-core" }
+# The translation table, shared with the KDE app (settings/kde/qml/tr.js).
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-reactor = "0.100"
+
+# Build scripts run on the build machine: the Windows App Runtime is fetched
+# and put next to the program only when building on Windows.
+[target.'cfg(windows)'.build-dependencies]
+windows-reactor-setup = "0.100"

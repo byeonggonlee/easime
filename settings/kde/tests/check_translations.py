@@ -2,8 +2,10 @@
 """Static checks of the settings window's translations, no Qt needed.
 
 * every text passed to Tr.t() in qml/*.qml is in the table of qml/tr.js,
-* every entry of the table is used (a changed Korean text must not leave a
-  dead entry behind),
+* every entry of the table is used, by the KDE window or by the Windows
+  settings app, which shares the table (its Korean string literals in
+  settings/windows/src/app.rs; a changed Korean text must not leave a dead
+  entry behind),
 * every entry has all four translations, and %1 appears as often as in the
   Korean text,
 * nothing still goes through qsTr() (it would not be translated).
@@ -36,6 +38,15 @@ for file in qml:
         problems.append(f"{file.name}: qsTr() is not translated, use Tr.t()")
     for match in re.finditer(r'Tr\.t\("((?:[^"\\]|\\.)*)"\)', text):
         used.add(json.loads('"' + match.group(1) + '"'))
+
+# The Windows settings app (settings/windows) reads the same table; its own
+# test checks that each of its Korean texts is in it.
+windows = root.parent / "windows" / "src" / "app.rs"
+if windows.exists():
+    for match in re.finditer(r'"((?:[^"\\]|\\.)*)"', windows.read_text(encoding="utf-8")):
+        text = json.loads('"' + match.group(1) + '"')
+        if re.search("[\uac00-\ud7a3]", text):
+            used.add(text)
 
 for text in sorted(used - set(table)):
     problems.append(f"not in the table: {text!r}")

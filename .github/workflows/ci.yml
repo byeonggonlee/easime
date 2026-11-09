@@ -114,6 +114,48 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  # The Windows settings app (WinUI 3 through windows-reactor) is a separate
+  # cargo project. Its build fetches the Windows App Runtime from NuGet and puts
+  # it next to the program, the way the installer will ship it. The window is
+  # opened in every display language and a picture of each is kept.
+  windows-settings:
+    name: Settings app (Windows, WinUI 3)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: settings/windows
+      - uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\windows-reactor-setup
+          key: windows-reactor-setup-${{ hashFiles('settings/windows/Cargo.lock') }}
+      - name: Format and lint
+        working-directory: settings/windows
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        working-directory: settings/windows
+        run: cargo test --locked
+      - name: Build
+        working-directory: settings/windows
+        run: |
+          cargo build --locked
+          Get-ChildItem target\debug -File | Sort-Object Name | ForEach-Object { "{0,12:N0}  {1}" -f $_.Length, $_.Name }
+      - name: Open the window in every display language
+        run: .\settings\windows\tests\open-window.ps1 -Exe settings\windows\target\debug\easime-settings.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: settings-app-windows
+          path: shots-windows/*
+          if-no-files-found: warn
+          retention-days: 30
+
   # The settings window needs Qt 6 and Kirigami, so it is built in Fedora (the
   # distribution the project targets) and is a separate cargo project that the
   # jobs above never touch. It opens every page without a display and keeps a
