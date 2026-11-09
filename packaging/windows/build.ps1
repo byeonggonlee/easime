@@ -1,4 +1,6 @@
-# Builds the Windows installer: <OutDir>\easime-<version>-x64.msi (default target\)
+# Builds the Windows installer: <OutDir>\easime-<version>-x64.msi (default target\),
+# and setup.exe around it: <OutDir>\easime-setup-<version>-x64.exe (bundle.wxs),
+# which also fetches Microsoft's Windows App Runtime when a PC lacks it.
 #
 # Needs the Rust toolchain and WiX 5 (`dotnet tool install --global wix --version 5.0.2`);
 # the WiX UI extension (the setup window) is added to WiX by this script.
@@ -56,12 +58,17 @@ if (-not (Test-Path $Dictionary)) {
 $wix = Join-Path $env:USERPROFILE ".dotnet\tools\wix.exe"
 if (-not (Test-Path $wix)) { $wix = "wix" }
 
-# The setup window (WixUI) is an extension of WiX, kept next to the tool.
+# The setup window (WixUI), and the bundle's window and searches (Bal, Util), are
+# extensions of WiX, kept next to the tool.
 $uiExtension = "WixToolset.UI.wixext"
+$balExtension = "WixToolset.Bal.wixext"
+$utilExtension = "WixToolset.Util.wixext"
 $wixVersion = ((& $wix --version) -split '\+')[0].Trim()
-if (-not ((& $wix extension list --global) -match [regex]::Escape($uiExtension))) {
-    & $wix extension add --global "$uiExtension/$wixVersion"
-    if ($LASTEXITCODE -ne 0) { throw "could not add the WiX UI extension $uiExtension/$wixVersion" }
+foreach ($extension in $uiExtension, $balExtension, $utilExtension) {
+    if (-not ((& $wix extension list --global) -match [regex]::Escape($extension))) {
+        & $wix extension add --global "$extension/$wixVersion"
+        if ($LASTEXITCODE -ne 0) { throw "could not add the WiX extension $extension/$wixVersion" }
+    }
 }
 
 if (-not [System.IO.Path]::IsPathRooted($OutDir)) { $OutDir = Join-Path $root $OutDir }
@@ -71,6 +78,11 @@ $binaries = Join-Path $root "target\release"
 $source = Join-Path $root "packaging\windows\easime.wxs"
 & $wix build -arch x64 -ext $uiExtension -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Dictionary=$Dictionary" -d "SettingsExe=$settingsExe" -d "Root=$root" -o $out $source
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
-
 Write-Host "built $out"
+
+$setup = Join-Path $OutDir "easime-setup-$Version-x64.exe"
+$bundle = Join-Path $root "packaging\windows\bundle.wxs"
+& $wix build -arch x64 -ext $balExtension -ext $utilExtension -d "Version=$Version" -d "Msi=$out" -d "Root=$root" -o $setup $bundle
+if ($LASTEXITCODE -ne 0) { throw "wix build of setup.exe failed" }
+Write-Host "built $setup"
 Write-Output $out

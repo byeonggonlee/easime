@@ -117,6 +117,7 @@ jobs:
           name: easime-windows-installer-${{ github.sha }}
           path: |
             target/easime-*-x64.msi
+            target/easime-setup-*-x64.exe
             msi-logs/*.log
           if-no-files-found: warn
           retention-days: 30
@@ -150,19 +151,6 @@ jobs:
         run: |
           cargo build --locked
           Get-ChildItem target\debug -File | Sort-Object Name | ForEach-Object { "{0,12:N0}  {1}" -f $_.Length, $_.Name }
-      # The runner already has the runtime staged (machine-wide, not set up by
-      # Microsoft's installer). Whether the app opens on that alone decides
-      # what the installer bundle may treat as "the runtime is there".
-      - name: "Experiment: open the window before installing the runtime"
-        continue-on-error: true
-        run: |
-          $app = Start-Process settings\windows\target\debug\easime-settings.exe -ArgumentList "--ui-language=en" -PassThru
-          $deadline = (Get-Date).AddSeconds(45)
-          do { Start-Sleep -Milliseconds 500; $app.Refresh() } until ($app.HasExited -or $app.MainWindowHandle -ne 0 -or (Get-Date) -gt $deadline)
-          Write-Host "EXPERIMENT window before the runtime installer: handle $($app.MainWindowHandle), title '$($app.MainWindowTitle)', exited $($app.HasExited)"
-          Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { Write-Host "  window: $($_.ProcessName) '$($_.MainWindowTitle)'" }
-          if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
-          Get-Process | Where-Object { $_.MainWindowTitle -like "*easime*" } | Stop-Process -Force -ErrorAction SilentlyContinue
       - name: Install the Windows App Runtime from Microsoft
         run: .\packaging\windows\runtime.ps1 -Install
       - name: Open the window in every display language
@@ -172,6 +160,31 @@ jobs:
         with:
           name: settings-app-windows
           path: shots-windows/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # setup.exe on a fresh runner, which has the Windows App Runtime only staged,
+  # not installed: it must download Microsoft's runtime installer, install
+  # easime, open the settings app, and leave the runtime when easime goes.
+  windows-setup:
+    name: Windows setup.exe (runtime from Microsoft)
+    needs: windows-installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: easime-windows-installer-${{ github.sha }}
+          path: installer
+      - name: Set up easime with setup.exe, remove it, set it up again
+        run: |
+          $setup = Get-ChildItem installer -Recurse -Filter "easime-setup-*-x64.exe" | Select-Object -First 1
+          .\packaging\windows\test-setup.ps1 -Setup $setup.FullName
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: easime-windows-setup-logs-${{ github.sha }}
+          path: setup-logs/*.log
           if-no-files-found: warn
           retention-days: 30
 

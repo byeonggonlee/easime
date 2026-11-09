@@ -43,12 +43,14 @@ cargo deb -p easime --no-build          # Debian: target/debian/easime_*.deb    
 ### Windows 설치 프로그램 만들기와 시험
 Windows에서만 된다. WiX 5가 필요하다: `dotnet tool install --global wix --version 5.0.2`.
 ```powershell
-pwsh packaging\windows\build.ps1                       # target\easime-<버전>-x64.msi
+pwsh packaging\windows\build.ps1                       # target\easime-<버전>-x64.msi 와 target\easime-setup-<버전>-x64.exe
 # 시험은 컴퓨터를 바꾼다(설치·제거). CI 러너나 가상 머신에서만 실행한다.
 pwsh packaging\windows\build.ps1 -Version 0.0.1 -OutDir target\upgrade-test
+pwsh packaging\windows\runtime.ps1 -Install           # Microsoft의 Windows App Runtime (설정 앱용)
 pwsh packaging\windows\test.ps1 -Msi target\easime-<버전>-x64.msi -OldMsi target\upgrade-test\easime-0.0.1-x64.msi
+pwsh packaging\windows\test-setup.ps1 -Setup target\easime-setup-<버전>-x64.exe   # 런타임이 없는 PC에서
 ```
-MSI는 텍스트 서비스 DLL(`easime_tsf.dll`)을 설치하고 Windows에 등록하며, 설치한 사용자의 언어 목록에 한국어를 켠다(`rundll32 easime_tsf.dll,EnableForCurrentUser korean`). 터미널 데모와 라이선스도 담는다. 만들려면 Rust와 WiX가 필요하고 `build.ps1`이 WiX UI 확장(설치 창)을 WiX에 더한다.
+MSI는 텍스트 서비스 DLL(`easime_tsf.dll`)을 설치하고 Windows에 등록하며, 설치한 사용자의 입력 방법에 easime를 한국어 아래로 켠다. 설정 앱(시작 메뉴 "easime"), 일본어 사전, 터미널 데모와 라이선스도 담는다. `setup.exe`(번들, `bundle.wxs`)는 그 MSI를 담고, Windows App Runtime이 없으면 Microsoft에서 공식 설치 파일(크기·SHA-512 고정)을 받아 먼저 설치한다(easime는 런타임을 재배포하지 않는다). 만들려면 Rust와 WiX가 필요하고 `build.ps1`이 WiX 확장(UI, Bal, Util)을 WiX에 더한다.
 
 **실제 Windows PC에서 시험하기** (절차와 기록 양식은 [windows-testing.md](windows-testing.md)) (CI의 `easime-windows-installer-<commit>` 아티팩트를 받거나 위처럼 직접 만든다):
 ```powershell
