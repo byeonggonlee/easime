@@ -314,8 +314,9 @@ fn registered_languages() -> Vec<u16> {
     .collect()
 }
 
-/// The Windows language id of a language tag (`en-US`), if it names one
-/// language of one region.
+/// The Windows language id of a language tag (`en-US`), if it names a
+/// language Windows knows. A bare language (`en`) gets the region Windows
+/// picks for it (en-US).
 fn language_id(tag: &str) -> Option<u16> {
     let name = wide(tag);
     // SAFETY: `name` is NUL-terminated and lives for the call.
@@ -558,13 +559,14 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_language_or_nonsense_has_no_id_to_list_under() {
-        assert_eq!(
-            language_id("en"),
-            None,
-            "no region: a profile cannot be listed under it"
-        );
-        assert_eq!(language_id("ko"), None);
+    fn a_bare_language_gets_the_region_windows_picks_for_it() {
+        // Seen on a Windows runner: "en" is read as en-US, which is what a
+        // user whose list says just "English" has.
+        assert_eq!(language_id("en"), Some(0x0409));
+    }
+
+    #[test]
+    fn nonsense_has_no_id_to_list_under() {
         assert_eq!(language_id(""), None);
         assert_eq!(language_id("not a language"), None);
     }

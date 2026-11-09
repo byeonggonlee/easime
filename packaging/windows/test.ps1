@@ -143,8 +143,9 @@ function User-Tips {
 }
 
 # The languages in this user's language list that the installer also lists easime
-# under (decision of 2026-11-09): one language of one region (en-US), not a bare
-# language (en); Korean has it anyway. As language ids in four hex digits.
+# under (decision of 2026-11-09): the ones that name one language of one region
+# (en-US); Korean has it anyway. (A bare "en" is listed under en-US too: Windows
+# reads it that way. Only what must be there is checked.) As language ids in four hex digits.
 function User-Language-Ids {
     @(Get-ChildItem $userProfiles -ErrorAction SilentlyContinue | ForEach-Object {
         try { $culture = [System.Globalization.CultureInfo]::new($_.PSChildName) } catch { return }

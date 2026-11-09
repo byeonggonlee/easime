@@ -94,8 +94,8 @@ pub fn parse_language_key(name: &str) -> Option<u16> {
 }
 
 /// Whether a Windows language id names one language of one region (`ko-KR`),
-/// which a profile can be listed under, and not a bare language (`ko`), "any
-/// language" (`0xFFFF`) or nothing.
+/// which a profile can be listed under, and not a bare language id (`0x0012`),
+/// "any language" (`0xFFFF`) or nothing.
 pub fn is_specific_language(lang_id: u16) -> bool {
     lang_id != 0 && lang_id != 0xFFFF && (lang_id >> 10) != 0
 }
