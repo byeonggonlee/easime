@@ -148,11 +148,23 @@ jobs:
           Get-ChildItem target\debug -File | Sort-Object Name | ForEach-Object { "{0,12:N0}  {1}" -f $_.Length, $_.Name }
       - name: Open the window in every display language
         run: .\settings\windows\tests\open-window.ps1 -Exe settings\windows\target\debug\easime-settings.exe
+      # The license terms of the Windows App Runtime that ships next to the app,
+      # as the NuGet package states them (kept in data/windowsappsdk once read).
+      - name: Show the Windows App Runtime license
+        if: always()
+        run: |
+          $nupkg = Get-ChildItem "$env:LOCALAPPDATA\windows-reactor-setup\temp" -Filter "Microsoft.WindowsAppSDK.Runtime.*.nupkg" | Select-Object -First 1
+          New-Item -ItemType Directory -Force shots-windows\windowsappsdk | Out-Null
+          tar -xf $nupkg.FullName -C shots-windows\windowsappsdk license.txt NOTICE.txt
+          Write-Host "---- $($nupkg.Name): license.txt"
+          Get-Content shots-windows\windowsappsdk\license.txt
+          Write-Host "---- NOTICE.txt"
+          Get-Content shots-windows\windowsappsdk\NOTICE.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: settings-app-windows
-          path: shots-windows/*
+          path: shots-windows/
           if-no-files-found: warn
           retention-days: 30
 
