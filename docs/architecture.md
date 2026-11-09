@@ -20,7 +20,7 @@
 - GNOME에는 기본 트레이가 없으므로 상태 표시는 GNOME 자체 입력 소스 표시기와 커서 아래 박스에 의존한다.
 - wlroots 계열(Sway, Hyprland)은 `input-method-v2`를 쓰므로 필요하면 나중에 추가할 수 있다.
 
-### Windows (Linux 다음) — 구현됨, 실제 PC 미시험
+### Windows (Linux 다음) — 구현됨, 실제 PC 입력 시험(W1–W14) 문제 없음 보고
 - **TSF(Text Services Framework)** 텍스트 서비스: `windows` crate로 COM 인터페이스를 구현하고 `cdylib` DLL(`easime_tsf.dll`)로 빌드한다. 한국어 아래 프로필 하나를 등록하고, 그 안에서 영어 → 한국어 → 일본어를 한 키로 순환한다.
 - TSF DLL은 각 앱 프로세스에 로드되므로 모드는 프로세스마다 따로다. "전체 공통 입력 상태"를 위한 공유(공유 메모리 또는 named pipe 서비스)는 아직 없다.
 - 조합은 TSF composition과 표시 속성(밑줄)으로, 후보창과 상태 박스는 Win32(GDI) 창으로 그린다. 후보를 직접 그리는 앱(전체 화면 게임 등)에는 `ITfCandidateListUIElement`로 목록을 넘긴다. 알림 영역 아이콘이나 언어 바 단추 같은 상시 표시는 아직 없다.
@@ -110,7 +110,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - MSI가 담는 것: 텍스트 서비스 DLL(64비트), 일본어 사전(`dictionary\mozc.bin`과 Mozc 원본 라이선스, 빼고 설치할 수 있는 기능, 약 36MB), 설정 앱과 시작 메뉴 "easime", 터미널 데모, 앱 아이콘, 라이선스. 사전은 CI가 Linux 패키지와 같은 스크립트(`scripts/build-dictionary.sh mozc`)로 만들고, 텍스트 서비스는 DLL 옆 `dictionary` 폴더에서 찾는다(설치 위치를 바꿔도 따라감).
   - 설치 때 DLL을 등록하고 설치한 사용자의 입력 방법에 easime를 켜며(설치 창의 기능 선택이 확인), 제거가 되돌리기다. easime를 쓰는 프로그램은 닫지 않고 사용 중인 파일은 다음 재시작 때 바꾼다.
   - `setup.exe`는 MSI를 담고, 설정 앱이 필요로 하는 Windows App Runtime이 없을 때만 Microsoft의 공식 설치 파일을 받아 먼저 설치한다. easime는 런타임을 재배포하지 않는다.
-  - 릴리스에는 올리지 않고 CI 아티팩트(`easime-windows-installer-<commit>`)로만 둔다: 실제 PC에서 시험한 적이 없다.
+  - 릴리스에는 올리지 않고 CI 아티팩트(`easime-windows-installer-<commit>`)로만 둔다. 실제 PC 시험은 입력(W1–W14)까지만 했고 설정 앱·`setup.exe`·제거는 아직이다.
   - 동작 상세, CI가 확인하는 것, 한계: [implementation/windows.md](implementation/windows.md)의 "설치 프로그램".
 - **macOS**: `.pkg` (서명/공증)
 - 버전은 workspace 전체가 하나의 버전을 공유한다. 태그 `vX.Y.Z`를 푸시하면 릴리스 워크플로가 동작한다.

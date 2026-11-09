@@ -26,7 +26,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 │   (easime-dict-tool, easime-cli)                              │
 ├───────────────────────────────────────────────────────────────┤
 │ OS 어댑터   프런트엔드. OS의 입력기 API ↔ 코어                  │
-│   frontend-wayland (있음)  frontend-tsf (있음, 실제 PC 미시험)  │
+│   frontend-wayland (있음)  frontend-tsf (있음, 입력 시험 W1–W14 통과) │
 │   frontend-ibus (계획)  macOS 껍데기(Swift) + easime-ffi (계획) │
 ├───────────────────────────────────────────────────────────────┤
 │ OS 고유     코어 밖. 설정 앱, 설치·등록, 트레이, 프로세스 구조    │
@@ -93,7 +93,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 - 예상: 키는 IBus가 전달하므로 키 반복은 우리 몫이 아니다(조사 필요). 상태 표시는 GNOME 입력 소스 표시기에 기댄다. 트레이가 없다.
 - Wayland 어댑터와 달라지는 것: 프로토콜, 키 코드 해석, 창 표시. 전환 키 판정·세션·엔진은 같다.
 
-### Windows (TSF): 있음 (CI 확인, 실제 PC 미시험)
+### Windows (TSF): 있음 (CI 확인, 실제 PC 입력 시험 W1–W14 문제 없음 보고)
 
 구현 현황과 CI가 확인하는 것, 실제 PC에서 확인하지 않은 것은 **[implementation/windows.md](implementation/windows.md)**에 있다. 여기서는 코어와 어댑터를 나누는 관점에서 Windows만의 차이를 적는다.
 
@@ -125,6 +125,8 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 ## OS 의존 항목 목록
 
 코어 안에 있어도 OS에 따라 달라지는 것, 어댑터에 있는 것을 파일 단위로 모았다. 코드를 고치면 이 표도 고친다.
+
+아래 표의 Windows 열에서 "미검증"·"실제 PC 미시험"은 2026-11-09 이전 기준이다. 그날 [Windows 시험 절차서](testing/windows.md)의 W1–W14가 문제 없다고 보고되었으나(상세 미기록) 표의 항목마다 어느 시험으로 확인되었는지는 아직 대응시키지 않았으므로, 항목별로는 "미검증"을 그대로 둔다. [implementation/windows.md](implementation/windows.md)에 구성 요소별 대응이 있다.
 
 | 항목 | 위치 | Linux | Windows | macOS |
 |---|---|---|---|---|

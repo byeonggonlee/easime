@@ -4,15 +4,15 @@
 It does not sit on top of ibus, fcitx or any other input method framework.
 
 > **Early development. No release has been published.**
-> Everything below is built and tested by CI. Only basic Korean/English typing on Fedora KDE has been tried by a person;
-> the Windows text service has never been tried on a real PC.
+> Everything below is built and tested by CI. People have tried only part of it: basic Korean/English typing on Fedora KDE,
+> and typing, Hanja and Japanese conversion on a real Windows PC (no problems reported, details not recorded).
 
 ## What works
 
 | Platform | State |
 |---|---|
 | **Linux, KDE Plasma 6 (Wayland)** | Korean (Dubeolsik), Japanese (romaji to kana, word-by-word Mozc dictionary conversion), single-syllable Korean Hanja, a candidate popup, a language indicator, a tray icon, an expert settings window (Kirigami), `.deb` and `.rpm` packages. Korean/English typing was user-tested; the rest is tested against a fake compositor and in clean containers. |
-| **Windows** | A TSF text service for Korean and Japanese (underlined compositions, candidate window), an installer (`setup.exe` with an MSI inside) and a WinUI 3 settings app. Tested in CI against a simulated TSF application. Never tried on a real PC. |
+| **Windows** | A TSF text service for Korean and Japanese (underlined compositions, candidate window), an installer (`setup.exe` with an MSI inside) and a WinUI 3 settings app. Tested in CI against a simulated TSF application, and the typing, Hanja and Japanese conversion tests were run on a real PC (no problems reported). The settings app, `setup.exe` on a PC without the runtime, and uninstalling have not been tried by a person. |
 | GNOME, macOS, XWayland apps, Chinese | Planned. |
 
 Japanese conversion is word by word (no clause or context conversion yet). Settings-window translations other than Korean are unreviewed drafts.

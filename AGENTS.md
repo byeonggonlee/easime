@@ -2,7 +2,7 @@
 
 Easy Eastern Asian IME: a Korean (then Japanese, Chinese) input method written from scratch in Rust, without ibus/fcitx.
 Platforms: Linux (KDE Plasma 6 Wayland first, then GNOME), then Windows, then macOS. License: MIT OR Apache-2.0.
-Status: early; a user confirmed basic Korean/English input on Fedora KDE. The Windows text service, installer and settings app exist but have only been tested in CI, never on a real PC. Broader testing is pending (see `docs/status.md`).
+Status: early; a user confirmed basic Korean/English input on Fedora KDE. The Windows text service, installer and settings app are tested in CI; on a real PC the typing, Hanja and Japanese conversion tests (W1-W14 in `docs/testing/windows.md`) were run with no problems reported, while the settings app, `setup.exe` without the runtime and uninstalling are untried. Broader testing is pending (see `docs/status.md`).
 
 ## Required reading for every agent and role
 - At the start of every task, read [DESIGN.md](DESIGN.md) in full and [CLAUDE.md](CLAUDE.md). This applies to implementers, reviewers, and delegated agents, regardless of tool name.
@@ -32,7 +32,7 @@ Linux builds need `libxkbcommon` and Wayland dev packages (list in `docs/develop
 ## Crates (`crates/`)
 `ime-core` (key events, `InputEngine`, `LanguageSwitcher`), `ime-session` (the `Session` every frontend drives: engines, language cycle, switch-key rules, dictionary), `engine-hangul`, `engine-japanese` (romaji to kana, dictionaries),
 `easime-dict-tool` (Mozc dictionary to binary), `easime-config` (TOML settings, OS paths), `easime-settings-model` (what the settings apps show and how a change is saved, no UI toolkit; used by `settings/kde` and `settings/windows`), `easime-cli` (terminal demo),
-`frontend-wayland` (KWin `zwp_input_method_v1`), `frontend-tsf` (Windows: key handling and the key pipeline that needs no Windows API, the TSF profile and language cycle, TSF registration, a text service that types Korean and Japanese into underlined TSF compositions, the cursor-adjacent mode box, and candidates in its own window or handed to applications that draw them; not yet tried on a real PC), `easime` (Linux daemon, with the task bar icon). Planned crates: `docs/architecture.md`.
+`frontend-wayland` (KWin `zwp_input_method_v1`), `frontend-tsf` (Windows: key handling and the key pipeline that needs no Windows API, the TSF profile and language cycle, TSF registration, a text service that types Korean and Japanese into underlined TSF compositions, the cursor-adjacent mode box, and candidates in its own window or handed to applications that draw them; typing tried on a real PC, see `docs/status.md`), `easime` (Linux daemon, with the task bar icon). Planned crates: `docs/architecture.md`.
 Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-session`, `frontend-tsf`, `engine-hangul`, `engine-japanese`, `easime-dict-tool`, `easime-config`, `easime-settings-model`, `easime-cli`.
 
 ## Rules
@@ -72,5 +72,5 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-sess
 | [docs/architecture.md](docs/architecture.md) | touching a frontend or protocol (KWin, GNOME, Windows, macOS), config format, settings GUI, packaging |
 | [docs/status.md](docs/status.md) | choosing what to do next: status board (implemented / CI-verified / tried on a real machine), known gaps, next candidates |
 | [docs/implementation/core.md](docs/implementation/core.md), [linux-kde.md](docs/implementation/linux-kde.md), [windows.md](docs/implementation/windows.md) | what exists in the shared core / the KDE frontend / the Windows frontend, and exactly how far it was verified |
-| [docs/testing/kde.md](docs/testing/kde.md), [windows.md](docs/testing/windows.md) | trying easime on a real desktop or PC: procedures and the (still empty) result tables |
+| [docs/testing/kde.md](docs/testing/kde.md), [windows.md](docs/testing/windows.md) | trying easime on a real desktop or PC: procedures and the result tables (only partly filled) |
 | [docs/development.md](docs/development.md) | trying the daemon in KWin, recovery steps, build dependencies |
