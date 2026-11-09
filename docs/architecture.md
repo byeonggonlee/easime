@@ -78,7 +78,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
 - **Linux (KDE Plasma 6)**: Rust + cxx-qt (Qt 6) + QML + **Kirigami**
   - Plasma 시스템 설정과 똑같이 보이고 동작해야 한다 (Breeze, 다크/라이트, 강조색, 글꼴, HiDPI).
   - 단독 앱으로 시작하고, 나중에 KCM으로 옮길 수 있게 만든다. GNOME에서도 동작은 해야 한다.
-- **Windows**: **WinUI 3** (Windows 11 Fluent 디자인). Rust + `windows-reactor`(windows-rs의 Rust용 WinUI 3 라이브러리)로 만들고, Linux 설정 앱의 Qt 없는 저장 로직을 같이 쓴다. Windows App Runtime은 MSI에 함께 넣는다(self-contained). 결정: [decisions.md](decisions.md) "설정 GUI"
+- **Windows**: **WinUI 3** (Windows 11 Fluent 디자인). Rust + `windows-reactor`(windows-rs의 Rust용 WinUI 3 라이브러리)로 만들고, Linux 설정 앱의 Qt 없는 저장 로직을 같이 쓴다. Windows App Runtime은 설치된 Microsoft 프레임워크 패키지를 쓰고(framework-dependent), 설치 프로그램(번들)이 없을 때만 Microsoft에서 받아 설치한다. 결정: [decisions.md](decisions.md) "설정 GUI"
 - **macOS**: **SwiftUI**
 - 공통 페이지 구성 (사이드바):
   - **일반**: 입력기 활성화·되돌리기(KDE), 지원·사전 상태, 설정 파일 위치·다시 읽기·초기화, (나중에) 자동 시작·트레이 아이콘 켜기/끄기
@@ -94,7 +94,7 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - `crates/easime-settings-model`(메인 워크스페이스, 모든 OS에서 테스트): UI 툴킷 없는 상태·저장 로직(`model`)과 사전 상태(`dictionary`). Windows 설정 앱도 같은 것을 쓴다. `src/activation.rs`: KDE의 입력기 선택(kwinrc)과 되돌리기. `src/view.rs`: QML이 묶는 값. `src/backend.rs`: cxx-qt QObject(`EasimeSettings`, QML 싱글톤). `qml/`: Kirigami 화면(페이지마다 파일 하나).
   - 저장은 **바뀐 키만** `toml_edit`으로 고친다. 직접 고친 파일의 주석, 키 순서, 모르는 키가 남는다. 읽을 수 없는 파일은 절대 덮어쓰지 않고(변경을 거부하고 알림), 초기화는 `config.toml.bak`을 남긴다.
   - 화면의 문구는 모두 `qml/tr.js`의 `Tr.t(...)`를 거친다(한국어 원문을 키로 한 5개 언어 번역표). 한국어 외의 번역은 원어민 검토 전 초안이며 일반 페이지에서 이를 알린다.
-- **Windows 구현** (`settings/windows`, 별개의 cargo 프로젝트): `src/app.rs`(windows-reactor 컴포넌트: NavigationView와 페이지, 메시지마다 공유 모델로 저장), `src/tr.rs`(KDE의 `qml/tr.js` 번역표를 빌드 때 읽어 같은 언어 선택 규칙으로 번역), `build.rs`(Windows App Runtime을 실행 파일 옆에 둠). 입력기 켜기 화면은 없다(설치 프로그램 몫).
+- **Windows 구현** (`settings/windows`, 별개의 cargo 프로젝트): `src/app.rs`(windows-reactor 컴포넌트: NavigationView와 페이지, 메시지마다 공유 모델로 저장), `src/tr.rs`(KDE의 `qml/tr.js` 번역표를 빌드 때 읽어 같은 언어 선택 규칙으로 번역), 런타임은 실행 파일 옆에 두지 않는다(설치된 Microsoft 프레임워크 패키지를 쓴다). 입력기 켜기 화면은 없다(설치 프로그램 몫).
 - 설정 파일 위치: Linux `~/.config/easime/config.toml`, Windows `%APPDATA%\easime\config.toml`,
   macOS `~/Library/Application Support/easime/config.toml`. 변경되면 재시작 없이 다시 읽는다.
 
