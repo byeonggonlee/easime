@@ -37,8 +37,10 @@ use windows::core::{PCWSTR, w};
 /// The window class, which the tests look for.
 pub const CLASS_NAME: &str = "EasimeIndicator";
 
-/// The box's size at 96 dpi, as on Linux.
-const SIZE: i32 = 48;
+/// The box's size at 96 dpi. Smaller than the 48 px box of the Linux daemon,
+/// because this one is then multiplied by the display scale (a 150% display
+/// made 48 px into 72 px, too big next to the text; real-PC feedback).
+const SIZE: i32 = 32;
 const BACKGROUND: COLORREF = COLORREF(0x0026_2220);
 const FOREGROUND: COLORREF = COLORREF(0x00F2_F2F2);
 /// Slightly see-through, like the Linux box (0xE0 of 0xFF).

@@ -34,18 +34,21 @@ use windows::core::{PCWSTR, w};
 /// The window class, which the tests look for.
 pub const CLASS_NAME: &str = "EasimeCandidates";
 
-// Sizes at 96 dpi, as in the Linux window.
-const MIN_WIDTH: i32 = 400;
-const MAX_WIDTH: i32 = 960;
-const MARGIN: i32 = 12;
-const HEADER: i32 = 34;
-const ROW: i32 = 34;
-const FOOTER: i32 = 30;
+// Sizes at 96 dpi, multiplied by the display scale. Smaller than the Linux
+// window (400 px wide, 34 px rows, 23 px candidates), which is not multiplied:
+// at 125-150% the same numbers were too big (real-PC feedback). A page is
+// still nine rows, so it is about 300 px high at 100%.
+const MIN_WIDTH: i32 = 260;
+const MAX_WIDTH: i32 = 720;
+const MARGIN: i32 = 10;
+const HEADER: i32 = 26;
+const ROW: i32 = 28;
+const FOOTER: i32 = 24;
 /// Where the candidate starts, after the number.
-const CANDIDATE_LEFT: i32 = 52;
-const TEXT_SIZE: i32 = 17;
-const CANDIDATE_SIZE: i32 = 23;
-const FOOTER_SIZE: i32 = 14;
+const CANDIDATE_LEFT: i32 = 40;
+const TEXT_SIZE: i32 = 14;
+const CANDIDATE_SIZE: i32 = 18;
+const FOOTER_SIZE: i32 = 12;
 
 const BACKGROUND: COLORREF = COLORREF(0x0026_2220);
 const TEXT: COLORREF = COLORREF(0x00F2_F2F2);
@@ -164,7 +167,7 @@ fn paint(dc: HDC, window: HWND, shown: &Shown) {
             dc,
             text_font,
             &row.label(),
-            line(top, s(ROW), s(10), s(CANDIDATE_LEFT)),
+            line(top, s(ROW), s(8), s(CANDIDATE_LEFT)),
         );
         let candidate_right = match &row.annotation {
             None => width - s(MARGIN),
@@ -179,7 +182,7 @@ fn paint(dc: HDC, window: HWND, shown: &Shown) {
             line(top, s(ROW), s(CANDIDATE_LEFT), candidate_right),
         );
         if let Some(annotation) = &row.annotation {
-            let left = (candidate_right + s(MARGIN)).max(s(100));
+            let left = (candidate_right + s(MARGIN)).max(s(80));
             draw(
                 dc,
                 text_font,
@@ -279,7 +282,7 @@ impl CandidateWindow {
         for row in &page.rows {
             let mut needed = s(CANDIDATE_LEFT) + measure(dc, candidate_font, &row.text);
             if let Some(annotation) = &row.annotation {
-                needed = needed.max(s(100) - s(MARGIN)) + s(MARGIN);
+                needed = needed.max(s(80) - s(MARGIN)) + s(MARGIN);
                 needed += measure(dc, text_font, annotation);
             }
             widest = widest.max(needed);

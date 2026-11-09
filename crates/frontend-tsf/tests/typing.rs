@@ -1095,7 +1095,7 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     let shown = mode_box().expect("the mode box is on the screen after a switch");
     assert_eq!(shown.left, CURSOR.left, "starts at the cursor");
     assert_eq!(shown.top, CURSOR.bottom + 2, "just below the cursor");
-    assert!(shown.right - shown.left >= 48 && shown.right - shown.left == shown.bottom - shown.top);
+    assert!(shown.right - shown.left >= 32 && shown.right - shown.left == shown.bottom - shown.top);
     pump(1500);
     assert!(mode_box().is_none(), "and goes away after its time");
     app.letters("gk");
