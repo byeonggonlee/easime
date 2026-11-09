@@ -17,6 +17,17 @@ $candidates = @(
 )
 $file = Join-Path ([IO.Path]::GetTempPath()) "windowsappruntimeinstall-x64.exe"
 
+# What an installer can see of the runtime without asking Windows' package
+# manager: the machine's package repository lists each package family. The
+# installer bundle detects the runtime this way.
+$family = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel\PackageRepository\Families\Microsoft.WindowsAppRuntime.2_8wekyb3d8bbwe"
+function Show-Family([string]$when) {
+    $present = Test-Path $family
+    Write-Host "runtime family in the package repository $when`: $present"
+    if ($present) { Get-ChildItem $family | ForEach-Object { Write-Host "  $($_.PSChildName)" } }
+}
+Show-Family "before"
+
 $found = $null
 foreach ($url in $candidates) {
     try {
@@ -46,4 +57,5 @@ if ($Install) {
     Write-Host "runtime installer exit code: $($process.ExitCode)"
     if ($process.ExitCode -ne 0) { throw "the runtime installer failed ($($process.ExitCode))" }
     powershell.exe -NoProfile -Command "Get-AppxPackage -AllUsers -Name 'Microsoft.WindowsAppRuntime*' | Sort-Object Name | ForEach-Object { '  ' + `$_.Name + ' ' + `$_.Version + ' ' + `$_.Architecture }"
+    Show-Family "after"
 }
