@@ -14,8 +14,12 @@
 //! ([`crate::display`]); the service is their provider. Candidates go to its
 //! window, or to an application that draws them itself ([`crate::element`]).
 //!
-//! **What it does not do yet:** show a persistent taskbar/language-bar
-//! indicator. See `docs/platforms.md`.
+//! The language is also a button in the notification area of the taskbar
+//! ([`crate::langbar`]); a click there is not a key, so the service handles it
+//! itself (`tray_request`).
+//!
+//! **What it does not do yet:** share the mode between programs. See
+//! `docs/platforms.md`.
 //!
 //! One service lives per thread of an application, so each has its own typist,
 //! and its mode (English or Korean) is its own. Everything here runs on that

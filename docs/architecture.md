@@ -23,7 +23,7 @@
 ### Windows (Linux 다음) — 구현됨, 실제 PC 입력 시험(W1–W14) 문제 없음 보고
 - **TSF(Text Services Framework)** 텍스트 서비스: `windows` crate로 COM 인터페이스를 구현하고 `cdylib` DLL(`easime_tsf.dll`)로 빌드한다. 한국어 아래 프로필 하나를 등록하고, 그 안에서 영어 → 한국어 → 일본어를 한 키로 순환한다.
 - TSF DLL은 각 앱 프로세스에 로드되므로 모드는 프로세스마다 따로다. "전체 공통 입력 상태"를 위한 공유(공유 메모리 또는 named pipe 서비스)는 아직 없다.
-- 조합은 TSF composition과 표시 속성(밑줄)으로, 후보창과 상태 박스는 Win32(GDI) 창으로 그린다. 후보를 직접 그리는 앱(전체 화면 게임 등)에는 `ITfCandidateListUIElement`로 목록을 넘긴다. 알림 영역 아이콘이나 언어 바 단추 같은 상시 표시는 아직 없다.
+- 조합은 TSF composition과 표시 속성(밑줄)으로, 후보창과 상태 박스는 Win32(GDI) 창으로 그린다. 후보를 직접 그리는 앱(전체 화면 게임 등)에는 `ITfCandidateListUIElement`로 목록을 넘긴다. 상시 표시는 TSF 언어 바 항목(입력 모드 단추, `langbar`)으로 작업 표시줄 알림 영역에 보이게 한다(클릭은 다음 언어, 메뉴는 언어 목록과 설정 앱).
 - 설치: **WiX 5** MSI + 번들 `setup.exe`(`packaging/windows`, 아래 "패키징과 배포"). MSI가 DLL을 등록하고(`regsvr32`) 설치한 사용자의 입력 방법에 easime를 켠다. 코드 서명은 선택 사항이며 아직 없다.
 - 설정 앱은 WinUI 3(Rust + `windows-reactor`)다. 구현 현황과 검증 범위: [implementation/windows.md](implementation/windows.md).
 

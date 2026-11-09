@@ -144,7 +144,7 @@ easime는 Linux(KDE → GNOME) → Windows → macOS 순서로 간다([decisions
 | 후보창 | `frontend-wayland/src/candidate.rs`, `panel.rs`, `frontend-tsf/src/candidate.rs`, `element.rs` (내용은 `page.rs`) | **있음** 입력 패널 + 직접 그림 | **있음(모의 앱 CI 확인)** 커서 아래 GDI 창, 후보를 직접 그리는 앱에는 TSF UI 요소 | **계획** |
 | 언어 표시 글자 | `ime-session/src/indicator.rs` | **있음(공통)** | 공통 | 공통 |
 | 표시 글꼴 | `frontend-wayland/src/font.rs`, `frontend-tsf/src/indicator.rs`, `candidate.rs` | **있음** Noto Sans CJK 등 | **있음(상태 상자, 후보창)** `Malgun Gothic`, 일본어 후보는 `Yu Gothic UI` (GDI) | **계획** OS의 CJK 글꼴 |
-| 상태 표시 방식 | `panel.rs`(박스), `crates/easime/src/tray.rs`(트레이), `frontend-tsf/src/indicator.rs` | **있음** 커서 옆 박스, 트레이 아이콘(StatusNotifierItem, 클릭·메뉴로 언어 전환; 실제 Plasma 미검증, D-Bus 위의 가짜 셸로 시험) | **있음(커서 옆 박스, 모의 앱 CI 확인)** / 상시 표시(알림 영역 아이콘 또는 언어 바)는 **계획** | **계획** 메뉴 막대 입력 소스 |
+| 상태 표시 방식 | `panel.rs`(박스), `crates/easime/src/tray.rs`(트레이), `frontend-tsf/src/indicator.rs`, `langbar.rs` | **있음** 커서 옆 박스, 트레이 아이콘(StatusNotifierItem, 클릭·메뉴로 언어 전환; 실제 Plasma 미검증, D-Bus 위의 가짜 셸로 시험) | **있음(모의 앱 CI 확인)** 커서 옆 박스와 작업 표시줄 알림 영역의 입력 모드 단추(`frontend-tsf/src/langbar.rs`; 실제 작업 표시줄에서 보이는지는 미확인) | **계획** 메뉴 막대 입력 소스 |
 | 프로세스 구조와 등록 | `data/easime.desktop` 등 | **있음** KWin 가상 키보드 | **있음** TSF DLL 등록(`regsvr32`, MSI) | **계획** `~/Library/Input Methods` |
 | 설정 앱 | `settings/` | **있음** `settings/kde` (Kirigami) | **있음(CI 확인, 실제 PC 미시험)** `settings/windows` (Rust + windows-reactor, WinUI 3) | **계획** SwiftUI |
 | 패키지 | `crates/easime`, `settings/kde`, `packaging/` | **있음** `.deb`, `.rpm` | **있음(CI 확인, 실제 PC 미시험)** MSI와 `setup.exe`(Windows App Runtime이 없으면 Microsoft에서 받음) | **계획** `.pkg` |
