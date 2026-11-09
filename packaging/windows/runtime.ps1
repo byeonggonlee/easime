@@ -18,13 +18,25 @@ $candidates = @(
 $file = Join-Path ([IO.Path]::GetTempPath()) "windowsappruntimeinstall-x64.exe"
 
 # What an installer can see of the runtime without asking Windows' package
-# manager: the machine's package repository lists each package family. The
-# installer bundle detects the runtime this way.
-$family = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel\PackageRepository\Families\Microsoft.WindowsAppRuntime.2_8wekyb3d8bbwe"
+# manager. The installer bundle can only search the registry and files, so this
+# lists where the registry mentions the runtime's package family, to find a key
+# the bundle can test (the package repository's family key turned out not to be
+# there: CI, 2026-11-09).
+$roots = @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx",
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel",
+    "HKLM:\SOFTWARE\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel",
+    "Registry::HKEY_CURRENT_USER\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel"
+)
 function Show-Family([string]$when) {
-    $present = Test-Path $family
-    Write-Host "runtime family in the package repository $when`: $present"
-    if ($present) { Get-ChildItem $family | ForEach-Object { Write-Host "  $($_.PSChildName)" } }
+    Write-Host "registry keys naming Microsoft.WindowsAppRuntime.2 $when`:"
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) { Write-Host "  (no $root)"; continue }
+        Get-ChildItem $root -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.PSChildName -like "Microsoft.WindowsAppRuntime.2*" } |
+            Select-Object -First 30 |
+            ForEach-Object { Write-Host "  $($_.Name)" }
+    }
 }
 Show-Family "before"
 
