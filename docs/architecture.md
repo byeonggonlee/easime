@@ -2,31 +2,32 @@
 
 플랫폼 프로토콜, crate 구성, 핵심 trait, 설정 GUI, 패키징을 다룬다.
 **무엇이 모든 OS 공통 코어이고 무엇이 OS마다 다른지는 [platforms.md](platforms.md)에 있다.**
+무엇이 구현되어 있고 어디까지 확인했는지는 [status.md](status.md)와 [구현 현황](implementation/core.md)에 있다. 이 문서는 구조와 연결 방식을 다루며, 계획인 것(GNOME, macOS, XIM, 중국어)과 구현된 것을 각 항목에 표시한다.
 
 ## 플랫폼별 연결 방식
-### Linux — KDE Plasma 6 (Wayland) ★ 최우선, 사용자의 주 환경 (Fedora, Plasma 6.8.x)
+### Linux — KDE Plasma 6 (Wayland) ★ 최우선, 사용자의 주 환경 (Fedora, Plasma 6.8.x) — 구현됨
 - KWin이 실행하는 Wayland input method 프로그램: `zwp_input_method_v1` (+ 키보드 grab)
 - 후보창과 커서 아래 상태 박스는 `zwp_input_panel_v1`의 panel surface (KWin이 커서 근처에 배치)
 - 앱 쪽은 KWin이 `text-input-v1/v2/v3`로 중계 → GTK/Qt/Firefox/Chromium(Wayland 모드)
 - 등록: 시스템 설정 → 키보드 → 가상 키보드 (`.desktop`에 `X-KDE-Wayland-VirtualKeyboard=true`)
 - Electron/Chromium: Wayland 모드 + `--enable-wayland-ime` 등 플래그 필요 → 설정 GUI에서 안내
-- **XWayland 앱 (게임, Wine, Steam, 일부 IDE)**: 데몬 안의 **XIM 서버**(`x11rb`)로 대응 (`XMODIFIERS=@im=easime`)
+- **XWayland 앱 (게임, Wine, Steam, 일부 IDE) — 계획(아직 없음)**: 데몬 안의 **XIM 서버**(`x11rb`)로 대응 (`XMODIFIERS=@im=easime`)
 
-### Linux — GNOME (Wayland)
+### Linux — GNOME (Wayland) — 계획
 - GNOME(Mutter/GNOME Shell)은 외부 입력기용 Wayland 프로토콜을 지원하지 않고 **IBus D-Bus 프로토콜만** 사용한다.
 - 계획: ibus 패키지를 쓰지 않고 **IBus 호환 D-Bus 서비스를 easime가 직접 구현**한다 (`frontend-ibus`).
   착수 전에 GNOME Shell이 IBus 주소를 찾는 방식과 필요한 인터페이스 범위를 조사한다 (조사 필요).
 - GNOME에는 기본 트레이가 없으므로 상태 표시는 GNOME 자체 입력 소스 표시기와 커서 아래 박스에 의존한다.
 - wlroots 계열(Sway, Hyprland)은 `input-method-v2`를 쓰므로 필요하면 나중에 추가할 수 있다.
 
-### Windows (Linux 다음)
-- **TSF(Text Services Framework)** 텍스트 서비스: `windows` crate로 COM 인터페이스 구현, `cdylib` DLL로 빌드
-- TSF DLL은 각 앱 프로세스에 로드된다 → "전체 공통 입력 상태"를 위해 상태 공유 방법이 필요하다
-  (공유 메모리 또는 named pipe 서비스).
-- 후보창과 상태 박스는 Win32 레이어드 창으로 그린다. 상태는 알림 영역 아이콘(또는 언어 바)으로 표시한다.
-- 설치: **MSI(WiX 5)** + TSF 등록(`regsvr32` 방식). 코드 서명은 선택 사항. 설치 프로그램의 틀은 이미 있다(`packaging/windows`, 아래 "패키징과 배포"). MSI는 TSF DLL을 Windows에 등록하고(`regsvr32`) 설치한 사용자의 언어 목록에 한국어를 켠다(사용자가 Windows 설정에서 언어를 직접 추가하지 않아도 된다). 텍스트 서비스는 한글을 TSF 조합으로 쓴다(실제 PC에서는 아직 시험하지 않았다).
+### Windows (Linux 다음) — 구현됨, 실제 PC 미시험
+- **TSF(Text Services Framework)** 텍스트 서비스: `windows` crate로 COM 인터페이스를 구현하고 `cdylib` DLL(`easime_tsf.dll`)로 빌드한다. 한국어 아래 프로필 하나를 등록하고, 그 안에서 영어 → 한국어 → 일본어를 한 키로 순환한다.
+- TSF DLL은 각 앱 프로세스에 로드되므로 모드는 프로세스마다 따로다. "전체 공통 입력 상태"를 위한 공유(공유 메모리 또는 named pipe 서비스)는 아직 없다.
+- 조합은 TSF composition과 표시 속성(밑줄)으로, 후보창과 상태 박스는 Win32(GDI) 창으로 그린다. 후보를 직접 그리는 앱(전체 화면 게임 등)에는 `ITfCandidateListUIElement`로 목록을 넘긴다. 알림 영역 아이콘이나 언어 바 단추 같은 상시 표시는 아직 없다.
+- 설치: **WiX 5** MSI + 번들 `setup.exe`(`packaging/windows`, 아래 "패키징과 배포"). MSI가 DLL을 등록하고(`regsvr32`) 설치한 사용자의 입력 방법에 easime를 켠다. 코드 서명은 선택 사항이며 아직 없다.
+- 설정 앱은 WinUI 3(Rust + `windows-reactor`)다. 구현 현황과 검증 범위: [implementation/windows.md](implementation/windows.md).
 
-### macOS (마지막)
+### macOS (마지막) — 계획
 - **InputMethodKit**: Objective-C/Swift 껍데기 + Rust 정적 라이브러리, `~/Library/Input Methods`에 `.app` 번들 설치
 - 상태 표시는 OS 메뉴 막대의 입력 소스 메뉴를 사용한다.
 - 배포: `.pkg`. 일반 배포에는 Apple 개발자 계정(서명, 공증)이 사실상 필요하다.
@@ -48,7 +49,7 @@ crates/
   frontend-wayland/  KWin input-method-v1 (Linux)
   frontend-xim/      XIM 서버 (XWayland, X11)
   frontend-ibus/     IBus 호환 D-Bus 서비스 (GNOME)
-  frontend-tsf/      Windows TSF DLL (키 입력 해석, 키 처리 파이프라인 `typing`(Windows API 없음), 프로필 하나의 등록과 순환 설정 `profiles`, TSF 등록, 한글을 TSF 조합으로 쓰는 텍스트 서비스, 전환 때 커서 옆에 뜨는 모드 상자 `indicator`와 그 위치 규칙 `placement`, 조합 밑줄 `marks`·`display`, 후보창 `candidate`(내용은 `page`)과 후보를 직접 그리는 앱에 넘기는 UI 요소 `element`, DLL 옆 사전 경로 `install`)
+  frontend-tsf/      Windows TSF DLL: 키 처리 파이프라인(`typing`, Windows API 없음), 프로필 하나의 등록과 순환 설정, 한글·일본어를 TSF 조합으로 쓰는 텍스트 서비스, 모드 상자, 조합 밑줄, 후보창과 TSF UI 요소 (모듈별 설명: implementation/windows.md)
   easime/            Linux 데몬 바이너리 (Wayland + XIM + IBus 프론트엔드, 트레이, D-Bus)
 settings/
   kde/               Linux 설정 앱: Rust + cxx-qt + QML + Kirigami
@@ -105,16 +106,12 @@ data/                .desktop 파일, 아이콘, 제3자 사전 데이터와 LIC
   - 데몬이 Qt 6·Kirigami에 의존하게 되므로 KDE가 아닌 데스크톱(GNOME 등)에 설치하면 Qt가 함께 설치된다. GNOME 지원이 생기면 다시 나눌지 따진다.
   - 빌드와 검증은 `.github/workflows/packages.yml`(재사용 워크플로) 하나다. CI와 릴리스(`release.yml`)가 같은 흐름과 **같은 실제 Mozc 사전**을 쓴다. 사전은 먼저 한 번 만들어 おおさか→大阪 같은 조회를 확인한 뒤 두 패키지가 쓴다. 각 패키지는 clean 컨테이너(Fedora, Debian)에 배포판의 의존성만으로 설치하고, 설치된 데몬이 시작되어 이유를 말하며 멈추는지(컴포지터가 없으므로)와 설치된 설정 창이 모든 페이지를 여는지 확인한 뒤에야 두 파일이 한 아티팩트(`easime-linux-packages-<commit>`)로 묶인다.
   - 패키지를 설치해도 easime가 입력기로 **자동 선택되지는 않는다**: 사용자의 데스크톱 설정을 설치 스크립트가 몰래 바꾸지 않기 때문이다(AGENTS.md). 설정 창(`easime-settings`) 일반 화면의 활성화 카드(바꿀 설정 확인과 되돌리기 제공)에서 켜거나 시스템 설정 → 키보드 → 가상 키보드에서 고른 뒤 다시 로그인해야 한다.
-- **Windows**: **MSI(WiX 5)**, `packaging/windows/easime.wxs`. `build.ps1`이 만들고 `test.ps1`이 CI의 Windows 러너에 실제로 설치·사용·업그레이드·제거를 시험한다.
-  담는 것: 텍스트 서비스 DLL(`easime_tsf.dll`, 64비트), 일본어 사전(`dictionary\mozc.bin`과 Mozc 원본 라이선스 파일, 빼고 설치할 수 있는 기능, 약 36MB), 터미널 데모(`easime-cli.exe`), 앱 아이콘(`easime.ico`), 라이선스. 사전은 CI의 Windows 작업이 Linux 패키지와 같은 스크립트(`scripts/build-dictionary.sh mozc`)로 만들고, 텍스트 서비스는 DLL 옆 `dictionary` 폴더에서 찾는다(설치 위치를 바꿔도 따라감).
-  - **설치 때** DLL을 Windows에 등록하고(`regsvr32`, 실패하면 설치가 멈추고 뒤에서 실패하면 등록을 되돌린다), **설치한 사용자의** 입력 방법에 easime를 켠다(프로필은 한국어 아래 하나이고, DLL의 `rundll32` 내보내기 `EnableForCurrentUser`가 한국어 아래에 `InstallLayoutOrTip`으로 켠다. 한국어가 목록에 없으면 언어도 함께 추가되고, 예전 시험판이 켠 항목은 지운다). 설치 창(WiX UI의 기능 트리)에서 기능("easime keyboard")을 고르게 하므로 그 화면이 확인이고, 무인 설치(`/qn`)는 기본값(켜짐)을 따른다. 기본 설치 폴더는 `C:\Program Files\easime`.
-  - **제거 때** 그 사용자의 켠 프로필을 끄고(`DisableForCurrentUser`; 설치가 언어까지 더했다면 그 언어도 목록에서 사라지는 것을 CI에서 확인했다. 설치 전에 이미 있던 언어는 남을 것으로 예상하며 확인하지 않았다) Windows 등록을 푼 다음 파일을 지운다. 되돌리기는 제거다. 업그레이드는 옛 버전을 먼저 제거하고 새 버전을 설치하되, 이때는 사용자 언어 목록에서 빼거나 등록을 푸는 단계를 건너뛴다(`UPGRADINGPRODUCTCODE`): 뺐다가 다시 넣으면 한국어가 사용자 언어 목록 끝으로 밀릴 수 있기 때문이다. CI가 업그레이드 뒤 언어 목록 순서가 그대로인 것을 확인한다. 로그(`easime.log`)는 1MB를 넘으면 `easime.log.old`로 옮겨 계속 커지지 않게 한다.
-  - **같은 PC의 다른 사용자**는 등록된 프로필을 Windows 설정의 "키보드 추가"에서 직접 켠다(등록은 기계 전체, 켜기는 설치한 사용자만).
-  - **순환에는 타자할 수 있는 언어만** 넣는다: `frontend-tsf::profiles::TYPEABLE`(한국어와 일본어, 2026-11-08 후보창과 함께 일본어 추가). 중국어는 엔진이 생겨 실제로 입력되면 더한다.
-  - **한계**: DLL이 64비트뿐이라 32비트 프로그램에서는 쓸 수 없다. ARM64 Windows의 ARM64 프로그램도 마찬가지일 것으로 예상한다(확인하지 않음). 입력기를 켜서 쓰는 중에 제거·업그레이드하면 DLL이 프로그램에 불려 있어 다시 로그인하거나 재시작해야 지워질 수 있다고 예상한다(CI에서는 DLL을 쓰는 프로그램이 없어 확인하지 못했다). 코드 서명이 없어 설치할 때 SmartScreen 경고가 뜰 수 있다(예상).
+- **Windows**: **MSI(WiX 5)**(`packaging/windows/easime.wxs`)와 번들 **`setup.exe`**(`bundle.wxs`). `build.ps1`이 만들고 `test.ps1`·`test-setup.ps1`이 CI의 Windows 러너에서 설치·사용·업그레이드·제거를 시험한다.
+  - MSI가 담는 것: 텍스트 서비스 DLL(64비트), 일본어 사전(`dictionary\mozc.bin`과 Mozc 원본 라이선스, 빼고 설치할 수 있는 기능, 약 36MB), 설정 앱과 시작 메뉴 "easime", 터미널 데모, 앱 아이콘, 라이선스. 사전은 CI가 Linux 패키지와 같은 스크립트(`scripts/build-dictionary.sh mozc`)로 만들고, 텍스트 서비스는 DLL 옆 `dictionary` 폴더에서 찾는다(설치 위치를 바꿔도 따라감).
+  - 설치 때 DLL을 등록하고 설치한 사용자의 입력 방법에 easime를 켜며(설치 창의 기능 선택이 확인), 제거가 되돌리기다. easime를 쓰는 프로그램은 닫지 않고 사용 중인 파일은 다음 재시작 때 바꾼다.
+  - `setup.exe`는 MSI를 담고, 설정 앱이 필요로 하는 Windows App Runtime이 없을 때만 Microsoft의 공식 설치 파일을 받아 먼저 설치한다. easime는 런타임을 재배포하지 않는다.
   - 릴리스에는 올리지 않고 CI 아티팩트(`easime-windows-installer-<commit>`)로만 둔다: 실제 PC에서 시험한 적이 없다.
-  - CI의 `test.ps1`이 확인하는 것: 설치 후 Windows의 COM 클래스(설치된 DLL을 가리킴)와 TSF 프로필 등록(한국어만), 설치한 사용자의 언어 설정에 한국어 켜짐, 설치된 DLL을 COM이 불러 서비스를 만드는 것, 한국어 기능을 뺀 설치(등록은 있고 켜짐은 없음), 제거 후 아무것도 남지 않음(폴더, Windows 등록, 사용자 언어 목록), `ADDLOCAL=ALL`, 업그레이드(등록과 켜짐 유지), 다운그레이드 거부. 같은 단계의 결과와 `easime.log`가 CI 로그에 남는다.
-  시스템 PATH에 폴더를 더하는 기능은 기본이 꺼져 있다(`ADDLOCAL=ALL`로 켠다): 시스템 설정을 바꾸는 일이기 때문이다.
+  - 동작 상세, CI가 확인하는 것, 한계: [implementation/windows.md](implementation/windows.md)의 "설치 프로그램".
 - **macOS**: `.pkg` (서명/공증)
 - 버전은 workspace 전체가 하나의 버전을 공유한다. 태그 `vX.Y.Z`를 푸시하면 릴리스 워크플로가 동작한다.
 

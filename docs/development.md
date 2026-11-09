@@ -1,4 +1,4 @@
-# easime 개발 환경과 KWin 시험
+# easime 개발 방법: 빌드, 실행, 시험, CI
 
 ## 개발 모드로 KWin에서 시험하기 (사용자 환경을 바꾸므로 사용자가 직접 실행)
 ```sh
@@ -50,9 +50,9 @@ pwsh packaging\windows\runtime.ps1 -Install           # Microsoft의 Windows App
 pwsh packaging\windows\test.ps1 -Msi target\easime-<버전>-x64.msi -OldMsi target\upgrade-test\easime-0.0.1-x64.msi
 pwsh packaging\windows\test-setup.ps1 -Setup target\easime-setup-<버전>-x64.exe   # 런타임이 없는 PC에서
 ```
-MSI는 텍스트 서비스 DLL(`easime_tsf.dll`)을 설치하고 Windows에 등록하며, 설치한 사용자의 입력 방법에 easime를 한국어 아래로 켠다. 설정 앱(시작 메뉴 "easime"), 일본어 사전, 터미널 데모와 라이선스도 담는다. `setup.exe`(번들, `bundle.wxs`)는 그 MSI를 담고, Windows App Runtime이 없으면 Microsoft에서 공식 설치 파일(크기·SHA-512 고정)을 받아 먼저 설치한다(easime는 런타임을 재배포하지 않는다). 만들려면 Rust와 WiX가 필요하고 `build.ps1`이 쓰는 WiX 확장(UI, BootstrapperApplications, Util)은 NuGet에서 WiX와 같은 버전으로 받는다.
+MSI는 텍스트 서비스 DLL(`easime_tsf.dll`)을 설치하고 Windows에 등록하며, 설치한 사용자의 입력 방법에 easime를 한국어 아래로 켠다. 설정 앱(시작 메뉴 "easime"), 일본어 사전, 터미널 데모와 라이선스도 담는다. `setup.exe`(번들, `bundle.wxs`)는 그 MSI를 담고, Windows App Runtime이 없으면 Microsoft에서 공식 설치 파일(크기·SHA-512 고정)을 받아 먼저 설치한다(easime는 런타임을 재배포하지 않는다). 만들려면 Rust와 WiX가 필요하고 `build.ps1`이 쓰는 WiX 확장(UI, BootstrapperApplications, Util)은 NuGet에서 WiX와 같은 버전으로 받는다. 네트워크를 제한한 환경에서는 `www.nuget.org`와 내려받기 호스트 `globalcdn.nuget.org`(WiX 확장), `aka.ms`와 `download.microsoft.com`(런타임 설치 파일)에 닿아야 한다.
 
-**실제 Windows PC에서 시험하기** (절차와 기록 양식은 [windows-testing.md](testing/windows.md)) (CI의 `easime-windows-installer-<commit>` 아티팩트를 받거나 위처럼 직접 만든다):
+**실제 Windows PC에서 시험하기** (절차와 기록 양식은 [Windows 시험 절차서](testing/windows.md)) (CI의 `easime-windows-installer-<commit>` 아티팩트를 받거나 위처럼 직접 만든다):
 ```powershell
 msiexec /i easime-<버전>-x64.msi            # 설치 창이 뜬다. "easime keyboard"가 기본으로 켜져 있다
 msiexec /i easime-<버전>-x64.msi /l*v install.log   # 무엇이 일어났는지 기록
@@ -81,3 +81,22 @@ cargo clippy --manifest-path settings/windows/Cargo.toml --target x86_64-pc-wind
 pwsh settings\windows\tests\open-window.ps1 -Exe settings\windows\target\debug\easime-settings.exe   # 다섯 언어로 열어 PNG로 저장
 ```
 화면의 한국어 문자열은 모두 공유 번역표에 있어야 한다(`tr.rs`의 테스트와 `check_translations.py`가 확인한다).
+
+## CI 구성
+
+`main`에 푸시하면(그리고 풀 리퀘스트, 수동 실행에서) `.github/workflows/ci.yml`이 돈다. 실패한 `main` CI는 다른 일보다 먼저 고친다. 초록은 자동 검증이 통과했다는 뜻이며 실제 데스크톱·PC에서 쓸 수 있다는 뜻이 아니다([status.md](status.md)).
+
+| 잡 | 무엇을 하나 |
+|---|---|
+| Linux (whole workspace) | 전체 워크스페이스 `fmt`·`clippy -D warnings`·`test` (가짜 KWin 테스트, D-Bus 위의 트레이 포함) |
+| OS-independent crates (macOS, Windows) | 포터블 크레이트만 같은 검사. 경로·구분자를 하드코딩한 시험은 여기서 걸린다 |
+| Windows installer (MSI, text service) | 실제 Windows에서 TSF 등록·가짜 응용 프로그램 타자·MSI 설치/제거/업그레이드·사용 중 프로그램·설정 앱 설치. 아티팩트 `easime-windows-installer-<commit>`(MSI와 `setup.exe`) |
+| Settings app (Windows, WinUI 3) | 설정 앱을 Windows에서 빌드하고 다섯 언어로 열어 UI 자동화로 읽고 저장. 아티팩트 `settings-app-windows` |
+| Windows setup.exe (runtime from Microsoft) | 런타임이 없는 새 러너에서 `setup.exe` 설치·제거·재설치 |
+| Settings window (KDE, Fedora) | Fedora 컨테이너에서 실제 Kirigami로 모든 페이지를 열고 조작. 아티팩트 `settings-window-pages` |
+| Linux packages (재사용 워크플로 `packages.yml`) | Mozc 사전 → `.rpm`(Fedora)·`.deb`(Debian 13) 빌드 → clean 컨테이너에 설치해 데몬·설정 창 시작 → 한 아티팩트(`easime-linux-packages-<commit>`)로 묶기 |
+
+- 태그 `v*`를 푸시하면 `release.yml`이 같은 패키지 흐름으로 릴리스를 만든다(Windows 설치 파일은 올리지 않는다). 태그는 사용자가 정한다.
+- 잡에는 시간 제한이 있다(`windows-installer` 40분, `windows-setup` 30분). WiX 확장을 잘못 받으면 무한정 걸린 적이 있어서 넣었다.
+- 아티팩트는 보존 기한이 있다. 화면 캡처 같은 관찰은 중요한 것을 문서에 글로 남긴다.
+- Windows 잡의 러너에는 Windows App Runtime이 staged로만 있다. 설정 앱을 열려면 Microsoft 설치 파일로 등록해야 한다(`packaging/windows/runtime.ps1 -Install`).
