@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Texts of the setup window that replace the ones of the WiX UI extension (its
-  strings are "overridable"). No Culture: the extension's English strings are
-  the neutral ones, and this file is used for the build without -culture.
+  strings are "overridable"). The build says -culture en-US so that the
+  extension's English strings are loaded and these replace some of them. (A
+  file without a culture, and no -culture, made every string of the window
+  "unknown" in the CI.)
 
   FilesInUse: the window that lists the programs using easime when an install,
   upgrade or removal has to replace files they have loaded. easime never closes
@@ -11,7 +13,7 @@
   [Ignore] is the way to go on without closing anything. The text has room for
   about two lines (a control of 330 x 30 dialog units).
 -->
-<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl">
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-US">
   <String Id="FilesInUseDescription" Value="Some programs are using easime. You do not have to close them." />
   <String Id="FilesInUseText" Value="These programs use files that setup replaces. Click &amp;Ignore to keep them open (the new files take over after a restart), or close them and click &amp;Retry." />
 </WixLocalization>

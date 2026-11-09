@@ -95,7 +95,7 @@ $binaries = Join-Path $root "target\release"
 $source = Join-Path $root "packaging\windows\easime.wxs"
 Write-Host "$(Get-Date -Format HH:mm:ss) building $out"
 $strings = Join-Path $root "packaging\windows\strings.wxl"
-& $wix build -arch x64 -ext $uiExtension -loc $strings -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Dictionary=$Dictionary" -d "SettingsExe=$settingsExe" -d "Root=$root" -o $out $source
+& $wix build -arch x64 -ext $uiExtension -culture en-US -loc $strings -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Dictionary=$Dictionary" -d "SettingsExe=$settingsExe" -d "Root=$root" -o $out $source
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 Write-Host "built $out"
 
