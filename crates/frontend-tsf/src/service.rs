@@ -32,6 +32,7 @@ use crate::element::Candidates;
 use crate::indicator::{self, Indicator};
 use crate::install;
 use crate::keys::{KeyInfo, KeyboardState};
+use crate::langbar::{self, LangBar, Request};
 use crate::marks::Mark;
 use crate::page;
 use crate::placement::Rect;
@@ -48,7 +49,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::{Duration, Instant};
-use windows::Win32::Foundation::{CLASS_E_NOAGGREGATION, E_INVALIDARG, E_POINTER, LPARAM, WPARAM};
+use windows::Win32::Foundation::{
+    CLASS_E_NOAGGREGATION, E_FAIL, E_INVALIDARG, E_POINTER, LPARAM, WPARAM,
+};
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardState;
 use windows::Win32::UI::TextServices::{
@@ -56,12 +59,13 @@ use windows::Win32::UI::TextServices::{
     ITfCompartmentMgr, ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext,
     ITfContextComposition, ITfContextView, ITfDisplayAttributeInfo, ITfDisplayAttributeProvider,
     ITfDisplayAttributeProvider_Impl, ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl,
-    ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfSource,
-    ITfTextInputProcessor, ITfTextInputProcessor_Impl, ITfTextInputProcessorEx,
-    ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl,
-    ITfThreadMgrEx, ITfUIElementMgr, TF_AE_NONE, TF_ANCHOR_END, TF_CONTEXT_EDIT_CONTEXT_FLAGS,
-    TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE, TF_TMF_UIELEMENTENABLEDONLY,
+    ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr,
+    ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor, ITfTextInputProcessor_Impl,
+    ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
+    ITfThreadMgrEventSink_Impl, ITfThreadMgrEx, ITfUIElementMgr, TF_AE_NONE, TF_ANCHOR_END,
+    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE,
+    TF_ES_READ, TF_ES_READWRITE, TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
+    TF_TMF_UIELEMENTENABLEDONLY,
 };
 use windows::core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
@@ -183,6 +187,12 @@ pub struct TextService {
     /// TSF's numbers for the underlines, once asked for (`None` if TSF would
     /// not give them: the composition is then not underlined).
     atoms: Cell<Option<Option<[u32; 3]>>>,
+    /// The button in the notification area ([`crate::langbar`]).
+    langbar: RefCell<Option<LangBar>>,
+    /// The service as the sink of its own compositions, kept from the
+    /// activation on: what starts outside a key (the language bar) edits the
+    /// document too, and the edit needs the sink.
+    self_sink: RefCell<Option<ITfCompositionSink>>,
 }
 
 impl TextService {
@@ -199,6 +209,8 @@ impl TextService {
             told_no_caret: Cell::new(false),
             composing: Rc::new(RefCell::new(None)),
             atoms: Cell::new(None),
+            langbar: RefCell::new(None),
+            self_sink: RefCell::new(None),
         }
     }
 }
@@ -212,6 +224,19 @@ impl Default for TextService {
 impl Drop for TextService {
     fn drop(&mut self) {
         IN_USE.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The language bar menu's entry that opens the settings, in the language of
+/// the user's Windows (Korean or English).
+fn langbar_settings_text() -> String {
+    let korean = easime_config::system_language_tags()
+        .first()
+        .is_some_and(|tag| tag.to_ascii_lowercase().starts_with("ko"));
+    if korean {
+        "easime 설정…".to_owned()
+    } else {
+        "easime settings…".to_owned()
     }
 }
 
@@ -309,9 +334,41 @@ impl TextService_Impl {
             client_id,
             thread_sink_cookie: cookie,
         });
+        *self.self_sink.borrow_mut() = Some(self.to_interface());
+        self.add_langbar(thread_manager);
         Ok(())
     }
 
+    /// Put the button on the language bar (and so in the notification area).
+    /// Without it the service works as before, so a failure is only logged.
+    fn add_langbar(&self, thread_manager: &ITfThreadMgr) {
+        let Ok(manager) = thread_manager.cast::<ITfLangBarItemMgr>() else {
+            diag::log("language bar: TSF has no manager for it, no tray button");
+            return;
+        };
+        let state = self
+            .typist
+            .borrow()
+            .as_ref()
+            .map(|typist| (typist.language(), typist.cycle().to_vec()));
+        let Some((language, cycle)) = state else {
+            return;
+        };
+        // The button asks this service for what the user chose. The loop (the
+        // service holds the button, the button the service) is cut in
+        // `Deactivate`.
+        let service = self.to_object();
+        let handler = Box::new(move |request: Request| service.get().tray_request(request));
+        match LangBar::add(manager, language, cycle, langbar_settings_text(), handler) {
+            Ok(bar) => *self.langbar.borrow_mut() = Some(bar),
+            Err(e) => diag::log(&format!("language bar: could not add the button: {e}")),
+        }
+    }
+}
+
+/// What does not need the COM object itself: the rest of the service's work,
+/// which the language bar button also calls (`tray_request`).
+impl TextService {
     fn client_id(&self) -> Option<u32> {
         self.activated.borrow().as_ref().map(|a| a.client_id)
     }
@@ -344,8 +401,81 @@ impl TextService_Impl {
         if let Some(language) = outcome.switched_to {
             diag::log(&format!("language -> {language:?}"));
             self.show_indicator(context, language);
+            self.update_langbar();
         }
         edited
+    }
+
+    /// The button shows the language and the cycle the typist has now.
+    fn update_langbar(&self) {
+        let state = self
+            .typist
+            .borrow()
+            .as_ref()
+            .map(|typist| (typist.language(), typist.cycle().to_vec()));
+        // Outside every borrow of ours: TSF asks the button for its icon now.
+        let button = self.langbar.borrow().as_ref().map(LangBar::button);
+        if let (Some((language, cycle)), Some(button)) = (state, button) {
+            button.get().set(language, cycle);
+        }
+    }
+
+    /// What the user asked of the button: another language (the text being
+    /// composed is finished first, as with the switch key) or the settings app.
+    fn tray_request(&self, request: Request) {
+        guarded("language bar", (), || {
+            if request == Request::Settings {
+                langbar::open_settings();
+                return;
+            }
+            let outcome = {
+                let mut typist = self.typist.borrow_mut();
+                let Some(typist) = typist.as_mut() else {
+                    return;
+                };
+                match request {
+                    Request::Next => typist.next_language(),
+                    Request::Select(language) => typist.select_language(language),
+                    Request::Settings => return,
+                }
+            };
+            if outcome.switched_to.is_none() {
+                return;
+            }
+            // The text of the switch is finished where the composition is, else
+            // in the document that has the focus; with neither there is nothing
+            // to finish and only the language changes.
+            let context = self
+                .composing
+                .borrow()
+                .as_ref()
+                .map(|composing| composing.context.clone())
+                .or_else(|| self.focused_context());
+            match context {
+                Some(context) => {
+                    self.perform(&context, &outcome);
+                }
+                None => {
+                    if let Some(language) = outcome.switched_to {
+                        diag::log(&format!("language -> {language:?} (from the language bar)"));
+                    }
+                    self.update_langbar();
+                }
+            }
+        });
+    }
+
+    /// The text field that has the focus, if the application tells.
+    fn focused_context(&self) -> Option<ITfContext> {
+        let thread_manager = self.activated.borrow().as_ref()?.thread_manager.clone();
+        // SAFETY: the interfaces are alive for the calls.
+        let document = unsafe { thread_manager.GetFocus() }.ok()?;
+        unsafe { document.GetTop() }.ok()
+    }
+
+    /// The service as the sink of its compositions (set from the activation on).
+    fn composition_sink(&self) -> Result<ITfCompositionSink> {
+        self.self_sink.borrow().clone().ok_or_else(|| E_FAIL.into())
     }
 
     /// Say which language is on, next to the text cursor, if the user wants it.
@@ -472,7 +602,7 @@ impl TextService_Impl {
         };
         let session: ITfEditSession = EditSession {
             context: context.clone(),
-            sink: self.to_interface(),
+            sink: self.composition_sink()?,
             composing: self.composing.clone(),
             steps: steps.clone(),
             parts: parts.clone(),
@@ -494,7 +624,7 @@ impl TextService_Impl {
             // in when it can.
             let session: ITfEditSession = EditSession {
                 context: context.clone(),
-                sink: self.to_interface(),
+                sink: self.composition_sink()?,
                 composing: self.composing.clone(),
                 steps,
                 parts,
@@ -570,6 +700,8 @@ impl TextService_Impl {
                         diag::log(&format!("could not edit the document: {e}"));
                     }
                 }
+                // The languages of the cycle may have changed.
+                self.update_langbar();
             }
             Err(why) => diag::log(&format!("settings changed but not understood, kept: {why}")),
         }
@@ -587,6 +719,10 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             self.end_composition();
             self.indicator.borrow_mut().destroy();
             self.candidates.destroy(self.elements().as_ref());
+            let bar = self.langbar.borrow_mut().take();
+            if let Some(bar) = bar {
+                bar.remove();
+            }
             // Every step is tried even if one fails: a sink left behind would
             // keep this service alive and keep being called.
             let taken = self.activated.borrow_mut().take();
@@ -602,6 +738,7 @@ impl ITfTextInputProcessor_Impl for TextService_Impl {
             }
             *self.typist.borrow_mut() = None;
             *self.reloader.borrow_mut() = None;
+            *self.self_sink.borrow_mut() = None;
             Ok(())
         })
     }

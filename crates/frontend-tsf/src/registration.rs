@@ -26,8 +26,9 @@ use windows::Win32::System::Registry::{
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
-    GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, ITfCategoryMgr,
-    ITfInputProcessorProfileMgr, TF_INPUTPROCESSORPROFILE, TF_PROFILETYPE_INPUTPROCESSOR,
+    GUID_TFCAT_TIP_KEYBOARD, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+    ITfCategoryMgr, ITfInputProcessorProfileMgr, TF_INPUTPROCESSORPROFILE,
+    TF_PROFILETYPE_INPUTPROCESSOR,
 };
 use windows::core::{BOOL, Error, GUID, PCWSTR, PWSTR, Result, s, w};
 
@@ -200,10 +201,12 @@ pub fn class_registered() -> bool {
 ///
 /// Not `SECUREMODE` (the sign-in screen and UAC prompts): a text service there
 /// must not touch user files or show its own windows, which this one does.
-pub const CATEGORIES: [GUID; 3] = [
+pub const CATEGORIES: [GUID; 4] = [
     GUID_TFCAT_TIP_KEYBOARD,
     GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
     GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER,
+    // The language bar button may be shown in the notification area (`langbar`).
+    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
 ];
 
 fn category_manager() -> Result<ITfCategoryMgr> {

@@ -50,6 +50,8 @@ pub mod element;
 #[cfg(windows)]
 pub mod indicator;
 #[cfg(windows)]
+pub mod langbar;
+#[cfg(windows)]
 pub mod registration;
 #[cfg(windows)]
 pub mod service;

@@ -280,7 +280,23 @@ impl Typist {
         })
     }
 
-    /// Choose the language directly (the profile the user picked in Windows).
+    /// The languages the switch key cycles through, English first.
+    pub fn cycle(&self) -> &[Language] {
+        self.session.cycle()
+    }
+
+    /// Go to the next language of the cycle, as the switch key does (a click
+    /// on the language bar button). What was being composed is finished first.
+    pub fn next_language(&mut self) -> Outcome {
+        let (leftover, language) = self.session.switch_language();
+        Outcome {
+            eaten: true,
+            edit: self.finished(leftover),
+            switched_to: Some(language),
+        }
+    }
+
+    /// Choose the language directly (a choice in the language bar's menu).
     pub fn select_language(&mut self, language: Language) -> Outcome {
         match self.session.select_language(language) {
             Some((leftover, language)) => Outcome {
@@ -554,6 +570,49 @@ mod tests {
         assert_eq!(field.typist.language(), Language::Korean);
         field.type_letters("gk");
         assert_eq!(field.text, "하gk하");
+    }
+
+    #[test]
+    fn the_language_bar_goes_round_the_cycle_and_picks_a_language() {
+        let mut chosen = Config::default();
+        chosen.languages.enabled = Some(vec![Language::Korean, Language::Japanese]);
+        let config = effective_config(
+            &chosen,
+            &[],
+            &[Language::Korean, Language::Japanese],
+            Language::Korean,
+        );
+        let session = Session::new(
+            &config,
+            JapaneseDictionary::fixed(std::sync::Arc::new(
+                engine_japanese::dictionary::MemoryDictionary::parse("").0,
+            )),
+            Box::new(|_| {}),
+        );
+        let mut typist = Typist::new(session, ToggleKey::Both);
+        assert_eq!(
+            typist.cycle(),
+            [Language::English, Language::Korean, Language::Japanese]
+        );
+        assert_eq!(typist.language(), Language::Korean);
+
+        let next = typist.next_language();
+        assert_eq!(next.switched_to, Some(Language::Japanese));
+        assert!(next.eaten);
+        assert_eq!(next.edit, None, "nothing was being composed");
+        assert_eq!(typist.next_language().switched_to, Some(Language::English));
+        assert_eq!(typist.next_language().switched_to, Some(Language::Korean));
+
+        assert_eq!(
+            typist.select_language(Language::Japanese).switched_to,
+            Some(Language::Japanese)
+        );
+        assert_eq!(
+            typist.select_language(Language::Japanese).switched_to,
+            None,
+            "already there: nothing changes"
+        );
+        assert_eq!(typist.language(), Language::Japanese);
     }
 
     #[test]

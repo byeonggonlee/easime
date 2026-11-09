@@ -18,6 +18,7 @@ use std::rc::Rc;
 use windows::Win32::Foundation::{
     E_FAIL, E_NOTIMPL, E_UNEXPECTED, HWND, LPARAM, POINT, RECT, S_OK, WPARAM,
 };
+use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, FORMATETC,
     IDataObject,
@@ -28,25 +29,28 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{HKL, SetFocus};
 use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_DisplayAttributeMgr, CLSID_TF_InputProcessorProfiles,
     CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
-    GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, GUID_PROP_ATTRIBUTE, GUID_TFCAT_TIP_KEYBOARD,
-    IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink,
-    ITfCandidateListUIElement, ITfCategoryMgr, ITfCompartmentMgr, ITfContext,
+    GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, GUID_LBI_INPUTMODE, GUID_PROP_ATTRIBUTE,
+    GUID_TFCAT_TIP_KEYBOARD, IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl,
+    ITextStoreACPSink, ITfCandidateListUIElement, ITfCategoryMgr, ITfCompartmentMgr, ITfContext,
     ITfContextComposition, ITfDisplayAttributeMgr, ITfEditSession, ITfEditSession_Impl,
-    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfRange, ITfSource, ITfThreadMgr,
-    ITfUIElementMgr, ITfUIElementSink, ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS,
-    TF_ATTR_TARGET_CONVERTED, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ,
-    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
-    TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_LS_DOT, TF_PROFILETYPE_INPUTPROCESSOR,
+    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfMenu,
+    ITfMenu_Impl, ITfRange, ITfSource, ITfThreadMgr, ITfUIElementMgr, ITfUIElementSink,
+    ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS, TF_ATTR_TARGET_CONVERTED,
+    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ, TF_ES_SYNC,
+    TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE,
+    TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT, TF_LBI_STYLE_SHOWNINTRAY,
+    TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR, TF_LS_DOT, TF_PROFILETYPE_INPUTPROCESSOR,
     TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC,
     TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS, TS_TEXTCHANGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, DispatchMessageW, FindWindowW, GetWindowRect, IsWindowVisible,
-    MSG, PM_REMOVE, PeekMessageW, SetForegroundWindow, TranslateMessage, WINDOW_EX_STYLE,
-    WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    CreateWindowExW, DestroyIcon, DestroyWindow, DispatchMessageW, FindWindowW, GetWindowRect,
+    IsWindowVisible, MSG, PM_REMOVE, PeekMessageW, SetForegroundWindow, TranslateMessage,
+    WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
 };
 use windows::core::{
-    BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement, w,
+    BOOL, ComObject, GUID, HRESULT, IUnknown, Interface, OutRef, PCWSTR, PWSTR, Ref, Result,
+    implement, w,
 };
 
 /// `target/<profile>/frontend_tsf.dll`, next to the test's own folder.
@@ -1237,6 +1241,119 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     assert_eq!(app.text(), format!("{before}にほん"));
     assert!(app.candidate_list().is_none(), "the list ended");
     app.elements.draws_itself.set(false);
+
+    language_bar(app, context);
+}
+
+/// A menu that remembers what was added to it: (id, flags, text).
+#[implement(ITfMenu)]
+struct Menu {
+    items: RefCell<Vec<(u32, u32, String)>>,
+}
+
+impl ITfMenu_Impl for Menu_Impl {
+    fn AddMenuItem(
+        &self,
+        id: u32,
+        flags: u32,
+        _bitmap: HBITMAP,
+        _mask: HBITMAP,
+        text: &PCWSTR,
+        length: u32,
+        _sub_menu: OutRef<ITfMenu>,
+    ) -> Result<()> {
+        let name = if text.is_null() || length == 0 {
+            String::new()
+        } else {
+            // SAFETY: TSF's contract: `length` UTF-16 units at `text`.
+            String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text.0, length as usize) })
+        };
+        self.items.borrow_mut().push((id, flags, name));
+        Ok(())
+    }
+}
+
+/// The button in the notification area (`frontend_tsf::langbar`), as TSF shows
+/// it: it is on the language bar, shown in the tray, says the language with
+/// its letter, its tooltip and an icon, follows a switch, and a click or a menu
+/// choice switches the language without a key.
+fn language_bar(app: &Application, context: &ITfContext) {
+    // SAFETY: the interfaces are alive for the calls; the values are plain.
+    unsafe {
+        let manager: ITfLangBarItemMgr =
+            app.thread_manager.cast().expect("the language bar manager");
+        let item = manager
+            .GetItem(&GUID_LBI_INPUTMODE)
+            .expect("easime's button is on the language bar");
+        let mut info = TF_LANGBARITEMINFO::default();
+        item.GetInfo(&mut info).unwrap();
+        assert_eq!(info.clsidService, registration::guid(profiles::CLSID));
+        assert!(
+            info.dwStyle & TF_LBI_STYLE_SHOWNINTRAY != 0,
+            "shown in the notification area"
+        );
+        let button: ITfLangBarItemButton = item.cast().unwrap();
+        let letter = || button.GetText().unwrap().to_string();
+        let tooltip = || item.GetTooltipString().unwrap().to_string();
+
+        // The scenario ends in Japanese.
+        assert_eq!(letter(), "あ");
+        assert_eq!(tooltip(), "easime: 日本語");
+        let icon = button.GetIcon().expect("an icon for the tray");
+        assert!(!icon.is_invalid(), "the icon exists");
+        let _ = DestroyIcon(icon);
+
+        // A left click goes to the next language: the cycle is English,
+        // Korean, Japanese, so Japanese goes round to English, whose keys
+        // are the application's.
+        let before = app.text();
+        button
+            .OnClick(TF_LBI_CLK_LEFT, Default::default(), std::ptr::null())
+            .unwrap();
+        assert_eq!(letter(), "A");
+        assert_eq!(tooltip(), "easime: English");
+        app.letters("gk");
+        assert_eq!(app.text(), format!("{before}gk"), "typed as the keys are");
+        button
+            .OnClick(TF_LBI_CLK_LEFT, Default::default(), std::ptr::null())
+            .unwrap();
+        assert_eq!(letter(), "한");
+        app.letters("gk");
+        assert_eq!(app.text(), format!("{before}gk하"));
+        assert_eq!(compositions(context), 1, "the syllable is being composed");
+
+        // The menu lists the languages, the current one marked, then the settings.
+        let menu = ComObject::new(Menu {
+            items: RefCell::new(Vec::new()),
+        });
+        let interface: ITfMenu = menu.to_interface();
+        button.InitMenu(&interface).unwrap();
+        let items = menu.get().items.borrow().clone();
+        let names: Vec<&str> = items.iter().map(|(_, _, name)| name.as_str()).collect();
+        assert_eq!(names[..3], ["English", "한국어", "日本語"]);
+        assert_eq!(items[3].1 & TF_LBMENUF_SEPARATOR, TF_LBMENUF_SEPARATOR);
+        assert!(names[4].contains("easime"), "the settings entry: {names:?}");
+        let checked: Vec<bool> = items[..3]
+            .iter()
+            .map(|(_, flags, _)| flags & TF_LBMENUF_RADIOCHECKED != 0)
+            .collect();
+        assert_eq!(
+            checked,
+            [false, true, false],
+            "Korean is the current language"
+        );
+
+        // Choosing a language from the menu finishes what is being composed.
+        button.OnMenuSelect(items[2].0).unwrap();
+        assert_eq!(letter(), "あ");
+        assert_eq!(app.text(), format!("{before}gk하"), "the syllable stays");
+        assert_eq!(compositions(context), 0, "and is finished");
+
+        // The switch key moves the button too.
+        assert!(app.press(VK_HANGUL, 0x72, None));
+        assert_eq!(letter(), "A", "Japanese, then English");
+        assert_eq!(tooltip(), "easime: English");
+    }
 }
 
 /// What an application sets on its own context, as a number.
