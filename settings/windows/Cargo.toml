@@ -28,10 +28,9 @@ ime-core = { path = "../../crates/ime-core" }
 # The translation table, shared with the KDE app (settings/kde/qml/tr.js).
 serde_json = "1"
 
+# WinUI 3. The Windows App Runtime is not shipped with the app (its license
+# puts duties on whoever redistributes it): the app uses the runtime installed
+# from Microsoft, and windows-reactor asks the user to install it if missing
+# (docs/decisions.md, "설정 GUI").
 [target.'cfg(windows)'.dependencies]
 windows-reactor = "0.100"
-
-# Build scripts run on the build machine: the Windows App Runtime is fetched
-# and put next to the program only when building on Windows.
-[target.'cfg(windows)'.build-dependencies]
-windows-reactor-setup = "0.100"

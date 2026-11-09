@@ -71,7 +71,7 @@ QT_QPA_PLATFORM=offscreen /usr/lib64/qt6/bin/qmltestrunner -input settings/kde/t
 화면의 문구는 `Tr.t("한국어 원문")`으로 쓰고, 같은 원문을 `settings/kde/qml/tr.js`의 표에 네 언어로 넣는다(원문을 고치면 표의 키도 고친다). 한국어 외의 번역은 원어민이 검토하기 전까지 초안이다. Windows 설정 앱도 같은 표를 쓴다(아래).
 
 ## Windows 설정 앱 (settings/windows)
-Rust + `windows-reactor`(windows-rs의 WinUI 3 라이브러리)로 만든 별도 cargo 프로젝트다. 페이지·저장 규칙·문구는 KDE 설정 창과 같다(`crates/easime-settings-model`, `settings/kde/qml/tr.js`). Windows에서 빌드하면 `build.rs`가 Windows App Runtime을 NuGet에서 받아 실행 파일 옆에 둔다.
+Rust + `windows-reactor`(windows-rs의 WinUI 3 라이브러리)로 만든 별도 cargo 프로젝트다. 페이지·저장 규칙·문구는 KDE 설정 창과 같다(`crates/easime-settings-model`, `settings/kde/qml/tr.js`). 실행하려면 Microsoft의 Windows App Runtime(2.4 이상)이 설치되어 있어야 한다. easime는 런타임을 재배포하지 않으므로(decisions.md "설정 GUI"), 없으면 앱이 Microsoft의 설치 안내를 띄운다. 직접 설치: `pwsh packaging\windows\runtime.ps1 -Install`(Microsoft에서 받아 서명을 확인하고 설치).
 ```sh
 cargo run  --manifest-path settings/windows/Cargo.toml -- --ui-language=ja    # Windows에서 창 열기
 cargo test --manifest-path settings/windows/Cargo.toml                         # 번역(어느 OS에서나)

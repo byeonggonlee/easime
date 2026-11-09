@@ -1,6 +1,6 @@
 # Opens the settings app (a debug build) in several display languages and keeps
 # a picture of each window: the CI's check that the app starts, shows its window
-# and stays up, with the Windows App Runtime it carries next to it. A throwaway
+# and stays up, on the Windows App Runtime installed from Microsoft. A throwaway
 # settings folder (APPDATA) is used, so the runner's settings are not touched,
 # and opening the window must not write anything there.
 #
