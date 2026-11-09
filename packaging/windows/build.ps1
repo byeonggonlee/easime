@@ -64,10 +64,18 @@ $uiExtension = "WixToolset.UI.wixext"
 $balExtension = "WixToolset.Bal.wixext"
 $utilExtension = "WixToolset.Util.wixext"
 $wixVersion = ((& $wix --version) -split '\+')[0].Trim()
+# Whether an extension is there is told by its folder (where wix build looks),
+# not by the text of `wix extension list`, which once said Bal was there when
+# it was not.
 foreach ($extension in $uiExtension, $balExtension, $utilExtension) {
-    if (-not ((& $wix extension list --global) -match [regex]::Escape($extension))) {
+    $folder = Join-Path $env:USERPROFILE ".wix\extensions\$extension\$wixVersion"
+    if (-not (Test-Path $folder)) {
         & $wix extension add --global "$extension/$wixVersion"
-        if ($LASTEXITCODE -ne 0) { throw "could not add the WiX extension $extension/$wixVersion" }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $folder)) {
+            & $wix extension list --global
+            throw "could not add the WiX extension $extension/$wixVersion (no $folder)"
+        }
+        Write-Host "added the WiX extension $extension/$wixVersion"
     }
 }
 
