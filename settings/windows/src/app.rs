@@ -10,6 +10,7 @@
 //! switching on).
 //! There is no Japanese page until Japanese has options (DESIGN.md 5.5).
 
+use crate::install;
 use crate::tr::{self, Words};
 use easime_config::{BackspaceUnit, ToggleKey};
 use easime_settings_model::dictionary::{self, DictionaryState};
@@ -92,17 +93,12 @@ fn language_name(words: &Words, language: Language) -> String {
     }
 }
 
-/// The Japanese dictionary folders the text service reads
-/// (`frontend_tsf::install::dictionary_dirs`): the user's own, then the
-/// installed one next to the DLL, which is next to this program too.
+/// The Japanese dictionary folders the text service reads ([`install`]).
 fn dictionary_dirs() -> Vec<PathBuf> {
-    let installed = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|folder| folder.join("dictionary")));
-    engine_japanese::loader::user_dictionary_dir()
-        .into_iter()
-        .chain(installed)
-        .collect()
+    install::dictionary_dirs(
+        engine_japanese::loader::user_dictionary_dir(),
+        std::env::current_exe().ok().as_deref(),
+    )
 }
 
 pub enum Message {
