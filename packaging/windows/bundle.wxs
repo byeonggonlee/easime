@@ -3,7 +3,7 @@
   easime setup (setup.exe): a WiX 5 bundle around easime.msi. Built by
   build.ps1 after the MSI; by hand:
 
-    wix build -arch x64 -ext WixToolset.Bal.wixext -ext WixToolset.Util.wixext \
+    wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext \
       -d Version=0.1.0 -d Msi=<easime-0.1.0-x64.msi> -d Root=<repository root> \
       -o easime-setup-0.1.0-x64.exe packaging/windows/bundle.wxs
 

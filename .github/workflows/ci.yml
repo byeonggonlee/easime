@@ -77,6 +77,8 @@ jobs:
   windows-installer:
     name: Windows installer (MSI, text service)
     runs-on: windows-latest
+    # It takes about ten minutes; a step that hangs must not hold a runner for hours.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -170,6 +172,7 @@ jobs:
     name: Windows setup.exe (runtime from Microsoft)
     needs: windows-installer
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

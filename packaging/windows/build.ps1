@@ -3,7 +3,8 @@
 # which also fetches Microsoft's Windows App Runtime when a PC lacks it.
 #
 # Needs the Rust toolchain and WiX 5 (`dotnet tool install --global wix --version 5.0.2`);
-# the WiX UI extension (the setup window) is added to WiX by this script.
+# the WiX extensions it uses (UI, BootstrapperApplications, Util) are downloaded
+# by this script.
 # Run from anywhere on Windows: pwsh packaging\windows\build.ps1 [-Version 0.1.0]
 #
 # The installer holds the text service (the 64-bit DLL), registers it with Windows,
@@ -58,38 +59,48 @@ if (-not (Test-Path $Dictionary)) {
 $wix = Join-Path $env:USERPROFILE ".dotnet\tools\wix.exe"
 if (-not (Test-Path $wix)) { $wix = "wix" }
 
-# The setup window (WixUI), and the bundle's window and searches (Bal, Util), are
-# extensions of WiX, kept next to the tool.
-$uiExtension = "WixToolset.UI.wixext"
-$balExtension = "WixToolset.Bal.wixext"
-$utilExtension = "WixToolset.Util.wixext"
+# The setup window (WixUI), and the bundle's window and searches
+# (BootstrapperApplications, Util), are
+# extensions of WiX. They are taken from NuGet at the version of WiX itself and
+# passed by path, rather than through `wix extension add`, whose global cache
+# once claimed Bal was there when it was not and once hung the CI.
 $wixVersion = ((& $wix --version) -split '\+')[0].Trim()
-# Whether an extension is there is told by its folder (where wix build looks),
-# not by the text of `wix extension list`, which once said Bal was there when
-# it was not.
-foreach ($extension in $uiExtension, $balExtension, $utilExtension) {
-    $folder = Join-Path $env:USERPROFILE ".wix\extensions\$extension\$wixVersion"
-    if (-not (Test-Path $folder)) {
-        & $wix extension add --global "$extension/$wixVersion"
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $folder)) {
-            & $wix extension list --global
-            throw "could not add the WiX extension $extension/$wixVersion (no $folder)"
+$extensions = Join-Path $root "target\wix-extensions"
+# (The bootstrapper extension is called BootstrapperApplications since WiX 5;
+# its old name, Bal, ships a DLL by the new name, which -ext Bal does not find.)
+function Get-WixExtension([string]$name) {
+    $folder = Join-Path $extensions "$name.$wixVersion"
+    $dll = Join-Path $folder "wixext5\$name.dll"
+    if (-not (Test-Path $dll)) {
+        New-Item -ItemType Directory -Force $folder | Out-Null
+        $package = Join-Path $extensions "$name.$wixVersion.nupkg"
+        Write-Host "$(Get-Date -Format HH:mm:ss) downloading the WiX extension $name $wixVersion"
+        Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/$name/$wixVersion" -OutFile $package -TimeoutSec 300
+        Expand-Archive -Path $package -DestinationPath $folder -Force
+        if (-not (Test-Path $dll)) {
+            Get-ChildItem $folder -Recurse -Filter *.dll | ForEach-Object { Write-Host "  $($_.FullName)" }
+            throw "the WiX extension $name $wixVersion has no $dll"
         }
-        Write-Host "added the WiX extension $extension/$wixVersion"
     }
+    return $dll
 }
+$uiExtension = Get-WixExtension "WixToolset.UI.wixext"
+$balExtension = Get-WixExtension "WixToolset.BootstrapperApplications.wixext"
+$utilExtension = Get-WixExtension "WixToolset.Util.wixext"
 
 if (-not [System.IO.Path]::IsPathRooted($OutDir)) { $OutDir = Join-Path $root $OutDir }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $out = Join-Path $OutDir "easime-$Version-x64.msi"
 $binaries = Join-Path $root "target\release"
 $source = Join-Path $root "packaging\windows\easime.wxs"
+Write-Host "$(Get-Date -Format HH:mm:ss) building $out"
 & $wix build -arch x64 -ext $uiExtension -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Dictionary=$Dictionary" -d "SettingsExe=$settingsExe" -d "Root=$root" -o $out $source
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 Write-Host "built $out"
 
 $setup = Join-Path $OutDir "easime-setup-$Version-x64.exe"
 $bundle = Join-Path $root "packaging\windows\bundle.wxs"
+Write-Host "$(Get-Date -Format HH:mm:ss) building $setup"
 & $wix build -arch x64 -ext $balExtension -ext $utilExtension -d "Version=$Version" -d "Msi=$out" -d "Root=$root" -o $setup $bundle
 if ($LASTEXITCODE -ne 0) { throw "wix build of setup.exe failed" }
 Write-Host "built $setup"
