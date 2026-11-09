@@ -77,6 +77,39 @@ function Show-Files-In-Use([string]$what) {
     Write-Host "----"
 }
 
+# The settings app: installed in its own folder, with a Start menu entry.
+$settingsExe = Join-Path $dir "settings\easime-settings.exe"
+$startMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\easime.lnk"
+function Assert-Settings-App([string]$what) {
+    Assert (Test-Path $settingsExe) "$what`: the settings app is installed"
+    Assert (Test-Path $startMenu) "$what`: the Start menu has easime"
+    $target = (New-Object -ComObject WScript.Shell).CreateShortcut($startMenu).TargetPath
+    Assert ($target -eq $settingsExe) "$what`: the Start menu entry opens the settings app ($target)"
+}
+
+# The installed settings app opens (on the Windows App Runtime installed from
+# Microsoft) and finds the installed Japanese dictionary, one folder up next to
+# the text service: read through UI Automation, as a screen reader would.
+function Assert-Settings-App-Works {
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+    $app = Start-Process $settingsExe -ArgumentList "--ui-language=en" -PassThru
+    try {
+        $deadline = (Get-Date).AddSeconds(90)
+        do { Start-Sleep -Milliseconds 500; $app.Refresh() } until ($app.HasExited -or $app.MainWindowHandle -ne 0 -or (Get-Date) -gt $deadline)
+        Assert ($app.MainWindowHandle -ne 0) "the installed settings app opens its window (exited: $($app.HasExited))"
+        Assert ($app.MainWindowTitle -eq "easime Settings") "its window is 'easime Settings' ('$($app.MainWindowTitle)')"
+        Start-Sleep -Seconds 3
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+        $names = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+            ForEach-Object { $_.Current.Name } | Where-Object { $_ })
+        $dictionary = @($names | Where-Object { $_ -like "Found (*" -or $_ -like "Not found*" -or $_ -like "*dictionary file*" })
+        Write-Host "the settings app says about the dictionary: $($dictionary -join ' | ')"
+        Assert (@($names | Where-Object { $_ -like "Found (*" }).Count -gt 0) "the settings app finds the installed Japanese dictionary"
+    } finally {
+        if (-not $app.HasExited) { $app.CloseMainWindow() | Out-Null; if (-not $app.WaitForExit(15000)) { Stop-Process -Id $app.Id -Force } }
+    }
+}
+
 # Files Windows will rename or delete at the next restart.
 function Pending-At-Restart {
     $key = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
@@ -165,6 +198,8 @@ Show-State "after the install"
 Assert-Registered "after the install"
 Assert ((User-Tips) -contains $tip) "easime is switched on under Korean ($tip)"
 Assert ((User-Tips).Count -eq 1) "and nowhere else"
+Assert-Settings-App "after the install"
+Assert-Settings-App-Works
 
 # What it installed works: the Hangul demo.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -187,6 +222,7 @@ Assert ((Entries).Count -eq 0) "Apps & features no longer lists easime"
 Assert-Unregistered "after the uninstall"
 Assert ((User-Tips).Count -eq 0) "easime is switched off again in this user's language settings"
 Assert (-not (Test-Path "HKLM:\SOFTWARE\easime\Keyboard")) "the record of the chosen feature is gone"
+Assert (-not (Test-Path $startMenu)) "the Start menu entry is gone"
 
 # 3. Without the keyboard feature the text service is still registered (other
 # users can add it), but nothing is switched on for this user.

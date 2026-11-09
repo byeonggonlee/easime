@@ -6,6 +6,7 @@
     wix build -arch x64 -ext WixToolset.UI.wixext \
       -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d TsfDll=<frontend_tsf.dll, built with the dll profile> \
       -d Dictionary=<mozc.bin from scripts/build-dictionary.sh mozc> -d Root=<repository root> \
+      -d SettingsExe=<easime-settings.exe from settings/windows, release build> \
       -o easime.msi packaging/windows/easime.wxs
 
   WHAT IT INSTALLS
@@ -19,6 +20,10 @@
       is the undo: it takes easime away again;
     - the Japanese dictionary (Mozc) with its license files, in "dictionary"
       next to the DLL (a feature that can be left out);
+    - the settings app (WinUI 3, settings\easime-settings.exe) with a Start menu
+      entry "easime". It needs Microsoft's Windows App Runtime, which easime does
+      not redistribute (docs/decisions.md, "설정 GUI"): without it the app asks
+      the user to install it;
     - the terminal demo (easime-cli.exe) and the licenses.
 
   OTHER USERS of the same PC find easime under "Add a keyboard" of Korean;
@@ -77,6 +82,16 @@
         </Component>
         <!-- One file per component: a component with an automatic GUID may only
              hold several files if one of them is versioned. -->
+        <!-- The settings app, in a folder of its own. It finds the dictionary next
+             to the text service one folder up (settings/windows/src/install.rs). -->
+        <Directory Id="SettingsFolder" Name="settings">
+          <Component Id="SettingsApp">
+            <File Id="SettingsExe" Name="easime-settings.exe" Source="$(SettingsExe)" KeyPath="yes">
+              <Shortcut Id="SettingsStartMenu" Directory="ProgramMenuFolder" Name="easime"
+                        Description="easime settings" WorkingDirectory="SettingsFolder" Icon="EasimeIcon" />
+            </File>
+          </Component>
+        </Directory>
         <Component Id="AppIcon">
           <File Id="EasimeIco" Source="$(Root)/data/icons/easime.ico" />
         </Component>
@@ -121,16 +136,18 @@
         </Component>
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
 
     <Feature Id="Main" Title="easime" Level="1" AllowAdvertise="no" ConfigurableDirectory="INSTALLFOLDER"
              Display="expand"
-             Description="The Windows input method, the terminal demo and the licenses.">
+             Description="The Windows input method, its settings app, the terminal demo and the licenses.">
       <ComponentRef Id="TextService" />
       <ComponentRef Id="Demo" />
       <ComponentRef Id="AppIcon" />
       <ComponentRef Id="LicenseMit" />
       <ComponentRef Id="LicenseApache" />
       <ComponentRef Id="ThirdParty" />
+      <ComponentRef Id="SettingsApp" />
       <!-- Switching easime on in the installing user's input methods, under
            Korean (frontend-tsf, setup.rs). Only languages it can type are in
            its cycle (profiles::TYPEABLE). -->
