@@ -150,6 +150,19 @@ jobs:
         run: |
           cargo build --locked
           Get-ChildItem target\debug -File | Sort-Object Name | ForEach-Object { "{0,12:N0}  {1}" -f $_.Length, $_.Name }
+      # The runner already has the runtime staged (machine-wide, not set up by
+      # Microsoft's installer). Whether the app opens on that alone decides
+      # what the installer bundle may treat as "the runtime is there".
+      - name: "Experiment: open the window before installing the runtime"
+        continue-on-error: true
+        run: |
+          $app = Start-Process settings\windows\target\debug\easime-settings.exe -ArgumentList "--ui-language=en" -PassThru
+          $deadline = (Get-Date).AddSeconds(45)
+          do { Start-Sleep -Milliseconds 500; $app.Refresh() } until ($app.HasExited -or $app.MainWindowHandle -ne 0 -or (Get-Date) -gt $deadline)
+          Write-Host "EXPERIMENT window before the runtime installer: handle $($app.MainWindowHandle), title '$($app.MainWindowTitle)', exited $($app.HasExited)"
+          Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { Write-Host "  window: $($_.ProcessName) '$($_.MainWindowTitle)'" }
+          if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+          Get-Process | Where-Object { $_.MainWindowTitle -like "*easime*" } | Stop-Process -Force -ErrorAction SilentlyContinue
       - name: Install the Windows App Runtime from Microsoft
         run: .\packaging\windows\runtime.ps1 -Install
       - name: Open the window in every display language
