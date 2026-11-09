@@ -529,14 +529,87 @@ const KEY_ENTER: u32 = 28;
 const KEY_A: u32 = 30;
 const KEY_N: u32 = 49;
 
-/// Korean and Japanese both enabled, in that order.
+/// Korean and Japanese both enabled, in that order, the plain switch key going
+/// round the cycle (the tests below walk it; the default, English and the last
+/// language, has tests of its own).
 fn korean_and_japanese() -> easime_config::Config {
     let mut config = easime_config::Config::default();
     config.languages.enabled = Some(vec![
         ime_core::Language::Korean,
         ime_core::Language::Japanese,
     ]);
+    config.languages.switch = ime_core::SwitchMode::Cycle;
     config
+}
+
+/// Korean and Japanese enabled with the default way of switching: the plain
+/// key goes between English and the language last typed in.
+fn korean_and_japanese_toggling() -> easime_config::Config {
+    let mut config = korean_and_japanese();
+    config.languages.switch = ime_core::SwitchMode::ToggleLast;
+    config
+}
+
+#[test]
+fn the_plain_key_goes_between_english_and_korean_and_shift_goes_to_japanese() {
+    let mut fake = Fake::start_with(korean_and_japanese_toggling());
+    fake.activate();
+
+    // Plain: Korean to English and back, however many languages are on.
+    fake.tap_all(&[KEY_HANGEUL]);
+    fake.tap_all(&[KEY_G]);
+    let requests = fake.settle();
+    assert_eq!(
+        forwarded(&requests),
+        [(KEY_G, 1), (KEY_G, 0)],
+        "English: {requests:#?}"
+    );
+    fake.tap_all(&[KEY_HANGEUL]);
+    fake.press(KEY_G);
+    let requests = fake.settle();
+    assert_eq!(last_preedit(&requests), Some("ㅎ"), "Korean again");
+    fake.release(KEY_G);
+
+    // Shift with the key: the next language, Japanese ("ka" is か).
+    let shift = fake.mod_mask("Shift");
+    fake.modifiers(shift, 0, 0, 0);
+    fake.tap_all(&[KEY_HANGEUL]);
+    fake.modifiers(0, 0, 0, 0);
+    let requests = fake.settle();
+    assert_eq!(commits(&requests), ["ㅎ"], "{requests:#?}");
+    assert_eq!(forwarded(&requests), [], "the key and Shift are not typed");
+    fake.tap_all(&[KEY_K, KEY_A]);
+    let requests = fake.settle();
+    assert_eq!(last_preedit(&requests), Some("か"), "{requests:#?}");
+
+    // Japanese is the last language now: English and back reaches it.
+    fake.tap_all(&[KEY_HANGEUL]);
+    let requests = fake.settle();
+    assert_eq!(commits(&requests), ["か"], "{requests:#?}");
+    fake.tap_all(&[KEY_HANGEUL]);
+    fake.tap_all(&[KEY_K, KEY_A]);
+    let requests = fake.settle();
+    assert_eq!(last_preedit(&requests), Some("か"), "Japanese, not Korean");
+}
+
+#[test]
+fn shift_with_a_right_alt_tap_goes_to_the_next_language() {
+    let mut fake = Fake::start_with(korean_and_japanese_toggling());
+    fake.activate();
+
+    let shift = fake.mod_mask("Shift");
+    fake.modifiers(shift, 0, 0, 0);
+    fake.tap_all(&[KEY_RIGHTALT]);
+    fake.modifiers(0, 0, 0, 0);
+    let requests = fake.settle();
+    assert_eq!(forwarded(&requests), [], "the tap is taken: {requests:#?}");
+    fake.tap_all(&[KEY_K, KEY_A]);
+    let requests = fake.settle();
+    assert_eq!(
+        last_preedit(&requests),
+        Some("か"),
+        "Japanese: {requests:#?}"
+    );
 }
 
 #[test]
@@ -763,6 +836,7 @@ fn saving_settings_can_enable_japanese_and_keeps_the_current_language() {
         ime_core::Language::Korean,
         ime_core::Language::Japanese,
     ]);
+    updated.languages.switch = ime_core::SwitchMode::Cycle;
     updated.save_to(&path).unwrap();
     fake.barrier();
     // Applying settings finishes the text in progress.

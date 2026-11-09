@@ -185,11 +185,9 @@ impl Typist {
     /// `OnKeyDown`: take the key (or not) and say what to do with the document.
     pub fn key_down(&mut self, key: KeyInfo, state: &KeyboardState) -> Outcome {
         let role = match keys::toggle_role(key) {
-            KeyRole::RightAlt
-                if keys::shift_held(state)
-                    || keys::modifiers(state).ctrl
-                    || keys::modifiers(state).meta =>
-            {
+            // Shift is allowed: a right Alt tap with Shift is the other gesture
+            // (the next language). Ctrl with it is AltGr, Win a shortcut.
+            KeyRole::RightAlt if keys::modifiers(state).ctrl || keys::modifiers(state).meta => {
                 KeyRole::Other
             }
             role => role,
@@ -198,10 +196,14 @@ impl Typist {
             // Held down: one press switched, the repeats are not more presses.
             return Outcome::eaten();
         }
-        match self.toggle.on_press(key.vk, role, ()).1 {
-            Decision::Toggle => {
+        match self
+            .toggle
+            .on_press(key.vk, role, keys::shift_held(state), ())
+            .1
+        {
+            decision @ (Decision::Toggle | Decision::Next) => {
                 self.taken_presses.insert(key.vk);
-                return self.switch();
+                return self.switch(decision == Decision::Next);
             }
             // The right Alt press is not held back: see the module docs.
             Decision::Swallow => return Outcome::passed(),
@@ -252,15 +254,21 @@ impl Typist {
             return Outcome::eaten();
         }
         match self.toggle.on_release(key.vk) {
-            Decision::Toggle => self.switch(),
+            Decision::Toggle => self.switch(false),
+            Decision::Next => self.switch(true),
             _ => Outcome::passed(),
         }
     }
 
-    /// The switch key was used: finish what is being composed, then the next
-    /// language.
-    fn switch(&mut self) -> Outcome {
-        let (leftover, language) = self.session.switch_language();
+    /// The switch key was used: finish what is being composed, then change
+    /// language: the plain key does what the settings say (English and the last
+    /// language, or the next one), Shift with it (`next`) the next one.
+    fn switch(&mut self, next: bool) -> Outcome {
+        let (leftover, language) = if next {
+            self.session.next_language()
+        } else {
+            self.session.switch_language()
+        };
         Outcome {
             eaten: true,
             edit: self.finished(leftover),
@@ -285,15 +293,16 @@ impl Typist {
         self.session.cycle()
     }
 
-    /// Go to the next language of the cycle, as the switch key does (a click
-    /// on the language bar button). What was being composed is finished first.
+    /// Do what the plain switch key does (a click on the language bar button):
+    /// English and the last language, or the next one, as the settings say.
+    /// What was being composed is finished first.
+    pub fn toggle_language(&mut self) -> Outcome {
+        self.switch(false)
+    }
+
+    /// Go to the next language of the cycle, whatever the settings say.
     pub fn next_language(&mut self) -> Outcome {
-        let (leftover, language) = self.session.switch_language();
-        Outcome {
-            eaten: true,
-            edit: self.finished(leftover),
-            switched_to: Some(language),
-        }
+        self.switch(true)
     }
 
     /// Choose the language directly (a choice in the language bar's menu).
@@ -344,6 +353,7 @@ mod tests {
         Config {
             languages: Languages {
                 enabled: Some(vec![language]),
+                ..Languages::default()
             },
             ..Config::default()
         }
@@ -621,6 +631,8 @@ mod tests {
         let words = std::sync::Arc::new(MemoryDictionary::parse("にほん\t日本\n").0);
         let mut chosen = Config::default();
         chosen.languages.enabled = Some(vec![Language::Korean, Language::Japanese]);
+        // The cycle (the other mode is `the_plain_key_goes_between_english...`).
+        chosen.languages.switch = ime_core::SwitchMode::Cycle;
         // What the Windows service builds from the settings once Japanese can be typed.
         let config = effective_config(
             &chosen,
@@ -708,15 +720,113 @@ mod tests {
         assert!(!release.eaten && release.switched_to.is_none());
         assert_eq!(typist.language(), Language::Korean);
 
-        // AltGr (Ctrl already down when right Alt is pressed) or Shift+RightAlt
-        // must not arm the switch either.
-        for modifier in [VK_CONTROL, VK_SHIFT] {
-            typist.key_down(alt, &held(&[modifier]));
-            assert!(!typist.test_key_up(alt));
-            let release = typist.key_up(alt);
-            assert!(!release.eaten && release.switched_to.is_none());
-            assert_eq!(typist.language(), Language::Korean);
-        }
+        // AltGr (Ctrl already down when right Alt is pressed) must not arm the
+        // switch either. (Shift does: that is the other gesture, below.)
+        typist.key_down(alt, &held(&[VK_CONTROL]));
+        assert!(!typist.test_key_up(alt));
+        let release = typist.key_up(alt);
+        assert!(!release.eaten && release.switched_to.is_none());
+        assert_eq!(typist.language(), Language::Korean);
+    }
+
+    /// Korean and Japanese on, the plain key doing `mode`.
+    fn korean_and_japanese(mode: ime_core::SwitchMode) -> Typist {
+        let mut chosen = Config::default();
+        chosen.languages.enabled = Some(vec![Language::Korean, Language::Japanese]);
+        chosen.languages.switch = mode;
+        let config = effective_config(
+            &chosen,
+            &[],
+            &[Language::Korean, Language::Japanese],
+            Language::Korean,
+        );
+        let session = Session::new(&config, JapaneseDictionary::installed(), Box::new(|_| {}));
+        Typist::new(session, ToggleKey::Both)
+    }
+
+    #[test]
+    fn the_plain_key_goes_between_english_and_the_last_language_and_shift_goes_on() {
+        let mut typist = korean_and_japanese(ime_core::SwitchMode::ToggleLast);
+        let hangul = named(VK_HANGUL, 0x72);
+        assert_eq!(typist.language(), Language::Korean);
+        let out = typist.key_down(hangul, &NO_KEYS);
+        assert_eq!(
+            out.switched_to,
+            Some(Language::English),
+            "plain: to English"
+        );
+        typist.key_up(hangul);
+        let out = typist.key_down(hangul, &NO_KEYS);
+        assert_eq!(
+            out.switched_to,
+            Some(Language::Korean),
+            "plain: back to Korean"
+        );
+        typist.key_up(hangul);
+
+        // Shift with the key: the next language of the cycle, Japanese.
+        let out = typist.key_down(hangul, &held(&[VK_SHIFT]));
+        assert!(out.eaten);
+        assert_eq!(out.switched_to, Some(Language::Japanese));
+        typist.key_up(hangul);
+        // Japanese is now the last language: English and back reach it.
+        assert_eq!(
+            typist.key_down(hangul, &NO_KEYS).switched_to,
+            Some(Language::English)
+        );
+        typist.key_up(hangul);
+        assert_eq!(
+            typist.key_down(hangul, &NO_KEYS).switched_to,
+            Some(Language::Japanese)
+        );
+        typist.key_up(hangul);
+        // Shift again goes round: English, then Korean.
+        assert_eq!(
+            typist.key_down(hangul, &held(&[VK_SHIFT])).switched_to,
+            Some(Language::English)
+        );
+    }
+
+    #[test]
+    fn shift_with_a_right_alt_tap_goes_to_the_next_language() {
+        let mut typist = korean_and_japanese(ime_core::SwitchMode::ToggleLast);
+        let alt = right_alt();
+        // The press goes to the application; the tap is taken on release.
+        let press = typist.key_down(alt, &held(&[VK_SHIFT]));
+        assert!(!press.eaten);
+        assert!(typist.test_key_up(alt));
+        let release = typist.key_up(alt);
+        assert!(release.eaten);
+        assert_eq!(release.switched_to, Some(Language::Japanese));
+        // Without Shift it is the plain key again.
+        typist.key_down(alt, &NO_KEYS);
+        assert_eq!(typist.key_up(alt).switched_to, Some(Language::English));
+    }
+
+    #[test]
+    fn in_cycle_mode_the_plain_key_goes_round() {
+        let mut typist = korean_and_japanese(ime_core::SwitchMode::Cycle);
+        let hangul = named(VK_HANGUL, 0x72);
+        assert_eq!(
+            typist.key_down(hangul, &NO_KEYS).switched_to,
+            Some(Language::Japanese)
+        );
+        typist.key_up(hangul);
+        assert_eq!(
+            typist.key_down(hangul, &NO_KEYS).switched_to,
+            Some(Language::English)
+        );
+    }
+
+    #[test]
+    fn the_language_bar_click_does_what_the_plain_key_does() {
+        let mut typist = korean_and_japanese(ime_core::SwitchMode::ToggleLast);
+        assert_eq!(
+            typist.toggle_language().switched_to,
+            Some(Language::English)
+        );
+        assert_eq!(typist.toggle_language().switched_to, Some(Language::Korean));
+        assert_eq!(typist.next_language().switched_to, Some(Language::Japanese));
     }
 
     #[test]

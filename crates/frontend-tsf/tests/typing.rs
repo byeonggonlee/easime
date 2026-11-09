@@ -1189,9 +1189,11 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
         "にほん\t日本\n",
     )
     .unwrap();
+    // The cycle: this scenario walks Korean, Japanese, English with one key. (The
+    // default, English and the last language, is tested without TSF: `typing::tests`.)
     std::fs::write(
         easime.join("config.toml"),
-        "[languages]\nenabled = [\"korean\", \"japanese\"]\n",
+        "[languages]\nenabled = [\"korean\", \"japanese\"]\nswitch = \"cycle\"\n",
     )
     .unwrap();
     pump(2200);

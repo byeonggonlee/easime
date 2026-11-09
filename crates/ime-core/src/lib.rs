@@ -8,5 +8,5 @@ pub mod os;
 
 pub use engine::{CandidateList, EngineOutput, InputEngine, Preedit};
 pub use key::{Key, KeyEvent, Modifiers};
-pub use language::{Language, LanguageSwitcher};
+pub use language::{Language, LanguageSwitcher, SwitchMode};
 pub use os::Os;

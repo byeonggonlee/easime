@@ -10,7 +10,7 @@
 //!
 //! * The icon is the language's letter (`A`, `한`, `あ`) on a dark rounded
 //!   badge, like the tray icon of the Linux daemon. The tooltip names the language.
-//! * A left click goes to the next language; the menu (right click) lists the
+//! * A left click does what the plain switch key does; the menu (right click) lists the
 //!   languages and opens the settings app.
 //! * What a click or a menu choice does is the service's business
 //!   ([`Request`]): the button only says what the user asked for.
@@ -54,8 +54,8 @@ use windows::core::{BOOL, BSTR, GUID, IUnknown, Interface, PCWSTR, Ref, Result, 
 /// What the user asked of the service through the button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Request {
-    /// Go to the next language of the cycle (a left click).
-    Next,
+    /// Do what the plain switch key does (a left click).
+    Toggle,
     /// Go to this language (a menu choice).
     Select(Language),
     /// Open the settings app (a menu choice).
@@ -186,7 +186,7 @@ impl ITfLangBarItemButton_Impl for ModeButton_Impl {
     fn OnClick(&self, click: TfLBIClick, _point: &POINT, _area: *const RECT) -> Result<()> {
         // A right click opens the menu on its own (`InitMenu`).
         if click == TF_LBI_CLK_LEFT {
-            (self.handler)(Request::Next);
+            (self.handler)(Request::Toggle);
         }
         Ok(())
     }

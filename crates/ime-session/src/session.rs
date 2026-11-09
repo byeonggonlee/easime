@@ -59,8 +59,12 @@ impl Session {
     pub fn apply_config(&mut self, config: &Config) -> String {
         let leftover = self.flush();
         let previous = self.switcher.current();
+        let last = self.switcher.last();
         let (engines, mut switcher) =
             build_engines(config, &mut self.dictionary, &*self.log, &self.system);
+        if let Some(last) = last {
+            switcher.remember(last);
+        }
         switcher.select(previous);
         self.engines = engines;
         self.switcher = switcher;
@@ -111,11 +115,23 @@ impl Session {
         }
     }
 
-    /// Move to the next language. The text in progress is finished first and
+    /// What the plain switch key does: go between English and the language
+    /// last typed in, or to the next language of the cycle, as the settings say
+    /// ([`ime_core::SwitchMode`]). The text in progress is finished first and
     /// returned for committing, so nothing is lost or typed in the wrong
     /// language.
     #[must_use = "the text in progress has to be committed"]
     pub fn switch_language(&mut self) -> (String, Language) {
+        let leftover = self.flush();
+        let language = self.switcher.toggle();
+        (leftover, language)
+    }
+
+    /// Move to the next language of the cycle whatever the settings say (Shift
+    /// with the switch key). The text in progress is finished first and
+    /// returned for committing.
+    #[must_use = "the text in progress has to be committed"]
+    pub fn next_language(&mut self) -> (String, Language) {
         let leftover = self.flush();
         let language = self.switcher.advance();
         (leftover, language)
@@ -193,7 +209,10 @@ fn build_engines(
         .copied()
         .filter(|l| engines.contains_key(l))
         .collect();
-    (engines, LanguageSwitcher::new(&usable))
+    (
+        engines,
+        LanguageSwitcher::new(&usable).with_mode(config.languages.switch),
+    )
 }
 
 #[cfg(test)]
@@ -206,7 +225,10 @@ mod tests {
 
     fn config(languages: Option<Vec<Language>>) -> Config {
         Config {
-            languages: Languages { enabled: languages },
+            languages: Languages {
+                enabled: languages,
+                ..Languages::default()
+            },
             ..Config::default()
         }
     }

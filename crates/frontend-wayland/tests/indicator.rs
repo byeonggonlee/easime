@@ -21,6 +21,7 @@ const LONG_MS: u32 = 60_000;
 fn config(indicator_ms: u32) -> Config {
     let mut config = Config::default();
     config.languages.enabled = Some(vec![Language::Korean, Language::Japanese]);
+    config.languages.switch = ime_core::SwitchMode::Cycle;
     config.appearance.indicator_ms = indicator_ms;
     config
 }

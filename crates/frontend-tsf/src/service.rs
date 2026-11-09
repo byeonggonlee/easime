@@ -438,7 +438,7 @@ impl TextService {
                     return;
                 };
                 match request {
-                    Request::Next => typist.next_language(),
+                    Request::Toggle => typist.toggle_language(),
                     Request::Select(language) => typist.select_language(language),
                     Request::Settings => return,
                 }

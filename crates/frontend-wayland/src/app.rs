@@ -415,6 +415,19 @@ impl App {
     }
 
     /// True if a Shift key is physically held (Caps Lock does not count).
+    /// What the key is with no modifier held (its first level). Which key it
+    /// is must not depend on Shift: the right Alt key of the usual keymaps
+    /// gives `Alt_R`, and `Meta_R` with Shift.
+    fn base_keysym(&self, key: u32) -> Option<u32> {
+        let xkb = self.xkb.as_ref()?;
+        let keycode = xkb::Keycode::new(key + EVDEV_OFFSET);
+        let layout = xkb.state.key_get_layout(keycode);
+        xkb.keymap
+            .key_get_syms_by_level(keycode, layout, 0)
+            .first()
+            .map(|sym| sym.raw())
+    }
+
     fn shift_held(&self) -> bool {
         self.xkb.as_ref().is_some_and(|xkb| {
             xkb.state.mod_name_is_active(
@@ -442,8 +455,11 @@ impl App {
     fn on_key(&mut self, serial: u32, time: u32, key: u32, action: KeyAction) {
         match action {
             KeyAction::Released => {
-                if self.toggle.on_release(key) == Decision::Toggle {
+                let released = self.toggle.on_release(key);
+                if released == Decision::Toggle {
                     self.toggle_language();
+                } else if released == Decision::Next {
+                    self.next_language();
                 } else if self.swallowed.remove(&key).is_none() {
                     self.forward_key(serial, time, key, KeyAction::Released);
                 }
@@ -480,15 +496,16 @@ impl App {
             }
         };
 
-        let role = match toggle_role(keysym) {
-            ime_session::KeyRole::RightAlt
-                if self.current_modifiers().any() || self.shift_held() =>
-            {
+        let role = match toggle_role(self.base_keysym(key).unwrap_or(keysym)) {
+            // With Shift held, a right Alt tap is the other gesture (the next
+            // language); any other modifier means it is being used as one.
+            ime_session::KeyRole::RightAlt if self.current_modifiers().any() => {
                 ime_session::KeyRole::Other
             }
             role => role,
         };
-        let (held_back, decision) = self.toggle.on_press(key, role, (serial, time));
+        let shift = self.shift_held();
+        let (held_back, decision) = self.toggle.on_press(key, role, shift, (serial, time));
         if let Some(Held {
             key,
             token: (serial, time),
@@ -497,8 +514,12 @@ impl App {
             self.forward_key(serial, time, key, KeyAction::Pressed);
         }
         match decision {
-            Decision::Toggle => {
-                self.toggle_language();
+            Decision::Toggle | Decision::Next => {
+                if decision == Decision::Next {
+                    self.next_language();
+                } else {
+                    self.toggle_language();
+                }
                 self.swallowed.insert(
                     key,
                     Swallowed {
@@ -554,9 +575,17 @@ impl App {
         }
     }
 
+    /// The plain switch key: English and the last language, or the next one,
+    /// as the settings say.
     fn toggle_language(&mut self) {
         // Finishes the text in progress before switching.
         let (leftover, language) = self.session.switch_language();
+        self.language_changed(leftover, language);
+    }
+
+    /// Shift with the switch key: the next language of the cycle.
+    fn next_language(&mut self) {
+        let (leftover, language) = self.session.next_language();
         self.language_changed(leftover, language);
     }
 

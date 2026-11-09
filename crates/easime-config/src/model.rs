@@ -1,6 +1,6 @@
 //! The settings data model.
 
-use ime_core::Language;
+use ime_core::{Language, SwitchMode};
 use serde::{Deserialize, Serialize};
 
 /// Which key switches between English and the current language.
@@ -47,6 +47,12 @@ pub struct Languages {
     /// English only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<Vec<Language>>,
+    /// What the plain switch key does with three or more languages on:
+    /// go between English and the language last typed in (the default), or
+    /// walk the cycle. Shift with the switch key always goes to the next
+    /// language of the cycle.
+    #[serde(skip_serializing_if = "SwitchMode::is_default")]
+    pub switch: SwitchMode,
 }
 
 impl Languages {
@@ -240,6 +246,7 @@ mod tests {
         let c = Config {
             languages: Languages {
                 enabled: Some(vec![Language::Korean, Language::Japanese]),
+                switch: SwitchMode::Cycle,
             },
             shortcuts: Shortcuts {
                 toggle_key: ToggleKey::Hangul,
@@ -253,6 +260,18 @@ mod tests {
             },
         };
         assert_eq!(Config::from_toml(&c.to_toml()).unwrap(), c);
+    }
+
+    #[test]
+    fn the_switch_mode_defaults_to_the_last_language_and_is_written_only_when_chosen() {
+        assert_eq!(Config::default().languages.switch, SwitchMode::ToggleLast);
+        assert!(!Config::default().to_toml().contains("switch"));
+        let c = Config::from_toml("[languages]\nswitch = \"cycle\"\n").unwrap();
+        assert_eq!(c.languages.switch, SwitchMode::Cycle);
+        assert!(c.to_toml().contains("switch = \"cycle\""));
+        let c = Config::from_toml("[languages]\nswitch = \"toggle_last\"\n").unwrap();
+        assert_eq!(c.languages.switch, SwitchMode::ToggleLast);
+        assert!(Config::from_toml("[languages]\nswitch = \"random\"\n").is_err());
     }
 
     #[test]

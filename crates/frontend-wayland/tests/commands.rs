@@ -49,6 +49,7 @@ fn wait_for(fake: &mut Fake, done: impl Fn(&[Req]) -> bool) -> Vec<Req> {
 fn another_thread_can_switch_the_language() {
     let mut config = Config::default();
     config.languages.enabled = Some(vec![Language::Korean, Language::Japanese]);
+    config.languages.switch = ime_core::SwitchMode::Cycle;
     let mut fake = Fake::start_with(config);
     fake.activate();
 

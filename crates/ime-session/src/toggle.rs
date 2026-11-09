@@ -5,6 +5,11 @@
 //!   other key in between). If another key is pressed while it is held, it was
 //!   being used as a modifier, so the held-back press is handed back to be
 //!   forwarded to the application and the switch is cancelled.
+//! * With Shift held when the key is pressed, the key does the other thing,
+//!   [`Decision::Next`] (the next language of the cycle), instead of
+//!   [`Decision::Toggle`] (what the settings say the plain key does). The
+//!   decision of 2026-11-09: the plain key is for the common pair, English and
+//!   the language last typed in; Shift reaches the others.
 //!
 //! The rules are the same on every OS. What differs is how a frontend *knows*
 //! which key it is looking at (a keysym on Wayland, a virtual-key code on
@@ -42,8 +47,12 @@ pub enum Decision {
     Pass,
     /// Hold the event back; nothing to do now.
     Swallow,
-    /// Switch language and consume the event.
+    /// Switch language the way the plain key does (see
+    /// `ime_core::SwitchMode`) and consume the event.
     Toggle,
+    /// Go to the next language of the cycle and consume the event: the key
+    /// pressed with Shift held.
+    Next,
 }
 
 /// Tracks the switch key. `K` identifies a physical key so that its release can
@@ -53,6 +62,8 @@ pub enum Decision {
 pub struct ToggleTracker<K, T> {
     setting: ToggleKey,
     pending: Option<Held<K, T>>,
+    /// Whether the held-back press had Shift held (it ends as `Next`).
+    pending_next: bool,
 }
 
 impl<K, T> Default for ToggleTracker<K, T> {
@@ -60,6 +71,7 @@ impl<K, T> Default for ToggleTracker<K, T> {
         Self {
             setting: ToggleKey::default(),
             pending: None,
+            pending_next: false,
         }
     }
 }
@@ -74,19 +86,32 @@ impl<K: Copy + PartialEq, T: Copy> ToggleTracker<K, T> {
         Self {
             setting,
             pending: None,
+            pending_next: false,
         }
     }
 
-    /// Report a key press. If a held-back press is returned, forward it to the
-    /// application *before* acting on the decision.
-    pub fn on_press(&mut self, key: K, role: KeyRole, token: T) -> (Option<Held<K, T>>, Decision) {
+    /// Report a key press, with whether Shift is held. If a held-back press is
+    /// returned, forward it to the application *before* acting on the decision.
+    pub fn on_press(
+        &mut self,
+        key: K,
+        role: KeyRole,
+        shift: bool,
+        token: T,
+    ) -> (Option<Held<K, T>>, Decision) {
         match role {
             KeyRole::HangulKey if self.setting.uses_hangul_key() => {
-                (self.pending.take(), Decision::Toggle)
+                let decision = if shift {
+                    Decision::Next
+                } else {
+                    Decision::Toggle
+                };
+                (self.pending.take(), decision)
             }
             KeyRole::RightAlt if self.setting.uses_right_alt() => {
                 if self.pending.is_none() {
                     self.pending = Some(Held { key, token });
+                    self.pending_next = shift;
                 }
                 (None, Decision::Swallow)
             }
@@ -99,7 +124,11 @@ impl<K: Copy + PartialEq, T: Copy> ToggleTracker<K, T> {
         match self.pending {
             Some(p) if p.key == key => {
                 self.pending = None;
-                Decision::Toggle
+                if std::mem::take(&mut self.pending_next) {
+                    Decision::Next
+                } else {
+                    Decision::Toggle
+                }
             }
             _ => Decision::Pass,
         }
@@ -141,7 +170,7 @@ mod tests {
     fn hangul_key_toggles_on_press() {
         let mut t = Tracker::new();
         assert_eq!(
-            t.on_press(HANGUL, KeyRole::HangulKey, (1, 10)),
+            t.on_press(HANGUL, KeyRole::HangulKey, false, (1, 10)),
             (None, Decision::Toggle)
         );
     }
@@ -150,7 +179,7 @@ mod tests {
     fn tapping_right_alt_toggles_on_release() {
         let mut t = Tracker::new();
         assert_eq!(
-            t.on_press(ALT_R, KeyRole::RightAlt, (1, 10)),
+            t.on_press(ALT_R, KeyRole::RightAlt, false, (1, 10)),
             (None, Decision::Swallow)
         );
         assert!(t.holds(ALT_R));
@@ -161,8 +190,8 @@ mod tests {
     #[test]
     fn right_alt_used_as_modifier_is_forwarded_not_toggled() {
         let mut t = Tracker::new();
-        t.on_press(ALT_R, KeyRole::RightAlt, (1, 10));
-        let (held, decision) = t.on_press(A, KeyRole::Other, (2, 20));
+        t.on_press(ALT_R, KeyRole::RightAlt, false, (1, 10));
+        let (held, decision) = t.on_press(A, KeyRole::Other, false, (2, 20));
         assert_eq!(
             held,
             Some(Held {
@@ -179,7 +208,7 @@ mod tests {
     fn ordinary_keys_pass() {
         let mut t = Tracker::new();
         assert_eq!(
-            t.on_press(A, KeyRole::Other, (1, 10)),
+            t.on_press(A, KeyRole::Other, false, (1, 10)),
             (None, Decision::Pass)
         );
         assert_eq!(t.on_release(A), Decision::Pass);
@@ -189,12 +218,12 @@ mod tests {
     fn hangul_only_setting_leaves_right_alt_alone() {
         let mut t = Tracker::with_setting(ToggleKey::Hangul);
         assert_eq!(
-            t.on_press(ALT_R, KeyRole::RightAlt, (1, 10)),
+            t.on_press(ALT_R, KeyRole::RightAlt, false, (1, 10)),
             (None, Decision::Pass)
         );
         assert_eq!(t.on_release(ALT_R), Decision::Pass);
         assert_eq!(
-            t.on_press(HANGUL, KeyRole::HangulKey, (2, 20)),
+            t.on_press(HANGUL, KeyRole::HangulKey, false, (2, 20)),
             (None, Decision::Toggle)
         );
     }
@@ -203,11 +232,11 @@ mod tests {
     fn right_alt_only_setting_leaves_hangul_key_alone() {
         let mut t = Tracker::with_setting(ToggleKey::RightAlt);
         assert_eq!(
-            t.on_press(HANGUL, KeyRole::HangulKey, (1, 10)),
+            t.on_press(HANGUL, KeyRole::HangulKey, false, (1, 10)),
             (None, Decision::Pass)
         );
         assert_eq!(
-            t.on_press(ALT_R, KeyRole::RightAlt, (2, 20)),
+            t.on_press(ALT_R, KeyRole::RightAlt, false, (2, 20)),
             (None, Decision::Swallow)
         );
         assert_eq!(t.on_release(ALT_R), Decision::Toggle);
@@ -218,16 +247,16 @@ mod tests {
         // Some systems repeat a held modifier; the first press is the one that
         // may have to be forwarded.
         let mut t = Tracker::new();
-        t.on_press(ALT_R, KeyRole::RightAlt, (1, 10));
-        t.on_press(ALT_R, KeyRole::RightAlt, (3, 30));
-        let (held, _) = t.on_press(A, KeyRole::Other, (4, 40));
+        t.on_press(ALT_R, KeyRole::RightAlt, false, (1, 10));
+        t.on_press(ALT_R, KeyRole::RightAlt, false, (3, 30));
+        let (held, _) = t.on_press(A, KeyRole::Other, false, (4, 40));
         assert_eq!(held.map(|h| h.token), Some((1, 10)));
     }
 
     #[test]
     fn clear_forgets_pending() {
         let mut t = Tracker::new();
-        t.on_press(ALT_R, KeyRole::RightAlt, (1, 10));
+        t.on_press(ALT_R, KeyRole::RightAlt, false, (1, 10));
         t.clear();
         assert_eq!(t.on_release(ALT_R), Decision::Pass);
     }
@@ -236,8 +265,44 @@ mod tests {
     fn the_key_and_token_types_belong_to_the_frontend() {
         // A frontend with string key names and no token at all.
         let mut t: ToggleTracker<&str, ()> = ToggleTracker::new();
-        t.on_press("AltRight", KeyRole::RightAlt, ());
+        t.on_press("AltRight", KeyRole::RightAlt, false, ());
         assert!(t.holds("AltRight"));
         assert_eq!(t.on_release("AltRight"), Decision::Toggle);
+    }
+
+    #[test]
+    fn shift_with_the_hangul_key_goes_to_the_next_language() {
+        let mut t = Tracker::new();
+        assert_eq!(
+            t.on_press(HANGUL, KeyRole::HangulKey, true, (1, 10)),
+            (None, Decision::Next)
+        );
+        assert_eq!(
+            t.on_press(HANGUL, KeyRole::HangulKey, false, (2, 20)),
+            (None, Decision::Toggle),
+            "the next press without Shift is the plain key again"
+        );
+    }
+
+    #[test]
+    fn a_right_alt_tap_with_shift_goes_to_the_next_language() {
+        let mut t = Tracker::new();
+        assert_eq!(
+            t.on_press(ALT_R, KeyRole::RightAlt, true, (1, 10)),
+            (None, Decision::Swallow)
+        );
+        assert_eq!(t.on_release(ALT_R), Decision::Next);
+        // And the tap after it, without Shift, is a plain one.
+        t.on_press(ALT_R, KeyRole::RightAlt, false, (2, 20));
+        assert_eq!(t.on_release(ALT_R), Decision::Toggle);
+    }
+
+    #[test]
+    fn shift_does_not_make_an_ordinary_key_switch() {
+        let mut t = Tracker::new();
+        assert_eq!(
+            t.on_press(A, KeyRole::Other, true, (1, 10)),
+            (None, Decision::Pass)
+        );
     }
 }

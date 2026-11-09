@@ -28,6 +28,7 @@ fn the_observer_hears_the_start_and_every_switch() {
 
     let mut config = Config::default();
     config.languages.enabled = Some(vec![Language::Korean, Language::Japanese]);
+    config.languages.switch = ime_core::SwitchMode::Cycle;
     let mut fake = Fake::start_with(config);
     fake.activate();
 
