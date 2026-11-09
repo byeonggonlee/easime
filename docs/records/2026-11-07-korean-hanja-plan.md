@@ -1,5 +1,8 @@
 # Korean Hanja Implementation Plan
 
+> **기록, 상태: 모두 실행됨(2026-11-07).** 단계별 체크박스는 당시 에이전트 작업용이며 현재 상태를 나타내지 않는다. 현재 상태는 [status.md](../status.md)를 본다.
+
+
 > **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task. Preserve existing uncommitted design documents.
 
 **Goal:** Convert one composing Hangul syllable to Hanja and record/investigate the KDE panel regression.
