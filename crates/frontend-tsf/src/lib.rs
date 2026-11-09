@@ -160,6 +160,27 @@ mod exports {
         setup::run(Step::Disable, &unsafe { command_line_text(command_line) });
     }
 
+    /// `rundll32 easime_tsf.dll,ListUnderUserLanguages <user id>`: list easime
+    /// also under the languages of that user (the installer passes the id of the
+    /// user who installs), so they find it under "Add a keyboard" of their own
+    /// language. Only listing: nothing is switched on. Run as the system, not
+    /// as the user: the listing is machine-wide.
+    ///
+    /// # Safety
+    /// Called by `rundll32`, which passes a NUL-terminated command line.
+    #[unsafe(no_mangle)]
+    pub unsafe extern "system" fn ListUnderUserLanguages(
+        _window: HWND,
+        _instance: HINSTANCE,
+        command_line: *const c_char,
+        _show: i32,
+    ) {
+        if let Some(path) = dll_path() {
+            // SAFETY: rundll32 passes a NUL-terminated string.
+            setup::list_under_user_languages(&path, &unsafe { command_line_text(command_line) });
+        }
+    }
+
     /// Windows may unload the DLL only when no text service or lock is alive.
     #[unsafe(no_mangle)]
     pub extern "system" fn DllCanUnloadNow() -> HRESULT {

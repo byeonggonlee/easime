@@ -189,11 +189,23 @@
     <CustomAction Id="DisableKeyboard" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes" Return="ignore"
                   ExeCommand="&quot;[System64Folder]rundll32.exe&quot; &quot;[INSTALLFOLDER]easime_tsf.dll&quot;,DisableForCurrentUser" />
 
+    <!-- Also list easime under the languages of the user who installs, so they
+         find it under "Add a keyboard" of their own language (decision of
+         2026-11-09). Listing only: nothing is switched on, and TSF does not
+         start it anywhere (it is registered "not enabled by default"). Machine-wide
+         like the registration, so as the system; [UserSID] says whose language list
+         to read. Whatever it lists, the unregistration above takes away again (it
+         removes every language the class is listed under). A failure only means
+         easime is listed under Korean alone, so the install goes on. -->
+    <CustomAction Id="ListUnderUserLanguages" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="ignore"
+                  ExeCommand="&quot;[System64Folder]rundll32.exe&quot; &quot;[INSTALLFOLDER]easime_tsf.dll&quot;,ListUnderUserLanguages [UserSID]" />
+
     <InstallExecuteSequence>
       <!-- Switching on and off: &Feature is what will be, !Feature what is. -->
       <Custom Action="RegisterTextServiceRollback" After="InstallFiles" Condition="&amp;Main=3" />
       <Custom Action="RegisterTextService" After="RegisterTextServiceRollback" Condition="&amp;Main=3" />
-      <Custom Action="EnableKeyboard" After="RegisterTextService" Condition="&amp;Keyboard=3" />
+      <Custom Action="ListUnderUserLanguages" After="RegisterTextService" Condition="&amp;Main=3" />
+      <Custom Action="EnableKeyboard" After="ListUnderUserLanguages" Condition="&amp;Keyboard=3" />
 
       <!-- Removing: the user's entry first, then Windows' registration, then the files.
            Not when a newer version is replacing this one (UPGRADINGPRODUCTCODE): it

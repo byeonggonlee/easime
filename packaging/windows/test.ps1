@@ -142,6 +142,31 @@ function User-Tips {
     })
 }
 
+# The languages in this user's language list that the installer also lists easime
+# under (decision of 2026-11-09): one language of one region (en-US), not a bare
+# language (en); Korean has it anyway. As language ids in four hex digits.
+function User-Language-Ids {
+    @(Get-ChildItem $userProfiles -ErrorAction SilentlyContinue | ForEach-Object {
+        try { $culture = [System.Globalization.CultureInfo]::new($_.PSChildName) } catch { return }
+        $id = $culture.LCID -band 0xFFFF
+        if ($culture.IsNeutralCulture -or $id -eq 0 -or $id -eq 0x1000 -or $id -eq 0x0412) { return }
+        "{0:X4}" -f $id
+    })
+}
+# The languages TSF lists easime's profile under (machine-wide registration).
+function Listed-Languages {
+    $languages = "HKLM:\SOFTWARE\Microsoft\CTF\TIP\$clsid\LanguageProfile"
+    @(Get-ChildItem $languages -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.PSPath $profile.Profile) } |
+        ForEach-Object { $_.PSChildName })
+}
+# How many times the text service was started in a program (easime.log's "start:"):
+# TSF does that for a program only when easime is the input method it uses.
+function Service-Starts {
+    $log = Join-Path $env:LOCALAPPDATA "easime\easime.log"
+    if (Test-Path $log) { @(Get-Content $log | Where-Object { $_ -like "*start:*" }).Count } else { 0 }
+}
+
 # How many times the installer's helper logged a step ("enable"/"disable").
 function Setup-Lines([string]$step) {
     $log = Join-Path $env:LOCALAPPDATA "easime\easime.log"
@@ -168,10 +193,17 @@ function Assert-Registered([string]$what) {
     Assert ((Class-Dll) -eq (Join-Path $dir "easime_tsf.dll")) "$what`: Windows knows the text service, pointing at the installed DLL"
     Assert (Profile-Registered $profile) "$what`: the profile is registered under Korean"
     Assert (-not (Earlier-Registered)) "$what`: no per-language profile of an earlier build is left"
+    # Also listed under the user's own languages (so "Add a keyboard" of their language has it).
+    $ids = @(User-Language-Ids)
+    Assert ($ids.Count -ge 1) "$what`: the user has a language other than Korean to list easime under ($($ids -join ', '))"
+    foreach ($id in $ids) {
+        Assert ((Listed-Languages) -contains "0x0000$id".ToLower()) "$what`: easime is also listed under the user's language $id"
+    }
 }
 function Assert-Unregistered([string]$what) {
     Assert ($null -eq (Class-Dll)) "$what`: Windows no longer knows the text service"
     Assert (-not (Profile-Registered $profile)) "$what`: the profile is gone from the list"
+    Assert ((Listed-Languages).Count -eq 0) "$what`: easime is listed under no language any more ($((Listed-Languages) -join ', '))"
 }
 
 Assert (-not (Test-Path $dir)) "nothing is installed before the test"
@@ -198,6 +230,11 @@ Show-State "after the install"
 Assert-Registered "after the install"
 Assert ((User-Tips) -contains $tip) "easime is switched on under Korean ($tip)"
 Assert ((User-Tips).Count -eq 1) "and nowhere else"
+# Listed under the user's language is not switched on there, and no program has started
+# the text service on its own (the problem of listing it under every language, enabled by
+# default). A little time for programs that would.
+Start-Sleep -Seconds 8
+Assert ((Service-Starts) -eq 0) "no program started the text service because easime is listed under more languages ($(Service-Starts) starts)"
 Assert-Settings-App "after the install"
 Assert-Settings-App-Works
 

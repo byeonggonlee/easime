@@ -12,15 +12,16 @@
 use crate::profiles::{self, CLSID};
 use std::path::Path;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, FreeLibrary};
+use windows::Win32::Globalization::LocaleNameToLCID;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
     CoUninitialize,
 };
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE,
-    REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegEnumKeyExW, RegEnumValueW,
-    RegOpenKeyExW, RegSetValueExW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_READ, KEY_WRITE,
+    REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegEnumKeyExW,
+    RegEnumValueW, RegOpenKeyExW, RegSetValueExW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
 use windows::Win32::UI::TextServices::{
@@ -282,12 +283,92 @@ pub fn unregister_profiles() -> Result<()> {
         let _ =
             unsafe { manager.UnregisterProfile(&clsid, profile.lang_id, &guid(profile.guid), 0) };
     }
+    // The languages [`register_user_languages`] listed it under: whichever
+    // language keys TSF has for the class.
+    for lang_id in registered_languages() {
+        // SAFETY: GUID pointers live for the call; "not there" is fine.
+        let _ = unsafe {
+            manager.UnregisterProfile(&clsid, lang_id, &guid(profiles::REGISTERED.guid), 0)
+        };
+    }
     let categories = category_manager()?;
     for category in &CATEGORIES {
         // SAFETY: GUID pointers live for the call; "not there" is fine.
         let _ = unsafe { categories.UnregisterCategory(&clsid, category, &clsid) };
     }
     Ok(())
+}
+
+/// The languages TSF has a profile of the class registered under (machine-wide).
+fn registered_languages() -> Vec<u16> {
+    registry_names(
+        HKEY_LOCAL_MACHINE,
+        &format!("SOFTWARE\\Microsoft\\CTF\\TIP\\{CLSID}\\LanguageProfile"),
+        false,
+    )
+    .iter()
+    .filter_map(|name| profiles::parse_language_key(name))
+    .collect()
+}
+
+/// The Windows language id of a language tag (`en-US`), if it names one
+/// language of one region.
+fn language_id(tag: &str) -> Option<u16> {
+    let name = wide(tag);
+    // SAFETY: `name` is NUL-terminated and lives for the call.
+    let locale = unsafe { LocaleNameToLCID(PCWSTR(name.as_ptr()), 0) };
+    // 0: no such locale. The low 16 bits are the language id.
+    let id = (locale & 0xFFFF) as u16;
+    (locale != 0 && id != 0x1000 && profiles::is_specific_language(id)).then_some(id)
+}
+
+/// The languages in the language list of the user with the security id `sid`
+/// (the tags below `Control Panel\International\User Profile` of their registry
+/// hive, loaded while they are logged in), as language ids.
+pub fn languages_of_user(sid: &str) -> Vec<u16> {
+    registry_names(HKEY_USERS, &format!("{sid}\\{USER_PROFILE}"), false)
+        .iter()
+        .filter_map(|tag| language_id(tag))
+        .collect()
+}
+
+/// List easime also under the languages of the user with the id `sid`, so they
+/// find it under "Add a keyboard" of their own language. **Listing only:** the
+/// profile is registered *not enabled by default*, so nobody gets it switched
+/// on and no program starts it (an earlier try under every language, enabled by
+/// default, started the service in programs the user had not chosen it for).
+/// Switching on stays what [`enable_for_current_user`] does, under Korean.
+/// Needs administrator rights. Returns the languages it listed it under.
+pub fn register_user_languages(dll: &Path, sid: &str) -> Result<Vec<u16>> {
+    let _com = Com::start();
+    let clsid = guid(CLSID);
+    let manager = profile_manager()?;
+    let icon: Vec<u16> = dll.to_string_lossy().encode_utf16().collect();
+    let profile = profiles::REGISTERED;
+    let name: Vec<u16> = profile.name().encode_utf16().collect();
+    let mut listed = Vec::new();
+    for lang_id in languages_of_user(sid) {
+        if lang_id == profile.lang_id || listed.contains(&lang_id) {
+            continue;
+        }
+        // SAFETY: the slices and GUID pointers live for the call.
+        unsafe {
+            manager.RegisterProfile(
+                &clsid,
+                lang_id,
+                &guid(profile.guid),
+                &name,
+                &icon,
+                0,
+                HKL::default(),
+                0,
+                false,
+                0,
+            )?;
+        }
+        listed.push(lang_id);
+    }
+    Ok(listed)
 }
 
 /// Ask Windows for this profile of the text service. The error says why it is
@@ -363,18 +444,16 @@ fn text_of(units: &[u16]) -> String {
 /// The names of the keys (`values: false`) or values (`true`) of the current
 /// user's key at `path`.
 fn user_names(path: &str, values: bool) -> Vec<String> {
+    registry_names(HKEY_CURRENT_USER, path, values)
+}
+
+/// The names of the keys (`values: false`) or values (`true`) of the key at
+/// `path` below `root`.
+fn registry_names(root: HKEY, path: &str, values: bool) -> Vec<String> {
     let path = wide(path);
     let mut key = HKEY::default();
     // SAFETY: `path` is NUL-terminated; `key` receives the opened key.
-    let opened = unsafe {
-        RegOpenKeyExW(
-            HKEY_CURRENT_USER,
-            PCWSTR(path.as_ptr()),
-            None,
-            KEY_READ,
-            &mut key,
-        )
-    };
+    let opened = unsafe { RegOpenKeyExW(root, PCWSTR(path.as_ptr()), None, KEY_READ, &mut key) };
     if opened.is_err() {
         return Vec::new();
     }
@@ -461,4 +540,34 @@ pub fn unregister() -> Result<()> {
     let profiles = unregister_profiles();
     let class = unregister_class();
     profiles.and(class)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_tags_become_language_ids() {
+        assert_eq!(language_id("en-US"), Some(0x0409));
+        assert_eq!(language_id("ko-KR"), Some(0x0412));
+        assert_eq!(language_id("ja-JP"), Some(0x0411));
+        assert_eq!(language_id("zh-CN"), Some(0x0804));
+    }
+
+    #[test]
+    fn a_bare_language_or_nonsense_has_no_id_to_list_under() {
+        assert_eq!(
+            language_id("en"),
+            None,
+            "no region: a profile cannot be listed under it"
+        );
+        assert_eq!(language_id("ko"), None);
+        assert_eq!(language_id(""), None);
+        assert_eq!(language_id("not a language"), None);
+    }
+
+    #[test]
+    fn nobody_has_a_language_list_under_a_user_id_that_does_not_exist() {
+        assert!(languages_of_user("S-1-5-21-0-0-0-0").is_empty());
+    }
 }

@@ -82,6 +82,24 @@ pub fn tip_spec(lang_id: u16, profile: &Profile) -> String {
     format!("{lang_id:04X}:{CLSID}{}", profile.guid)
 }
 
+/// The language id in the name of one of TSF's language keys
+/// (`0x00000409` below `HKLM\SOFTWARE\Microsoft\CTF\TIP\<class>\LanguageProfile`).
+pub fn parse_language_key(name: &str) -> Option<u16> {
+    let digits = name
+        .strip_prefix("0x")
+        .or_else(|| name.strip_prefix("0X"))?;
+    u32::from_str_radix(digits, 16)
+        .ok()
+        .and_then(|id| u16::try_from(id).ok())
+}
+
+/// Whether a Windows language id names one language of one region (`ko-KR`),
+/// which a profile can be listed under, and not a bare language (`ko`), "any
+/// language" (`0xFFFF`) or nothing.
+pub fn is_specific_language(lang_id: u16) -> bool {
+    lang_id != 0 && lang_id != 0xFFFF && (lang_id >> 10) != 0
+}
+
 /// Whether an input method entry of the user's language settings (the value
 /// names under `Control Panel\International\User Profile\<language>`) is
 /// easime's, from this build or an earlier one.
@@ -129,6 +147,36 @@ pub fn effective_config(
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn language_keys_are_read_as_ids() {
+        assert_eq!(parse_language_key("0x00000409"), Some(0x0409));
+        assert_eq!(parse_language_key("0x00000412"), Some(KOREAN));
+        assert_eq!(parse_language_key("0x0000ffff"), Some(0xFFFF));
+        assert_eq!(
+            parse_language_key("00000409"),
+            None,
+            "not a TSF language key"
+        );
+        assert_eq!(parse_language_key("0x"), None);
+        assert_eq!(
+            parse_language_key("0x10000409"),
+            None,
+            "does not fit a language id"
+        );
+        assert_eq!(parse_language_key("Category"), None);
+    }
+
+    #[test]
+    fn only_a_language_of_a_region_can_hold_a_profile() {
+        assert!(is_specific_language(0x0409), "en-US");
+        assert!(is_specific_language(KOREAN));
+        assert!(is_specific_language(0x0804), "zh-CN");
+        assert!(!is_specific_language(0x0009), "en: no region");
+        assert!(!is_specific_language(0x0012), "ko: no region");
+        assert!(!is_specific_language(0xFFFF), "every language");
+        assert!(!is_specific_language(0));
+    }
 
     fn is_guid(text: &str) -> bool {
         let parts: Vec<&str> = text
