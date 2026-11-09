@@ -227,11 +227,11 @@ var table = {
     "zh-Hant": "無法讀取設定檔，目前顯示的是預設值。請自行修正檔案後按「重新讀取」，或在「一般」中按「還原為預設值」重新開始。無法讀取檔案時，為避免檔案被清除，不會儲存變更。",
     "zh-Hans": "无法读取设置文件，当前显示的是默认值。请自行修改文件后点击“重新读取”，或在“常规”中点击“恢复为默认值”重新开始。无法读取文件时，为避免文件被清除，不会保存更改。"
   },
-  "쓰는 언어만 켜 두세요. 어느 언어도 꼭 켜야 하는 것은 아닙니다. 전환 키를 누를 때마다 아래 순서대로 바뀌며, 열려 있는 모든 창에 똑같이 적용됩니다.": {
-    "en": "Turn on only the languages you use. No language is required. Each time you press the switch key, input moves through the order below, and the same applies to every open window.",
-    "ja": "使う言語だけをオンにしてください。どの言語も必ずオンにする必要はありません。切り替えキーを押すたびに下の順に切り替わり、開いているすべてのウィンドウに同じように適用されます。",
-    "zh-Hant": "只需開啟您會使用的語言。不一定要開啟任何語言。每按一次切換鍵，就會依下列順序切換，並同樣套用到所有開啟的視窗。",
-    "zh-Hans": "只需打开您要使用的语言。不一定要打开任何语言。每按一次切换键，就会按下列顺序切换，并同样应用到所有已打开的窗口。"
+  "쓰는 언어만 켜 두세요. 어느 언어도 꼭 켜야 하는 것은 아닙니다. 아래 순서는 Shift를 누른 채 전환 키를 누르거나 순환을 고른 경우에 전환되는 순서입니다. 켠 언어는 열려 있는 모든 창에 똑같이 적용됩니다.": {
+    "en": "Turn on only the languages you use. No language is required. The order below is the order you move through with Shift and the switch key, or with the switch key alone if you choose to cycle. The languages you turn on apply to every open window.",
+    "ja": "使う言語だけをオンにしてください。どの言語も必ずオンにする必要はありません。下の順序は、Shiftを押しながら切り替えキーを押したとき、または順番に切り替えを選んだときに切り替わる順序です。オンにした言語は、開いているすべてのウィンドウに同じように適用されます。",
+    "zh-Hant": "只需開啟您會使用的語言。不一定要開啟任何語言。下列順序是按住 Shift 再按切換鍵，或選擇循環時的切換順序。開啟的語言會同樣套用到所有開啟的視窗。",
+    "zh-Hans": "只需打开您要使用的语言。不一定要打开任何语言。下列顺序是按住 Shift 再按切换键，或选择循环时的切换顺序。打开的语言会同样应用到所有已打开的窗口。"
   },
   "아직 직접 고르지 않아 시스템 언어에 맞춰져 있습니다. 직접 바꾸면 그 선택이 저장됩니다.": {
     "en": "You have not chosen yet, so this follows your system language. Once you change it, your choice is kept.",
@@ -250,6 +250,30 @@ var table = {
     "ja": "言語",
     "zh-Hant": "語言",
     "zh-Hans": "语言"
+  },
+  "언어 전환 방식:": {
+    "en": "How the switch key works:",
+    "ja": "切り替えキーの動作:",
+    "zh-Hant": "切換鍵的運作方式：",
+    "zh-Hans": "切换键的工作方式："
+  },
+  "영어와 마지막 언어 사이를 오가기 (기본값)": {
+    "en": "English and the last language (default)",
+    "ja": "英語と直前に使った言語を行き来する(既定)",
+    "zh-Hant": "在英文與上次使用的語言之間切換（預設）",
+    "zh-Hans": "在英文与上次使用的语言之间切换（默认）"
+  },
+  "순서대로 순환": {
+    "en": "Cycle through the languages in order",
+    "ja": "言語を順番に切り替える",
+    "zh-Hant": "依序循環切換語言",
+    "zh-Hans": "依次循环切换语言"
+  },
+  "전환 키를 한 번 누르면 영어와 마지막으로 쓴 언어 사이를 오갑니다. 한국어와 영어를 섞어 쓸 때 늘 한 번이면 됩니다. Shift를 누른 채 전환 키를 누르면 다음 언어로 갑니다. 순환을 고르면 전환 키가 영어, 한국어, 일본어 순서로 한 바퀴씩 돕니다. 켠 언어가 영어와 하나뿐이면 두 방식이 같습니다.": {
+    "en": "Pressing the switch key once goes between English and the language you used last, so mixing Korean and English always takes one press. Hold Shift with the switch key to go to the next language. If you choose to cycle, the switch key goes round English, Korean, Japanese in turn. With only English and one other language on, both ways are the same.",
+    "ja": "切り替えキーを1回押すと、英語と直前に使った言語を行き来します。韓国語と英語を混ぜて入力するときは常に1回で済みます。Shiftを押しながら切り替えキーを押すと次の言語に進みます。順番に切り替えを選ぶと、英語、韓国語、日本語の順に一巡します。オンの言語が英語と1つだけなら、どちらも同じです。",
+    "zh-Hant": "按一次切換鍵，會在英文與上次使用的語言之間切換，混用韓文與英文時永遠只需按一次。按住 Shift 再按切換鍵，則會切到下一個語言。若選擇循環，切換鍵會依英文、韓文、日文的順序輪流切換。若只開啟英文與一種語言，兩種方式相同。",
+    "zh-Hans": "按一次切换键，会在英文与上次使用的语言之间切换，混用韩文与英文时始终只需按一次。按住 Shift 再按切换键，则会切到下一个语言。若选择循环，切换键会按英文、韩文、日文的顺序轮流切换。若只开启英文与一种语言，两种方式相同。"
   },
   "언어 전환 키:": {
     "en": "Language switch key:",

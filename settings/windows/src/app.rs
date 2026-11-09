@@ -16,6 +16,7 @@ use easime_config::{BackspaceUnit, ToggleKey};
 use easime_settings_model::dictionary::{self, DictionaryState};
 use easime_settings_model::model::{Failure, FailureKind, Model, SELECTABLE};
 use ime_core::Language;
+use ime_core::SwitchMode;
 use std::path::PathBuf;
 use windows_reactor::*;
 
@@ -76,6 +77,15 @@ const TOGGLE_KEYS: [(ToggleKey, &str); 3] = [
     (ToggleKey::Both, "둘 다 (현재 기본값)"),
 ];
 
+/// What the plain switch key does, in the order shown (Shortcuts page).
+const SWITCH_MODES: [(SwitchMode, &str); 2] = [
+    (
+        SwitchMode::ToggleLast,
+        "영어와 마지막 언어 사이를 오가기 (기본값)",
+    ),
+    (SwitchMode::Cycle, "순서대로 순환"),
+];
+
 /// The choices of the Korean page.
 const BACKSPACE: [(BackspaceUnit, &str); 2] = [
     (BackspaceUnit::Jamo, "자모 단위 (한 → 하 → ㅎ)"),
@@ -106,6 +116,7 @@ pub enum Message {
     Language(Language, bool),
     Move(Language, bool),
     ToggleKey(Option<usize>),
+    SwitchMode(Option<usize>),
     Backspace(Option<usize>),
     IndicatorBox(bool),
     IndicatorSeconds(Option<f64>),
@@ -215,6 +226,15 @@ impl Component for Settings {
                     return;
                 }
                 self.model.set_toggle_key(key)
+            }
+            Message::SwitchMode(index) => {
+                let Some(&(mode, _)) = index.and_then(|i| SWITCH_MODES.get(i)) else {
+                    return;
+                };
+                if mode == self.model.config().languages.switch {
+                    return;
+                }
+                self.model.set_switch_mode(mode)
             }
             Message::Backspace(index) => {
                 let Some(&(unit, _)) = index.and_then(|i| BACKSPACE.get(i)) else {
@@ -485,7 +505,7 @@ impl Settings {
         let mut order = enabled.clone();
         order.extend(SELECTABLE.iter().filter(|l| !enabled.contains(l)));
         let mut views = vec![paragraph(w.t(
-            "쓰는 언어만 켜 두세요. 어느 언어도 꼭 켜야 하는 것은 아닙니다. 전환 키를 누를 때마다 아래 순서대로 바뀌며, 열려 있는 모든 창에 똑같이 적용됩니다.",
+            "쓰는 언어만 켜 두세요. 어느 언어도 꼭 켜야 하는 것은 아닙니다. 아래 순서는 Shift를 누른 채 전환 키를 누르거나 순환을 고른 경우에 전환되는 순서입니다. 켠 언어는 열려 있는 모든 창에 똑같이 적용됩니다.",
         ))];
         if self.model.follows_system_language() {
             views.push(paragraph(w.t(
@@ -529,6 +549,7 @@ impl Settings {
     fn shortcuts(&self, context: &mut ViewContext<Self>) -> Vec<View> {
         let w = &self.words;
         let current = self.model.config().shortcuts.toggle_key;
+        let mode = self.model.config().languages.switch;
         vec![
             RadioButtons::new()
                 .items_source(TOGGLE_KEYS.iter().map(|(_, text)| w.t(text)))
@@ -537,6 +558,14 @@ impl Settings {
                 .slot(RadioButtonsSlot::Header, w.t("언어 전환 키:")),
             paragraph(w.t(
                 "한/영 키는 누르는 즉시 전환합니다. 오른쪽 Alt는 다른 키를 누르지 않고 눌렀다 뗄 때만 전환하므로, Alt와 다른 키를 함께 누르는 단축키는 그대로 쓸 수 있습니다.",
+            )),
+            RadioButtons::new()
+                .items_source(SWITCH_MODES.iter().map(|(_, text)| w.t(text)))
+                .selected_index(SWITCH_MODES.iter().position(|(m, _)| *m == mode))
+                .on_selection_changed(context.callback(Message::SwitchMode))
+                .slot(RadioButtonsSlot::Header, w.t("언어 전환 방식:")),
+            paragraph(w.t(
+                "전환 키를 한 번 누르면 영어와 마지막으로 쓴 언어 사이를 오갑니다. 한국어와 영어를 섞어 쓸 때 늘 한 번이면 됩니다. Shift를 누른 채 전환 키를 누르면 다음 언어로 갑니다. 순환을 고르면 전환 키가 영어, 한국어, 일본어 순서로 한 바퀴씩 돕니다. 켠 언어가 영어와 하나뿐이면 두 방식이 같습니다.",
             )),
         ]
     }

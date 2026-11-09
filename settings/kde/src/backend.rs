@@ -4,7 +4,8 @@
 
 use crate::activation::{Activation, Failure as ActivationFailure};
 use crate::model::{
-    Failure, FailureKind, Model, backspace_from_code, language_from_code, toggle_key_from_code,
+    Failure, FailureKind, Model, backspace_from_code, language_from_code, switch_mode_from_code,
+    toggle_key_from_code,
 };
 use crate::view::{ActivationView, View, failure_code};
 use core::pin::Pin;
@@ -30,6 +31,7 @@ pub mod qobject {
         #[qproperty(QString, languages)]
         #[qproperty(bool, languages_follow_system, cxx_name = "languagesFollowSystem")]
         #[qproperty(QString, toggle_key, cxx_name = "toggleKey")]
+        #[qproperty(QString, switch_mode, cxx_name = "switchMode")]
         #[qproperty(QString, backspace)]
         #[qproperty(bool, indicator_box, cxx_name = "indicatorBox")]
         #[qproperty(i32, indicator_ms, cxx_name = "indicatorMs")]
@@ -54,6 +56,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "applyToggleKey"]
         fn set_toggle_key_code(self: Pin<&mut EasimeSettings>, code: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "applySwitchMode"]
+        fn set_switch_mode_code(self: Pin<&mut EasimeSettings>, code: &QString);
 
         #[qinvokable]
         #[cxx_name = "applyBackspace"]
@@ -103,6 +109,7 @@ pub struct EasimeSettingsRust {
     languages: QString,
     languages_follow_system: bool,
     toggle_key: QString,
+    switch_mode: QString,
     backspace: QString,
     indicator_box: bool,
     indicator_ms: i32,
@@ -137,6 +144,7 @@ impl Default for EasimeSettingsRust {
             languages: QString::from(view.languages.as_str()),
             languages_follow_system: view.languages_follow_system,
             toggle_key: QString::from(view.toggle_key.as_str()),
+            switch_mode: QString::from(view.switch_mode.as_str()),
             backspace: QString::from(view.backspace.as_str()),
             indicator_box: view.indicator_box,
             indicator_ms: view.indicator_ms,
@@ -193,6 +201,8 @@ impl qobject::EasimeSettings {
         self.as_mut()
             .set_toggle_key(QString::from(view.toggle_key.as_str()));
         self.as_mut()
+            .set_switch_mode(QString::from(view.switch_mode.as_str()));
+        self.as_mut()
             .set_backspace(QString::from(view.backspace.as_str()));
         self.as_mut().set_indicator_box(view.indicator_box);
         self.as_mut().set_indicator_ms(view.indicator_ms);
@@ -224,6 +234,14 @@ impl qobject::EasimeSettings {
         let key = toggle_key_from_code(&code.to_string());
         self.run(|model| {
             model.set_toggle_key(key.ok_or_else(invalid)?)?;
+            Ok(Outcome::Done("saved", String::new()))
+        });
+    }
+
+    fn set_switch_mode_code(self: Pin<&mut Self>, code: &QString) {
+        let mode = switch_mode_from_code(&code.to_string());
+        self.run(|model| {
+            model.set_switch_mode(mode.ok_or_else(invalid)?)?;
             Ok(Outcome::Done("saved", String::new()))
         });
     }

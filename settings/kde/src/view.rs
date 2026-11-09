@@ -3,7 +3,9 @@
 //! produces codes and technical details.
 
 use crate::activation::{Activation, State};
-use crate::model::{Failure, FailureKind, Model, backspace_code, language_code, toggle_key_code};
+use crate::model::{
+    Failure, FailureKind, Model, backspace_code, language_code, switch_mode_code, toggle_key_code,
+};
 
 /// The code QML switches on for a failure.
 pub fn failure_code(kind: FailureKind) -> &'static str {
@@ -66,6 +68,8 @@ pub struct View {
     /// decides which are on.
     pub languages_follow_system: bool,
     pub toggle_key: String,
+    /// What the plain switch key does (`toggle_last` or `cycle`).
+    pub switch_mode: String,
     pub backspace: String,
     pub indicator_box: bool,
     pub indicator_ms: i32,
@@ -86,6 +90,7 @@ impl View {
             languages: languages.join(","),
             languages_follow_system: model.follows_system_language(),
             toggle_key: toggle_key_code(config.shortcuts.toggle_key).to_owned(),
+            switch_mode: switch_mode_code(config.languages.switch).to_owned(),
             backspace: backspace_code(config.korean.backspace).to_owned(),
             indicator_box: config.appearance.indicator_box,
             indicator_ms: i32::try_from(config.appearance.indicator_ms).unwrap_or(i32::MAX),
@@ -113,6 +118,7 @@ mod tests {
         assert_eq!(view.languages, "korean");
         assert!(view.languages_follow_system);
         assert_eq!(view.toggle_key, "both");
+        assert_eq!(view.switch_mode, "toggle_last");
         assert_eq!(view.backspace, "jamo");
         assert!(view.indicator_box);
         assert_eq!(view.indicator_ms, 1000);

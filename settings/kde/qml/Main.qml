@@ -143,6 +143,10 @@ Kirigami.ApplicationWindow {
             hangul.click()
             console.info("INTERACTION toggle-key=" + EasimeSettings.toggleKey
                 + " hangul=" + hangul.checked + " both=" + find(page, "choice-both").checked)
+            var cycle = find(page, "choice-cycle")
+            cycle.click()
+            console.info("INTERACTION switch-mode=" + EasimeSettings.switchMode
+                + " cycle=" + cycle.checked + " last=" + find(page, "choice-toggle_last").checked)
         } else if (name === "appearance") {
             var duration = find(page, "indicator-duration")
             for (var localeName of ["en_US", "de_DE", "ko_KR"]) {

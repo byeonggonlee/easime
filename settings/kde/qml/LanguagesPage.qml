@@ -60,7 +60,7 @@ Kirigami.ScrollablePage {
         QQC2.Label {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            text: Tr.t("쓰는 언어만 켜 두세요. 어느 언어도 꼭 켜야 하는 것은 아닙니다. 전환 키를 누를 때마다 아래 순서대로 바뀌며, 열려 있는 모든 창에 똑같이 적용됩니다.")
+            text: Tr.t("쓰는 언어만 켜 두세요. 어느 언어도 꼭 켜야 하는 것은 아닙니다. 아래 순서는 Shift를 누른 채 전환 키를 누르거나 순환을 고른 경우에 전환되는 순서입니다. 켠 언어는 열려 있는 모든 창에 똑같이 적용됩니다.")
         }
 
         // What decides the languages that are on now: not yet the user.

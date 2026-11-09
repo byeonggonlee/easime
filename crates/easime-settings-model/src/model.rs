@@ -8,7 +8,7 @@
 //! overwritten by a change.
 
 use easime_config::{AVAILABLE_LANGUAGES, BackspaceUnit, Config, ToggleKey};
-use ime_core::Language;
+use ime_core::{Language, SwitchMode};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -53,6 +53,20 @@ pub fn toggle_key_from_code(code: &str) -> Option<ToggleKey> {
     [ToggleKey::Hangul, ToggleKey::RightAlt, ToggleKey::Both]
         .into_iter()
         .find(|&key| toggle_key_code(key) == code)
+}
+
+/// The name used in the settings file (`[languages] switch`).
+pub fn switch_mode_code(mode: SwitchMode) -> &'static str {
+    match mode {
+        SwitchMode::ToggleLast => "toggle_last",
+        SwitchMode::Cycle => "cycle",
+    }
+}
+
+pub fn switch_mode_from_code(code: &str) -> Option<SwitchMode> {
+    [SwitchMode::ToggleLast, SwitchMode::Cycle]
+        .into_iter()
+        .find(|&mode| switch_mode_code(mode) == code)
 }
 
 pub fn backspace_code(unit: BackspaceUnit) -> &'static str {
@@ -231,6 +245,11 @@ impl Model {
         self.change(|config| config.shortcuts.toggle_key = key)
     }
 
+    /// What the plain switch key does with three or more languages on.
+    pub fn set_switch_mode(&mut self, mode: SwitchMode) -> Result<(), Failure> {
+        self.change(|config| config.languages.switch = mode)
+    }
+
     pub fn set_backspace(&mut self, unit: BackspaceUnit) -> Result<(), Failure> {
         self.change(|config| config.korean.backspace = unit)
     }
@@ -303,7 +322,7 @@ fn save_changes(path: &Path, next: &Config) -> Result<(), Failure> {
 
     // A language list is only written once the user has chosen one; until then
     // the key stays absent and the system language decides.
-    if on_disk.languages != next.languages
+    if on_disk.languages.enabled != next.languages.enabled
         && let Some(chosen) = &next.languages.enabled
     {
         let mut codes = toml_edit::Array::new();
@@ -311,6 +330,10 @@ fn save_changes(path: &Path, next: &Config) -> Result<(), Failure> {
             codes.push(language_code(language));
         }
         set(&mut doc, "languages", "enabled", Value::Array(codes));
+    }
+    if on_disk.languages.switch != next.languages.switch {
+        let code = switch_mode_code(next.languages.switch);
+        set(&mut doc, "languages", "switch", Value::from(code));
     }
     if on_disk.shortcuts != next.shortcuts {
         let code = toggle_key_code(next.shortcuts.toggle_key);
@@ -496,6 +519,35 @@ extra = \"keep me\"
         let reread = open(&dir);
         assert_eq!(reread.config().appearance.indicator_ms, 250);
         assert_eq!(reread.config().shortcuts.toggle_key, ToggleKey::RightAlt);
+    }
+
+    #[test]
+    fn the_switch_mode_is_written_under_languages_and_nothing_else_moves() {
+        let dir = TempDir::new();
+        dir.write("[languages]\n# my order\nenabled = [\"korean\", \"japanese\"] # two\n");
+        let mut model = open(&dir);
+        assert_eq!(model.config().languages.switch, SwitchMode::ToggleLast);
+        model.set_switch_mode(SwitchMode::Cycle).unwrap();
+        let text = dir.read();
+        assert!(
+            text.contains("enabled = [\"korean\", \"japanese\"] # two\n"),
+            "the language list is left as written: {text}"
+        );
+        assert!(text.contains("# my order\n"), "{text}");
+        assert!(text.contains("switch = \"cycle\""), "{text}");
+        assert_eq!(open(&dir).config().languages.switch, SwitchMode::Cycle);
+        // Back to the default: written as chosen, so the file says so.
+        let mut model = open(&dir);
+        model.set_switch_mode(SwitchMode::ToggleLast).unwrap();
+        assert!(dir.read().contains("switch = \"toggle_last\""));
+    }
+
+    #[test]
+    fn the_switch_mode_codes_round_trip() {
+        for mode in [SwitchMode::ToggleLast, SwitchMode::Cycle] {
+            assert_eq!(switch_mode_from_code(switch_mode_code(mode)), Some(mode));
+        }
+        assert_eq!(switch_mode_from_code("random"), None);
     }
 
     #[test]

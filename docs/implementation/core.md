@@ -8,8 +8,8 @@
 
 | 크레이트 | 하는 일 | 상태 |
 |---|---|---|
-| `ime-core` | 키 이벤트, `InputEngine`(`wants_key` 포함), `EngineOutput`, `CandidateList`(9개 쪽, 번호 1–9), `Language`/`LanguageSwitcher`, `Os` | 완료. `ime_core::contract`가 모든 엔진이 같은 약속을 지키는지 시험 |
-| `ime-session` | `Session`: 엔진 구성, 언어 순환, 전환 때 조합 확정, 설정 적용, 후보를 못 띄울 때 취소. `ToggleTracker`(한/영 키·오른쪽 Alt 탭 판정), `JapaneseDictionary`(한 번만 열어 공유), `language_glyph` | 완료 (2026-11-07 Wayland 쪽에서 옮겨 옴) |
+| `ime-core` | 키 이벤트(`LanguageSwitcher`의 `toggle`/`advance`, `SwitchMode`), `InputEngine`(`wants_key` 포함), `EngineOutput`, `CandidateList`(9개 쪽, 번호 1–9), `Language`/`LanguageSwitcher`, `Os` | 완료. `ime_core::contract`가 모든 엔진이 같은 약속을 지키는지 시험 |
+| `ime-session` | `Session`: 엔진 구성, 언어 전환(전환 키 한 번 `switch_language`: 영어 ↔ 마지막 언어 또는 순환, Shift+전환 키 `next_language`: 순환의 다음 언어), 전환 때 조합 확정, 설정 적용, 후보를 못 띄울 때 취소. `ToggleTracker`(한/영 키·오른쪽 Alt 탭 판정, Shift를 누른 채면 `Decision::Next`), `JapaneseDictionary`(한 번만 열어 공유), `language_glyph` | 완료 (2026-11-07 Wayland 쪽에서 옮겨 옴) |
 | `engine-hangul` | 두벌식, 겹모음·겹받침, 자모/글자 단위 백스페이스, 조합 중 한 글자 한자 변환 | 완료. 한자 변환은 실제 KDE 재검증 필요 |
 | `engine-japanese` | 로마자 → 히라가나/가타카나, Space로 단어 단위 사전 변환, 사전 로더 | 완료. 실제 데스크톱에서는 시험하지 않음 |
 | `easime-dict-tool` | Mozc OSS 사전 → easime 이진 사전 변환기 | 완료 |
@@ -39,6 +39,14 @@
 - **중국어**는 간체(`chinese_simplified`)와 번체(`chinese_traditional`)가 별개의 입력 언어다(2026-11-07 사용자 결정). 로케일 대응: `zh_TW`/`zh_HK`/`zh_MO`/`Hant` → 번체, `zh_CN`/`zh_SG`/`Hans`/`zh` → 간체. 엔진이 없어 기본으로 켜지지 않고 설정 앱에서도 켤 수 없다("준비 중").
 - 설정 파일 위치: Linux `~/.config/easime/config.toml`, Windows `%APPDATA%\easime\config.toml`, macOS `~/Library/Application Support/easime/config.toml`. 저장은 임시 파일 후 교체(원자적)이고, 읽을 수 없는 파일은 덮어쓰지 않는다.
 - 설정 변경 감지는 OS별이다: Linux는 inotify(즉시), Windows는 `ConfigReloader`가 키·포커스 같은 일이 있을 때 파일 시각을 본다([platforms.md](../platforms.md)).
+
+## 언어 전환 (2026-11-09 사용자 결정)
+
+- `ime_core::LanguageSwitcher`가 순환(영어, 켠 언어들)과 "마지막 언어"를 들고 있다. `SwitchMode::ToggleLast`(기본)에서 전환 키 한 번은 영어와 마지막으로 쓴 언어 사이를 오가고, `SwitchMode::Cycle`에서는 순환의 다음 언어로 간다. `advance`(Shift를 누른 채 전환 키)는 어느 모드에서나 순환의 다음 언어다. 언어를 고르거나(`select`) 순환으로 가면 그 언어가 마지막 언어가 된다. 영어는 마지막 언어가 아니다.
+- 설정은 `[languages] switch = "toggle_last" | "cycle"`(`easime-config`, 기본은 파일에 쓰지 않는다). 설정이 바뀌면 현재 언어와 마지막 언어를 지킨다.
+- **마지막 언어는 기억하지 않는다**: 새로 만든 전환기는 켠 언어 중 첫 번째에서 시작하고 그것이 마지막 언어다(Windows는 프로그램마다 따로이므로 프로그램을 새로 열면 첫 언어로 돌아간다).
+- 켠 언어가 영어와 하나뿐이면 두 모드가 같다.
+- 전환 키 판정(`toggle.rs`)은 Shift 여부를 프런트엔드에서 받는다. 오른쪽 Alt 탭은 Shift와 함께 눌러도 전환으로 센다(그때는 `Next`). Ctrl이나 Win, 다른 Alt가 함께면 전환 키가 아니다.
 
 ## 아직 없는 것
 
