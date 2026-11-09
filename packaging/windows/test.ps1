@@ -211,6 +211,21 @@ Assert ($null -eq (Class-Dll)) "the text service is not registered before the te
 Assert ((User-Tips).Count -eq 0) "no easime input method is switched on for this user before the test"
 Write-Host "the user's languages: $((User-Languages) -join ","); easime goes under Korean ($tip)"
 
+# The setup window's texts are the ones of packaging/windows/strings.wxl: the "Files in
+# Use" window says that Ignore keeps the programs open (the WiX default says to close them).
+function Msi-Text([string]$msi, [string]$query) {
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($msi, 0))
+    $view = $database.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $database, @($query))
+    $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+    $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+    if ($record) { $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, @(1)) } else { $null }
+}
+$filesInUse = Msi-Text $Msi "SELECT Text FROM Control WHERE Dialog_='FilesInUse' AND Control='Text'"
+Write-Host "the Files in Use window says: $filesInUse"
+Assert ($filesInUse -like "*Ignore*keep them open*") "the Files in Use window tells the user that Ignore keeps the programs open"
+Assert ($filesInUse -notlike "*Close these applications*") "and no longer tells them to close the programs"
+
 # 1. A plain install: the program, the text service, and easime switched on for this user.
 Assert ((Invoke-Msi "install" @("/i", "`"$Msi`"")) -eq 0) "the MSI installs"
 foreach ($file in "easime-cli.exe", "easime_tsf.dll", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.md") {
