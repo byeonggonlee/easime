@@ -28,8 +28,8 @@
 //!
 //! **Not here yet:** sharing the mode between programs.
 //! Korean and Japanese can be typed ([`profiles::TYPEABLE`]). It has been tested against
-//! a simulated TSF application in CI, not on a real PC. See `docs/platforms.md`,
-//! "Windows", and `docs/status.md`.
+//! a simulated TSF application in CI, not on a real PC. See
+//! `docs/implementation/windows.md` and `docs/platforms.md`.
 
 pub mod install;
 pub mod keys;

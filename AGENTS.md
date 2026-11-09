@@ -2,7 +2,7 @@
 
 Easy Eastern Asian IME: a Korean (then Japanese, Chinese) input method written from scratch in Rust, without ibus/fcitx.
 Platforms: Linux (KDE Plasma 6 Wayland first, then GNOME), then Windows, then macOS. License: MIT OR Apache-2.0.
-Status: early; a user confirmed basic Korean/English input on Fedora KDE. Broader testing is pending (see `docs/status.md`).
+Status: early; a user confirmed basic Korean/English input on Fedora KDE. The Windows text service, installer and settings app exist but have only been tested in CI, never on a real PC. Broader testing is pending (see `docs/status.md`).
 
 ## Required reading for every agent and role
 - At the start of every task, read [DESIGN.md](DESIGN.md) in full and [CLAUDE.md](CLAUDE.md). This applies to implementers, reviewers, and delegated agents, regardless of tool name.
@@ -61,6 +61,7 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-sess
 - [Complete document index](docs/README.md): every repository document, including dated plans, contribution templates, data notes and licenses, must be reachable from this index.
 - [2026-11-08 development and design assessment](docs/records/2026-11-08-assessment.md): evidence, gaps and recommended priorities; proposals are not approved product decisions.
 - When adding, moving or deleting documentation, update the index and affected links in the same commit. Keep current decisions, implementation status and dated proposals distinct. Check local links and reachability from AGENTS.md before committing documentation changes.
+- Where things go: a user decision goes to `docs/decisions.md` (with its implementation state); what exists and how far it was verified goes to `docs/status.md` and `docs/implementation/`; something true only on one date (an assessment, a plan, a design) goes to `docs/records/`; it keeps its original content and only gets a status line at the top when the work is done. When a feature is finished, mark it done in `status.md` and the decision row; do not leave it described as planned.
 
 ## Read when needed
 | File | When |
@@ -69,5 +70,7 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-sess
 | [docs/decisions.md](docs/decisions.md) | any design or product question: goals, decided choices, license notes |
 | [docs/platforms.md](docs/platforms.md) | deciding whether logic belongs in the shared core or in an OS frontend; anything OS-dependent (paths, keys, repeat, locale); starting a Windows/macOS/GNOME frontend |
 | [docs/architecture.md](docs/architecture.md) | touching a frontend or protocol (KWin, GNOME, Windows, macOS), config format, settings GUI, packaging |
-| [docs/status.md](docs/status.md) | choosing what to do next: roadmap, what exists, known gaps, unfinished branches |
+| [docs/status.md](docs/status.md) | choosing what to do next: status board (implemented / CI-verified / tried on a real machine), known gaps, next candidates |
+| [docs/implementation/core.md](docs/implementation/core.md), [linux-kde.md](docs/implementation/linux-kde.md), [windows.md](docs/implementation/windows.md) | what exists in the shared core / the KDE frontend / the Windows frontend, and exactly how far it was verified |
+| [docs/testing/kde.md](docs/testing/kde.md), [windows.md](docs/testing/windows.md) | trying easime on a real desktop or PC: procedures and the (still empty) result tables |
 | [docs/development.md](docs/development.md) | trying the daemon in KWin, recovery steps, build dependencies |

@@ -73,7 +73,7 @@ jobs:
   # the terminal demo and the licenses. The job builds it, installs it on the runner, checks what Windows
   # and the user's language settings say, uses what was installed, upgrades it and
   # removes it again, leaving nothing behind. The MSI is kept as an artifact for
-  # trying it on a real PC (it is not published as a release: docs/status.md).
+  # trying it on a real PC (it is not published as a release: docs/implementation/windows.md).
   windows-installer:
     name: Windows installer (MSI, text service)
     runs-on: windows-latest

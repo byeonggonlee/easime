@@ -1,0 +1,101 @@
+# Windows 구현 현황
+
+기준: 2026-11-09, `main` 86648c2. 한눈에 보는 현황은 [status.md](../status.md), 코어와 OS 어댑터의 경계는 [platforms.md](../platforms.md), 시험 절차는 [Windows 시험 절차서](../testing/windows.md)다.
+
+**실제 Windows PC에서는 아무것도 써 보지 않았다.** 아래의 "CI 확인"은 GitHub Actions의 실제 Windows(빌드 26100)에서 실제 TSF와 Windows Installer를 쓰되, 응용 프로그램은 TSF 규칙을 지키는 가짜(창과 문서)로 흉내 낸 것이다. 메모장·브라우저·메신저·게임의 결과가 아니다.
+
+## 구성 요소와 상태
+
+| 구성 요소 | 구현 | CI 확인 | 실제 PC |
+|---|---|---|---|
+| 키 입력 해석(`keys`), 키 처리 파이프라인(`typing`) | 완료 | 모든 OS의 CI가 단위 시험 | 미확인 |
+| 텍스트 서비스: 한글 타자(조합·확정·삭제·전환) | 완료 | 실제 TSF + 가짜 응용 프로그램 | 미확인 |
+| 텍스트 서비스: 일본어(가나, Space로 사전 변환) | 완료 | 같음 | 미확인 |
+| 모드 상자(전환 때 커서 옆 `A`/`한`) | 완료 | 위치·사라짐 | 미확인 |
+| 조합 밑줄(한국어 실선, 일본어 읽기 점선, 변환 대상 굵은 실선) | 완료 | 한국어 밑줄을 응용 프로그램 경로로 읽음 | 미확인 |
+| 후보창(한국어 한자, 일본어 변환) | 완료 | 위치·변환 밑줄·숫자 선택 | 미확인 |
+| 후보를 직접 그리는 앱에 넘기는 TSF UI 요소 | 완료 | 직접 그리겠다고 답하는 가짜 앱 | 미확인 |
+| TSF 등록(COM 클래스, 프로필 하나, 스토어 앱 범주) | 완료 | 등록 → 레지스트리·TSF 기록 → 제거 | 설정 화면 표시 미확인 |
+| MSI(WiX 5): 설치·사용자 켜기·제거·업그레이드·사용 중 프로그램 | 완료 | 전 과정 무인 시험 | 설치 창 모양 미확인 |
+| `setup.exe`(번들): 런타임이 없을 때 Microsoft에서 받기 | 완료 | 런타임이 없는 새 러너 | 116MB 다운로드 체감 미확인 |
+| WinUI 3 설정 앱(Rust + windows-reactor) | 완료 | 5개 언어로 열고 UI 자동화로 읽고 저장 | 모양·접근성 미확인 |
+| 일본어 사전(Mozc) 설치와 찾기 | 완료 | 설치된 앱이 사전을 찾음 | 변환 품질 미확인 |
+| 상시 모드 확인 경로(알림 영역 아이콘, 언어 바 단추) | 없음 | — | — |
+| 응용 프로그램 사이 모드 공유 | 없음 | — | — |
+| 후보창 마우스 선택(`ITfCandidateListUIElementBehavior`) | 없음 | — | — |
+
+## 어떻게 동작하는가
+
+- **프로세스 구조**: 텍스트 서비스 DLL(`easime_tsf.dll`, `frontend-tsf`의 cdylib, 64비트)이 응용 프로그램마다 로드되고, 코어(`ime-session` 등)는 그 DLL에 정적으로 링크된다. 프로세스마다 `Session`이 하나다. 그래서 Linux와 달리 모드는 응용 프로그램(스레드)마다 따로이고 공유되지 않는다.
+- **프로필 하나**(사용자 결정, [decisions.md](../decisions.md)): 한국어 아래 `easime` 하나만 등록하고, 그 안에서 한/영 키가 Linux와 같은 순환(영어 → 설정에서 켠 언어 → 영어)을 돈다. 순환은 `profiles::effective_config`가 설정에서 만들고, 타자가 되는 언어(`profiles::TYPEABLE`: 한국어, 일본어)만 넣는다. 비면 한국어, 사용자가 일부러 하나도 고르지 않았으면 영어만이다. 작업 표시줄의 Windows 언어 표시는 일본어를 쳐도 한국어로 남는다.
+- **키 처리**: TSF는 키를 가져갈지 먼저 묻는다(`OnTestKeyDown`). `typing::Typist`(Windows API 없음)가 `OnTestKeyDown`과 `OnKeyDown`에 답하며 둘이 어긋나지 않음을 모든 키 종류·상태로 시험한다. 이를 위해 엔진에 부작용 없이 "이 키가 내 일인가"를 답하는 `InputEngine::wants_key`를 두었다(`ime_core::contract`가 모든 엔진을 시험). TSF 쪽(`service.rs`)은 `Typist`의 계획(`Step`)을 편집 세션 안에서 TSF 조합으로 문서에 쓴다. 조합은 커서에서 시작해 글자를 바꿔 쓰고, 확정할 글자는 조합에 쓴 뒤 조합을 끝낸다. 포커스가 옮겨 가거나 응용 프로그램이 조합을 끝내면 거기서 끝내고 엔진의 사본만 버린다.
+- **전환 키**: 한/영 키(누르고 있어도 한 번), 오른쪽 Alt 단독 탭. TSF는 먹은 키를 나중에 다시 보낼 수 없으므로, 오른쪽 Alt 누름은 응용 프로그램에 그대로 가고 탭의 뗌에서만 전환하며 그 뗌을 먹는다. 수정 키(Ctrl·Shift·Win)가 함께 눌린 오른쪽 Alt(AltGr)는 전환으로 보지 않는다.
+- **응용 프로그램이 정한 것을 따른다**: 문맥에 "키보드 비활성"(비밀번호 칸)이나 "빈 문맥"(웹 페이지 본문)이 걸려 있으면 전환 키를 포함해 모든 키를 응용 프로그램에 넘긴다. `VK_PACKET`(유니코드 글자로 보내는 키: 원격 데스크톱, 비밀번호 관리자 등)은 키 위치로 읽지 않고, 스캔 코드 없이 온 글자·숫자 키는 가상 키로 읽는다. 문서가 편집을 거부하면 먹으려던 키를 돌려준다.
+- **설정**: 설정 파일은 실행 중에도 따른다(`ConfigReloader`, 키·포커스 같은 일이 있을 때 파일 시각을 한 번 본다). 설정·로그·사전 경로는 `Os`를 인자로 받는 하나의 코드다.
+- **오류 처리**: 항목마다 패닉을 잡아 키를 통과시키고 `%LOCALAPPDATA%\easime\easime.log`에 남긴다(`dll` 빌드 프로필은 abort가 아니라 unwind). `EASIME_LOG_KEYS=1`이면 모든 키를 기록한다. 로그는 1MB를 넘으면 `easime.log.old`로 옮긴다.
+
+## 화면에 나오는 것
+
+- **모드 상자**(`indicator`, 위치 규칙은 포터블 `placement`): 한/영 전환(사용자 조작) 직후 커서 바로 아래에 `A`/`한` 상자가 설정한 시간(기본 1초) 동안 나타났다 사라진다. `appearance.indicator_box`·`indicator_ms`를 Linux와 같이 따르고, 포커스만으로는 뜨지 않으며 포커스를 가져가지 않는다. 위치는 TSF `GetTextExt`, 없으면 시스템 캐럿이다. 둘 다 모르는 프로그램(자체 캐럿을 그리는 앱)에서는 엉뚱한 곳에 띄우지 않고 표시하지 않는다(로그에 한 번 남김). UI 요소만 허용하는 응용 프로그램(`TF_TMF_UIELEMENTENABLEDONLY`)에서도 띄우지 않는다. 고정 다크 색이며 시스템 색은 따르지 않는다.
+- **조합 밑줄**(`marks`가 구간을, `display`가 TSF 표시 속성을 맡는다): 색은 응용 프로그램이 정한다. 확정된 글자에는 남지 않는다.
+- **후보창**(`candidate`, 내용은 포터블 `page`): 변환 중에 커서 바로 아래(자리가 없으면 위)에 Linux와 같은 구성(읽기, 1–9 번호와 선택 표시 `>`·배경, 쪽과 키 안내)으로 뜬다. 한국어는 Malgun Gothic, 일본어는 Yu Gothic UI. 커서 위치를 모르면 앞 창의 왼쪽 위에 띄우고, 그래도 띄울 수 없으면 변환을 되돌린다. 쪽은 어느 OS에서나 9개씩이다.
+- **TSF UI 요소**(`element`): 전체 화면 게임처럼 후보를 직접 그리는 응용 프로그램에는 `ITfCandidateListUIElement`로 목록을 넘기고 easime 창은 띄우지 않는다. 후보가 생길 때 TSF에 알리고, 선택·쪽이 바뀔 때마다 알린다. 응용 프로그램이 쪽을 바꾸는 것(`SetPageIndex`)과 마우스로 고르는 것은 지원하지 않는다.
+- 스크린 리더 지원과 시스템 색 연동은 없다.
+
+## 등록
+
+- 클래스와 프로필은 `DllRegisterServer`/`DllUnregisterServer`(`registration`)가 등록한다: COM 클래스, 한국어(`0x0412`) 아래 고정 GUID의 프로필 하나(이름 `easime`), 범주는 키보드와 스토어 앱 지원(`GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT`). 로그인 화면·UAC용 `SECUREMODE`는 보안상 등록하지 않는다. 스토어 앱 안에서는 사용자 폴더의 설정·로그를 쓰지 못할 수 있어 기본값으로 조용히 동작한다.
+- 사용자별 켜기는 DLL의 `rundll32` 내보내기 `EnableForCurrentUser`/`DisableForCurrentUser`(`setup`)가 한국어 아래에 `InstallLayoutOrTip`으로 한다. 한국어가 사용자 언어 목록에 없으면 Windows가 더한다. 예전 시험판이 등록·켠 프로필은 지운다.
+- 모든 언어 아래 등록(`RegisterProfile`의 `0xFFFF`)은 2026-11-08에 적용했다가 되돌렸다. 켜자마자 사용자가 고르지 않은 프로그램들에서도 서비스가 켜졌고, 제거 때 Windows Installer가 그 프로그램들을 닫아 CI 러너까지 멈췄기 때문이다. 경위와 실험 결과는 [Windows 계획](../records/2026-11-08-windows-plan.md), 사용자 언어 아래에서 찾게 하는 다른 방법은 **실제 PC 시험(W1–W15) 뒤에 다시 정한다**.
+
+## 설치 프로그램
+
+`packaging/windows`: `build.ps1`이 만들고, `test.ps1`·`test-setup.ps1`이 CI의 Windows 러너에서 시험한다. 만드는 법은 [development.md](../development.md).
+
+- **MSI**(`easime.wxs`): 텍스트 서비스 DLL, 일본어 사전(`dictionary\mozc.bin`과 Mozc 원본 라이선스, 빼고 설치할 수 있는 기능, 약 36MB), 설정 앱과 시작 메뉴 "easime", 터미널 데모(`easime-cli.exe`), 앱 아이콘, 라이선스를 담는다. 기본 설치 폴더는 `C:\Program Files\easime`이다.
+- **설치 때** DLL을 등록하고(`regsvr32`, 실패하면 설치가 멈추고 뒤에서 실패하면 되돌린다) 설치한 사용자의 입력 방법에 easime를 켠다. 설치 창(WiX UI의 기능 트리)의 "easime keyboard" 기능이 확인이고, 무인 설치(`/qn`)는 기본값(켜짐)을 따른다. 시스템 PATH에 폴더를 더하는 기능은 시스템 설정을 바꾸므로 기본이 꺼져 있다(`ADDLOCAL=ALL`로 켠다).
+- **제거 때** 그 사용자의 켠 프로필을 끄고 Windows 등록을 푼 다음 파일을 지운다. 되돌리기는 제거다. 업그레이드는 옛 버전을 먼저 제거하고 새 버전을 설치하되 사용자 언어 목록에서 빼거나 등록을 푸는 단계를 건너뛴다(`UPGRADINGPRODUCTCODE`): 뺐다가 다시 넣으면 한국어가 목록 끝으로 밀릴 수 있기 때문이다.
+- **사용 중인 프로그램을 닫지 않는다**(사용자 결정, 2026-11-08): `MSIRESTARTMANAGERCONTROL=Disable`로 Restart Manager를 끈다. 쓰는 중인 DLL은 `C:\Config.Msi`로 옮겨져 다음 재시작 때 지워지고, 새 DLL은 바로 설치된다. 프로그램은 불러 둔 옛 DLL로 계속 돈다. 제거도 같고, 설치 폴더와 Windows 등록은 바로 사라진다. 종료 코드는 0이며 재시작을 요구하지 않는다(CI 확인).
+- **같은 PC의 다른 사용자**는 등록된 프로필을 Windows 설정의 "키보드 추가"에서 직접 켠다(등록은 기계 전체, 켜기는 설치한 사용자만).
+- **`setup.exe`**(번들, `bundle.wxs`): easime MSI를 담고, Windows App Runtime(설정 앱이 필요로 하는 Microsoft 프레임워크 패키지) 2.4 이상이 없을 때만 Microsoft의 공식 설치 파일(`aka.ms/windowsappsdk/2.4/latest/...`, 크기·SHA-512 고정, 116MB)을 받아 실행한 뒤 MSI를 설치한다. 감지는 `HKLM\...\AppxAllUserStore\Applications\MicrosoftCorporationII.WinAppRuntime.Main.2_2.4.0.0_x64__8wekyb3d8bbwe` 키다: 러너처럼 런타임이 staged로만 있으면 앱이 열리지 않으므로 이 키가 있어야 "있음"으로 센다. 받은 파일은 설치 뒤 캐시에서 지우고, 제거는 easime만 지우며 런타임은 남긴다. easime는 Microsoft 바이너리를 재배포하지 않는다(사용자 결정, 2026-11-09, [decisions.md](../decisions.md)).
+- **릴리스에는 올리지 않는다**: 실제 PC 시험 전이라 CI 아티팩트(`easime-windows-installer-<commit>`)로만 둔다. 코드 서명이 없어 SmartScreen 경고가 뜰 수 있다(예상).
+
+## 설정 앱
+
+`settings/windows`(별개의 cargo 프로젝트): Rust + `windows-reactor`(windows-rs의 Rust용 WinUI 3 라이브러리, 0.100), Mica 배경, `NavigationView`. KDE 설정 창과 같은 페이지(일반, 언어, 단축키, 한국어, 모양), 같은 저장 규칙(`easime-settings-model`: 바뀐 키만 고치고 주석·순서 보존, 못 읽는 파일은 덮어쓰지 않음, 초기화는 `config.toml.bak`), 같은 번역표(`settings/kde/qml/tr.js`)를 쓴다. 표시 언어는 다섯 가지이며 한국어 외는 원어민 검토 전 초안이다. 입력기를 켜는 화면은 없다(설치 프로그램이 켠다). 런타임은 실행 파일 옆에 두지 않고 설치된 Microsoft 프레임워크 패키지를 쓴다: 런타임 없이 열면 Microsoft의 설치 안내가 뜬다.
+
+## CI가 확인하는 것
+
+| 잡 | 확인하는 것 |
+|---|---|
+| `windows-installer` | MSI 설치 → Windows의 COM·TSF 등록 → 사용자 언어 목록(한국어 켜짐) → 설치된 DLL을 COM이 불러 서비스 생성 → 한국어 기능을 뺀 설치 → 제거(폴더, 등록, 언어 목록이 원래대로) → PATH 옵션 → 업그레이드(등록·켜짐 유지, 언어 순서 유지)·다운그레이드 거부 → DLL을 쓰는 프로그램을 띄운 채 업그레이드·제거해도 프로그램이 살아 있고 재시작을 요구하지 않음 → 설정 앱과 시작 메뉴 → UI 자동화로 설정 앱 창(`Found (*`) |
+| `frontend-tsf/tests` | `regsvr32` 등록, COM이 레지스트리의 DLL에서 서비스 생성, 실제 TSF 활성화, 가짜 응용 프로그램(`ITextStoreACP`)으로 한글·일본어 타자, 밑줄, 후보창, UI 요소, 모드 상자(러너에 한국어가 없고 TSF가 설치되지 않은 언어의 프로필 활성화를 거부하므로, 시험은 미국 영어 아래 시험 전용 프로필로 한다) |
+| `windows-settings` | 설정 앱을 Windows에서 빌드하고 다섯 언어로 열어(창 제목이 언어별로 나옴) 사진을 남김. UI 자동화로 페이지 목록, 일반 페이지의 설정 파일 위치·지원 상태·사전 상태, 언어 페이지의 전환 순서를 읽고, 日本語를 켜면 설정 파일에 `enabled = ["japanese"]`가 저장되고 알림이 뜸. 사진은 아티팩트 `settings-app-windows`이고 사람이 본 적은 없다 |
+| `windows-setup` | 런타임이 staged로만 있는 새 러너에서 `setup.exe /quiet`가 런타임이 없음을 감지해 Microsoft 설치 파일을 받아 실행하고 easime를 설치하며 설정 앱이 열림. 제거하면 easime만 사라지고 런타임은 남음. 다시 설치하면 런타임을 감지해 받지 않음. 앱 목록에 easime가 하나만 보임 |
+| `portable`(Windows) | 코어와 `frontend-tsf`의 포터블 부분(`fmt`, `clippy -D warnings`, `test`) |
+
+## 실제 PC에서 확인하지 않은 것과 알려진 한계
+
+- **가장 큰 미확인**: 메모장·브라우저·메신저 같은 실제 응용 프로그램에서 "`OnTestKeyDown`은 가져가겠다고 하고 `OnKeyDown`은 가져가지 않는 키"(조합 확정 뒤 Space·Enter·숫자)가 키를 잃지 않는지. 가짜 응용 프로그램은 TSF 규칙을 지킨다.
+- Windows 설정의 언어 화면에서 easime가 어떻게 보이는지, 설치 창의 모양, 제거할 때 설치 창이 사용 중인 프로그램을 어떻게 알리는지.
+- 밑줄·후보창·모드 상자의 실제 모양, 혼합 배율, 전체 화면 앱, 스토어 앱(설정 앱의 검색창 등).
+- 한국어·일본어 Windows에서의 시스템 언어 읽기(`GetUserPreferredUILanguages`는 러너에서 호출만 확인).
+- 사전을 앱마다 같은 페이지로 나눠 쓰는지(읽기 전용 메모리 매핑, 첫 변환 때 열기): 재 보지 않았다.
+- 오른쪽 Alt 탭 뒤 메뉴 막대(Alt로 메뉴를 여는 프로그램), 실제 AltGr 자판 PC.
+- 등록한 언어(한국어)와 실제로 치는 언어(일본어)가 다르면 응용 프로그램이 입력 언어로 하는 일(맞춤법 언어, 글꼴 선택)이 어긋날 수 있다.
+- DLL이 64비트뿐이라 32비트 프로그램에서는 쓸 수 없다. ARM64 Windows의 ARM64 프로그램도 마찬가지일 것으로 예상한다(확인하지 않음).
+- 모드 상자는 응용 프로그램마다 따로이고, 작업 표시줄에서 다시 확인하는 경로가 없다.
+
+## 코드 위치
+
+| 모듈 | 하는 일 | Windows API |
+|---|---|---|
+| `keys` | 가상 키·스캔 코드 → `KeyEvent`, 전환 키 분류 | 없음 |
+| `typing` | 키 처리 파이프라인(`Typist`, `Step`) | 없음 |
+| `profiles` | 프로필 하나, 순환 설정, `TYPEABLE` | 없음 |
+| `marks`, `page`, `placement`, `install` | 밑줄 구간, 후보 쪽 내용, 상자 위치 규칙, DLL 옆 경로 | 없음 |
+| `service` | 텍스트 서비스(COM, 키 싱크, 조합) | 있음 |
+| `registration`, `setup` | COM·프로필 등록, 사용자별 켜기 | 있음 |
+| `indicator`, `candidate`, `display`, `element` | 모드 상자, 후보창, 표시 속성, UI 요소 | 있음 |
+
+설정 앱은 `settings/windows`(`app`, `install`, `tr`), 설치 프로그램은 `packaging/windows`다.
