@@ -1,4 +1,4 @@
-//! An experiment, not a check of easime (docs/windows-plan-2026-11-08.md, step 2):
+//! An experiment, not a check of easime (docs/records/2026-11-08-windows-plan.md, step 2):
 //! can one input method be offered under **every** language of Windows?
 //!
 //! The documented way is the older `ITfInputProcessorProfiles::AddLanguageProfile`
@@ -15,7 +15,7 @@
 //! ignored by default; the CI's Windows runner runs it with
 //! `cargo test -p frontend-tsf --test languages -- --ignored --nocapture`.
 //! Whether Windows' Settings window shows the profile cannot be seen from here:
-//! that is for a real PC (docs/windows-testing.md).
+//! that is for a real PC (docs/testing/windows.md).
 #![cfg(windows)]
 
 use frontend_tsf::registration::guid;

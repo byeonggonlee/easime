@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, current InputEngine/CandidateList interfaces, existing bitmap fonts and Wayland input-panel protocol.
 
-**Spec:** [Korean Hanja design](../specs/2026-11-07-korean-hanja-design.md), [DESIGN.md](../../../DESIGN.md).
+**Spec:** [Korean Hanja design](2026-11-07-korean-hanja-design.md), [DESIGN.md](../../DESIGN.md).
 
 ## Global Constraints
 

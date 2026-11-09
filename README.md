@@ -17,7 +17,7 @@ beginner settings and first-run guide, XWayland (XIM), Chinese, GNOME and macOS.
 For all documentation and the dated development/design assessment, see the [document index](docs/README.md).
 See [docs/concept.md](docs/concept.md) for the product concept (in Korean).
 See [DESIGN.md](DESIGN.md) for the UX/UI assessment and design guidelines (in Korean).
-For Hanja controls and the resolved KDE floating-panel issue, see [KDE testing](docs/kde-testing.md).
+For Hanja controls and the resolved KDE floating-panel issue, see [KDE testing](docs/testing/kde.md).
 All agents should start with [AGENTS.md](AGENTS.md) and read DESIGN.md before working on this project.
 
 ## Roadmap

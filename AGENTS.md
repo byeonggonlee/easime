@@ -59,7 +59,7 @@ Portable crates, which also build on Windows and macOS CI: `ime-core`, `ime-sess
 ## Documentation entry point
 
 - [Complete document index](docs/README.md): every repository document, including dated plans, contribution templates, data notes and licenses, must be reachable from this index.
-- [2026-11-08 development and design assessment](docs/assessment-2026-11-08.md): evidence, gaps and recommended priorities; proposals are not approved product decisions.
+- [2026-11-08 development and design assessment](docs/records/2026-11-08-assessment.md): evidence, gaps and recommended priorities; proposals are not approved product decisions.
 - When adding, moving or deleting documentation, update the index and affected links in the same commit. Keep current decisions, implementation status and dated proposals distinct. Check local links and reachability from AGENTS.md before committing documentation changes.
 
 ## Read when needed

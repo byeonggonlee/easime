@@ -14,7 +14,7 @@
 //! every language, but also started in programs where nobody chose it (the
 //! user's other programs had it running right after it was switched on), and
 //! uninstalling then had Windows close those programs. So it is listed under
-//! Korean again (`docs/windows-plan-2026-11-08.md`, step 2).
+//! Korean again (`docs/records/2026-11-08-windows-plan.md`, step 2).
 //!
 //! Only languages the text service can really type are in the cycle
 //! ([`TYPEABLE`]), so Windows never offers an input method that does nothing

@@ -51,7 +51,7 @@ jobs:
         env:
           EASIME_REQUIRE_DLL: ${{ runner.os == 'Windows' && '1' || '' }}
       # The experiment behind registering for every language
-      # (docs/windows-plan-2026-11-08.md, step 2), kept as a watch on Windows: it
+      # (docs/records/2026-11-08-windows-plan.md, step 2), kept as a watch on Windows: it
       # prints what Windows says about each way of registering (the "EXPERIMENT"
       # lines) and fails only if it cannot clean up after itself.
       - name: "Experiment: one input method under every language"

@@ -44,7 +44,7 @@ Mac에서는 OS 독립 crate를 실행하고 Linux 대상은 컴파일 검사한
 - OS 독립 crate 전체 188개 테스트, Mac에서 독립 실행한 기존 렌더링·키 변환 모듈 27개 테스트가 통과했다.
 - Linux 대상 워크스페이스 전체와 테스트 타깃의 컴파일·clippy 검사를 통과했다. 후속 GitHub Actions에서 Linux 전체 테스트 294개(한자 통합 6개, 표시 테스트 18개 포함)가 통과했다. 새 기능의 실제 KDE 재검증은 남아 있다.
 - 리뷰에서 일본어에 한국어용 페이지 안내가 노출되는 문제를 발견해, 이번 후보 UI 연결을 한국어로 한정했다.
-- 태스크바 전체 이동은 KWin 6.8.1의 visible 오분류 → Plasma floating 상태 변경 경로와 일치한다. 사용자는 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용하자 문제가 재현되지 않는다고 확인했다. [확인 기록](../../kde-testing.md).
+- 태스크바 전체 이동은 KWin 6.8.1의 visible 오분류 → Plasma floating 상태 변경 경로와 일치한다. 사용자는 easime 재설치 없이 재부팅해 KWin 6.8.2를 적용하자 문제가 재현되지 않는다고 확인했다. [확인 기록](../testing/kde.md).
 
 Host verification limitation: native Mac cargo test --workspace cannot compile the existing Linux-only memfd_create/timerfd/inotify imports. Linux-target all-target compilation and clippy passed locally; the full Linux suite subsequently passed in GitHub Actions.
 
