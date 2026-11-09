@@ -66,6 +66,17 @@ function Restart-Manager-Off([string]$what) {
     @(Get-Content $log | Where-Object { $_ -match "RESTART MANAGER: Disabled" }).Count -gt 0
 }
 
+# What the installer log of one operation says about files in use, and what
+# waits for the next restart: printed so the docs can say what happens.
+function Show-Files-In-Use([string]$what) {
+    Write-Host "---- $what`: files in use"
+    Get-Content (Join-Path $logs ("$what.log" -replace '[^\w.-]', '_')) |
+        Where-Object { $_ -match 'in use|InUse|Scheduling reboot|Config\.Msi' } |
+        Select-Object -First 20 | ForEach-Object { Write-Host "  $_" }
+    Write-Host "  waiting for the next restart: $(@(Pending-At-Restart | Where-Object { $_ -match 'easime|Config\.Msi' }) -join ' | ')"
+    Write-Host "----"
+}
+
 # Files Windows will rename or delete at the next restart.
 function Pending-At-Restart {
     $key = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
@@ -204,11 +215,18 @@ $old = (Entries)[0].DisplayVersion
 $languagesBefore = (Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages -join ","
 $disablesBefore = Setup-Lines "disable"
 $holder = Start-Holder
+$second = $null
 try {
+    $pendingBefore = @(Pending-At-Restart | Where-Object { $_ -match 'Config\.Msi' }).Count
     $upgraded = Invoke-Msi "upgrade" @("/i", "`"$Msi`"")
     Assert ($upgraded -in 0, 3010) "the newer MSI installs over it (exit code $upgraded; 3010 asks for a restart)"
     Assert (Restart-Manager-Off "upgrade") "the upgrade did not use Restart Manager"
     Assert (-not $holder.HasExited) "the program using easime is still running after the silent upgrade"
+    # Observed in the CI: the installer moves the DLL the program uses aside
+    # (to C:\Config.Msi), installs the new one at once and deletes the old
+    # copy at the next restart; the program keeps the copy it loaded.
+    Assert (@(Pending-At-Restart | Where-Object { $_ -match 'Config\.Msi' }).Count -gt $pendingBefore) "the copy the program uses is deleted at the next restart"
+    Show-Files-In-Use "upgrade"
     Assert ((Setup-Lines "disable") -eq $disablesBefore) "the upgrade does not take the user's input method away in between"
     Assert (((Get-ItemProperty $userProfiles -ErrorAction SilentlyContinue).Languages -join ",") -eq $languagesBefore) "the user's language list keeps its order ($languagesBefore)"
     $entries = Entries
@@ -221,31 +239,27 @@ try {
     Assert ((Invoke-Msi "downgrade" @("/i", "`"$OldMsi`"")) -ne 0) "the older MSI is refused"
     Assert ((Entries)[0].DisplayVersion -eq $entries[0].DisplayVersion) "the newer version is still installed"
     Assert-Registered "after the refused downgrade"
+
+    # A program opened after the upgrade uses the new DLL, which the uninstall
+    # then has to take away while it is in use.
+    $second = Start-Holder
+    $pendingBefore = @(Pending-At-Restart | Where-Object { $_ -match 'Config\.Msi|easime' }).Count
     $removed = Invoke-Msi "final-uninstall" @("/x", "`"$Msi`"")
-    Assert ($removed -in 0, 3010) "the MSI uninstalls while the program uses easime (exit code $removed)"
+    Assert ($removed -in 0, 3010) "the MSI uninstalls while programs use easime (exit code $removed)"
     Assert (Restart-Manager-Off "final-uninstall") "the uninstall did not use Restart Manager"
-    Assert (-not $holder.HasExited) "the program using easime is still running after the silent uninstall"
+    Assert (-not $holder.HasExited -and -not $second.HasExited) "both programs using easime are still running after the silent uninstall"
     Assert-Unregistered "after the final uninstall"
     Assert ((User-Tips).Count -eq 0) "easime is switched off again at the end"
-    # What Windows Installer did with the DLL the program still has loaded:
-    # printed, so the docs say what happens rather than what was expected.
-    Write-Host "---- after the uninstall, with the program still running"
-    Write-Host "install folder: $(Test-Path $dir); left in it: $((Get-ChildItem $dir -Recurse -ErrorAction SilentlyContinue | ForEach-Object Name) -join ', ')"
-    Write-Host "to do at the next restart: $(@(Pending-At-Restart | Where-Object { $_ -match 'easime|Config\.Msi' }) -join ' | ')"
-    $held = @((Get-Process -Id $holder.Id).Modules | Where-Object { $_.FileName -match 'easime|Config\.Msi' } | ForEach-Object FileName)
-    Write-Host "the program has loaded: $($held -join ', ')"
-    foreach ($what in "upgrade", "final-uninstall") {
-        Write-Host "$what log, files in use:"
-        Get-Content (Join-Path $logs "$what.log") | Where-Object { $_ -match 'in use|InUse|Config\.Msi|REBOOT|\.rbf' } |
-            Select-Object -First 25 | ForEach-Object { Write-Host "  $_" }
-    }
-    Write-Host "----"
+    Show-Files-In-Use "final-uninstall"
+    Write-Host "install folder after the uninstall: $(Test-Path $dir)$(if (Test-Path $dir) { '; left in it: ' + ((Get-ChildItem $dir -Recurse | ForEach-Object Name) -join ', ') })"
+    Write-Host "the program opened after the upgrade has loaded: $(@((Get-Process -Id $second.Id).Modules | Where-Object { $_.FileName -match 'easime|Config\.Msi' } | ForEach-Object FileName) -join ', ')"
     $dll = Join-Path $dir "easime_tsf.dll"
-    if (Test-Path $dll) {
-        Assert (@(Pending-At-Restart | Where-Object { $_ -like "*easime*" }).Count -gt 0) "the DLL still in use is removed at the next restart"
-    }
+    Assert ((-not (Test-Path $dll)) -or @(Pending-At-Restart | Where-Object { $_ -like "*easime*" }).Count -gt 0) "the DLL in use is not left behind for good (gone, or deleted at the next restart)"
+    Assert (@(Pending-At-Restart | Where-Object { $_ -match 'Config\.Msi|easime' }).Count -gt $pendingBefore) "what the program still uses waits for the next restart"
 } finally {
-    if (-not $holder.HasExited) { Stop-Process -Id $holder.Id -Force }
+    foreach ($process in $holder, $second) {
+        if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+    }
 }
 # What waited for a restart can go now that nothing uses it.
 if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }

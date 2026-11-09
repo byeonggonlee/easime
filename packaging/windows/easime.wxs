@@ -31,9 +31,12 @@
   below. The programs keep the copy they loaded; whatever Windows Installer
   cannot replace or remove now waits for the next restart (msiexec then exits
   with 3010; the setup window lists the programs and offers to go on without
-  closing them). In the CI the silent upgrade and uninstall with a program
-  using easime finished without asking for a restart (exit code 0): the
-  installer test prints what became of the DLL.
+  closing them). Observed in the CI (silent upgrade, a program holding the
+  DLL): the installer moved that DLL aside to C:\Config.Msi, installed the new
+  one at once and scheduled the old copy for deletion at the next restart,
+  without asking for a restart (exit code 0); the program kept running on the
+  copy it had loaded. The installer test checks this, and the same for an
+  uninstall.
 
   The DLL is 64-bit: 32-bit programs cannot use the input method (docs/platforms.md).
   Everything the custom actions do is in crates/frontend-tsf (registration.rs,
