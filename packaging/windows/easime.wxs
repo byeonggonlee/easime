@@ -35,8 +35,9 @@
   DLL): the installer moved that DLL aside to C:\Config.Msi, installed the new
   one at once and scheduled the old copy for deletion at the next restart,
   without asking for a restart (exit code 0); the program kept running on the
-  copy it had loaded. The installer test checks this, and the same for an
-  uninstall.
+  copy it had loaded. An uninstall does the same: the folder and Windows'
+  registration go at once, the DLL still in use is deleted at the next restart.
+  The installer test checks both.
 
   The DLL is 64-bit: 32-bit programs cannot use the input method (docs/platforms.md).
   Everything the custom actions do is in crates/frontend-tsf (registration.rs,
