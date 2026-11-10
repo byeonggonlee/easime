@@ -1,6 +1,6 @@
 # 공통 코어와 엔진 구현 현황
 
-기준: 2026-11-09, `main` 86648c2. 모든 OS가 같은 코드로 쓰는 부분이다. 한눈에 보는 현황은 [status.md](../status.md), 코어와 어댑터를 나누는 기준은 [platforms.md](../platforms.md), OS별 구현은 [linux-kde.md](linux-kde.md)와 [windows.md](windows.md)다.
+기준: 2026-11-10, `main` 381e664. 모든 OS가 같은 코드로 쓰는 부분이다. 한눈에 보는 현황은 [status.md](../status.md), 코어와 어댑터를 나누는 기준은 [platforms.md](../platforms.md), OS별 구현은 [linux-kde.md](linux-kde.md)와 [windows.md](windows.md)다.
 
 코어 크레이트는 OS·UI 의존성이 없고, 모든 OS의 CI(Linux 전체, Windows·macOS는 포터블 크레이트)에서 `fmt`·`clippy -D warnings`·`test`를 통과한다. 이 시험은 코어가 맞다는 증거이지, 실제 데스크톱에서 입력이 된다는 증거가 아니다.
 
