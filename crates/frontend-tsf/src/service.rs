@@ -35,7 +35,7 @@ use crate::display;
 use crate::element::Candidates;
 use crate::indicator::{self, Indicator};
 use crate::install;
-use crate::keys::{KeyInfo, KeyboardState};
+use crate::keys::{self, KeyInfo, KeyboardState};
 use crate::langbar::{self, LangBar, Request};
 use crate::marks::Mark;
 use crate::page;
@@ -822,6 +822,12 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 None => return Ok(false.into()),
             };
             diag::log_key(|| format!("key down {key:?} -> {outcome:?}"));
+            // The user has seen which language it is and goes on: the box next
+            // to the text cursor does not wait for its time. The switch keys
+            // and the modifiers do not count (`starts_typing`).
+            if keys::starts_typing(key) {
+                self.indicator.borrow_mut().hide();
+            }
             if !self.perform(context, &outcome) && outcome.eaten {
                 // The document did not take the text (it may refuse
                 // compositions): give the key to the application rather than

@@ -120,6 +120,14 @@ pub fn is_modifier(vk: u16) -> bool {
     )
 }
 
+/// Whether this press is the user going on with their work, which ends the
+/// mode box that said which language was just switched to: any key but a
+/// modifier and but the switch keys themselves (holding the Hangul key, or
+/// the right Alt of a tap that has yet to switch, is still the switch).
+pub fn starts_typing(key: KeyInfo) -> bool {
+    !is_modifier(key.vk) && toggle_role(key) == KeyRole::Other
+}
+
 /// The keys with a name of their own (not letters or symbols).
 pub fn named_key(vk: u16) -> Option<Key> {
     Some(match vk {
@@ -360,6 +368,26 @@ mod tests {
         assert_eq!(toggle_role(press(VK_LMENU, 0x38)), KeyRole::Other);
         assert_eq!(toggle_role(press(0x41, 0x1E)), KeyRole::Other);
         assert_eq!(toggle_role(press(VK_HANJA, 0x71)), KeyRole::Other);
+    }
+
+    #[test]
+    fn a_key_that_goes_on_with_the_work_ends_the_mode_box() {
+        for vk in [0x41, VK_SPACE, VK_HANJA, 0x0D, 0x1B, 0x08] {
+            assert!(starts_typing(press(vk, 0x1E)), "{vk:#x} goes on");
+        }
+        // The keys that only change what others mean, and the switch keys.
+        for vk in [
+            VK_SHIFT, VK_LSHIFT, VK_CONTROL, VK_LMENU, VK_LWIN, VK_CAPITAL,
+        ] {
+            assert!(!starts_typing(press(vk, 0x2A)), "{vk:#x} is no typing");
+        }
+        assert!(!starts_typing(press(VK_HANGUL, 0x72)));
+        assert!(!starts_typing(press(VK_RMENU, 0x38)));
+        let right_alt = KeyInfo {
+            extended: true,
+            ..press(VK_MENU, 0x38)
+        };
+        assert!(!starts_typing(right_alt));
     }
 
     #[test]

@@ -1105,7 +1105,14 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     app.letters("gk");
     assert_eq!(app.text(), "한글gk");
     assert!(app.press(VK_HANGUL, 0x72, None));
+    assert!(
+        mode_box().is_some(),
+        "the second switch shows the box again"
+    );
+    // The first key of the typing that follows takes it away at once, not
+    // when its time is up.
     app.letters("gk");
+    assert!(mode_box().is_none(), "typing ends the box before its time");
     assert_eq!(app.text(), "한글gk하");
 
     // The Hangul key in the middle of a syllable finishes it first.
