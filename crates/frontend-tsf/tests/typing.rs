@@ -36,14 +36,14 @@ use windows::Win32::UI::TextServices::{
     GUID_TFCAT_TIP_KEYBOARD, IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl,
     ITextStoreACPSink, ITfCandidateListUIElement, ITfCategoryMgr, ITfCompartmentMgr, ITfContext,
     ITfContextComposition, ITfDisplayAttributeMgr, ITfEditSession, ITfEditSession_Impl,
-    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfMenu,
-    ITfMenu_Impl, ITfRange, ITfSource, ITfThreadMgr, ITfUIElementMgr, ITfUIElementSink,
-    ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS, TF_ATTR_TARGET_CONVERTED,
-    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ, TF_ES_SYNC,
-    TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE,
-    TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT, TF_LBI_CLK_RIGHT,
-    TF_LBI_STYLE_SHOWNINTRAY, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR, TF_LS_DOT,
-    TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
+    ITfFnConfigure, ITfFunction, ITfInputProcessorProfileMgr, ITfKeystrokeMgr,
+    ITfLangBarItemButton, ITfLangBarItemMgr, ITfMenu, ITfMenu_Impl, ITfRange, ITfSource,
+    ITfThreadMgr, ITfUIElementMgr, ITfUIElementSink, ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS,
+    TF_ATTR_TARGET_CONVERTED, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ,
+    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
+    TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT,
+    TF_LBI_CLK_RIGHT, TF_LBI_STYLE_SHOWNINTRAY, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR,
+    TF_LS_DOT, TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
     TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS,
     TS_TEXTCHANGE,
 };
@@ -1257,6 +1257,35 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     app.elements.draws_itself.set(false);
 
     language_bar(app, context);
+    options_entry();
+}
+
+/// The places Windows keeps for a text service's options (the keyboard's
+/// options in the Settings app, the old "Text Services and Input Languages"
+/// panel) make the service by its class id and ask it for `ITfFnConfigure`.
+/// easime answers with its name; `Show` opens the settings app, which the
+/// test's DLL has no copy of next to it, so it must say it could not.
+fn options_entry() {
+    // SAFETY: COM calls on interfaces made here; the values are plain.
+    unsafe {
+        let configure: ITfFnConfigure = CoCreateInstance(
+            &registration::guid(profiles::CLSID),
+            None,
+            CLSCTX_INPROC_SERVER,
+        )
+        .expect("the service answers for ITfFnConfigure");
+        let function: ITfFunction = configure.cast().expect("a configure is a function");
+        assert_eq!(function.GetDisplayName().unwrap().to_string(), "easime");
+        let shown = configure.Show(
+            HWND::default(),
+            0x0412,
+            &registration::guid(profiles::CLSID),
+        );
+        assert!(
+            shown.is_err(),
+            "no settings app next to the test's DLL: Show says so"
+        );
+    }
 }
 
 /// A menu that remembers what was added to it: (id, flags, text).

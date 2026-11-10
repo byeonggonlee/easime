@@ -54,7 +54,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{
-    CLASS_E_NOAGGREGATION, E_FAIL, E_INVALIDARG, E_POINTER, LPARAM, WPARAM,
+    CLASS_E_NOAGGREGATION, E_FAIL, E_INVALIDARG, E_POINTER, HWND, LPARAM, WPARAM,
 };
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardState;
@@ -63,15 +63,15 @@ use windows::Win32::UI::TextServices::{
     ITfCompartmentMgr, ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext,
     ITfContextComposition, ITfContextView, ITfDisplayAttributeInfo, ITfDisplayAttributeProvider,
     ITfDisplayAttributeProvider_Impl, ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl,
-    ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr,
-    ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor, ITfTextInputProcessor_Impl,
-    ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
-    ITfThreadMgrEventSink_Impl, ITfThreadMgrEx, ITfUIElementMgr, TF_AE_NONE, TF_ANCHOR_END,
-    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE,
-    TF_ES_READ, TF_ES_READWRITE, TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE,
-    TF_TMF_UIELEMENTENABLEDONLY,
+    ITfFnConfigure, ITfFnConfigure_Impl, ITfFunction_Impl, ITfInsertAtSelection, ITfKeyEventSink,
+    ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor,
+    ITfTextInputProcessor_Impl, ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl,
+    ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl, ITfThreadMgrEx,
+    ITfUIElementMgr, TF_AE_NONE, TF_ANCHOR_END, TF_CONTEXT_EDIT_CONTEXT_FLAGS,
+    TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
+    TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE, TF_TMF_UIELEMENTENABLEDONLY,
 };
-use windows::core::{BOOL, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
+use windows::core::{BOOL, BSTR, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
 /// How many objects of this DLL are alive (text services and their factories),
 /// for `DllCanUnloadNow`.
@@ -170,7 +170,8 @@ struct Composing {
     ITfKeyEventSink,
     ITfCompositionSink,
     ITfThreadMgrEventSink,
-    ITfDisplayAttributeProvider
+    ITfDisplayAttributeProvider,
+    ITfFnConfigure
 )]
 pub struct TextService {
     activated: RefCell<Option<Activated>>,
@@ -867,6 +868,29 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
 
     fn OnPreservedKey(&self, _context: Ref<ITfContext>, _guid: *const GUID) -> Result<BOOL> {
         Ok(false.into())
+    }
+}
+
+/// Windows' own places for a text service's options (the keyboard's options in
+/// the Settings app, the old "Text Services and Input Languages" panel) make
+/// the service by its class id, ask it for `ITfFnConfigure` and call `Show`.
+/// The options of easime are its settings app.
+impl ITfFunction_Impl for TextService_Impl {
+    fn GetDisplayName(&self) -> Result<BSTR> {
+        Ok(BSTR::from("easime"))
+    }
+}
+
+impl ITfFnConfigure_Impl for TextService_Impl {
+    fn Show(&self, _parent: HWND, _langid: u16, _profile: *const GUID) -> Result<()> {
+        guarded("Show", Err(E_FAIL.into()), || {
+            diag::log("options asked for by Windows: opening the settings app");
+            if langbar::open_settings() {
+                Ok(())
+            } else {
+                Err(E_FAIL.into())
+            }
+        })
     }
 }
 
