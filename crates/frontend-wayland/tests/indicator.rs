@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 const KEY_G: u32 = 34;
 const KEY_K: u32 = 37;
 const KEY_HANGEUL: u32 = 122;
+const KEY_LEFTSHIFT: u32 = 42;
 
 /// A long time, so a box never disappears during a test by accident.
 const LONG_MS: u32 = 60_000;
@@ -268,6 +269,32 @@ fn the_box_can_be_shown_again_after_it_disappeared() {
     let again = fake.wait_for_indicator_shown();
     assert!(again.visible_pixels() > 0);
     fake.wait_for_indicator_hidden();
+}
+
+#[test]
+fn typing_takes_the_box_away_at_once() {
+    let mut fake = Fake::start_with(config(LONG_MS));
+    fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
+    fake.wait_for_indicator_shown();
+    assert!(fake.indicator_mapped());
+
+    // Not its time yet (a minute): the first key of the typing ends it.
+    tap(&mut fake, KEY_G);
+    fake.wait_for_indicator_hidden();
+    assert!(!fake.indicator_mapped());
+}
+
+#[test]
+fn a_modifier_alone_keeps_the_box() {
+    let mut fake = Fake::start_with(config(LONG_MS));
+    fake.activate();
+    tap(&mut fake, KEY_HANGEUL);
+    fake.wait_for_indicator_shown();
+
+    tap(&mut fake, KEY_LEFTSHIFT);
+    fake.barrier();
+    assert!(fake.indicator_mapped(), "Shift alone is no typing");
 }
 
 #[test]

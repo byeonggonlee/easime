@@ -538,6 +538,10 @@ impl App {
             return;
         }
 
+        // The user has seen which language it is and goes on typing: the box
+        // does not wait for its time. (The switch keys returned above.)
+        self.hide_indicator();
+
         let keysym = case_from_shift(keysym, self.shift_held());
         let event = translate(keysym, self.current_modifiers());
         if event.key == Key::Hanja && !self.panel.as_ref().is_some_and(Panel::can_show_candidates) {
