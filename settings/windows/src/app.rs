@@ -323,6 +323,10 @@ impl Component for Settings {
             .collect();
         NavigationView::new()
             .pane_display_mode(NavigationViewPaneDisplayMode::Left)
+            // The pane is always open, so the menu (hamburger) button has
+            // nothing to do; on a real PC pressing it broke the window
+            // (2026-11-10), so it is not shown.
+            .is_pane_toggle_button_visible(false)
             .is_settings_visible(false)
             .is_back_button_visible(NavigationViewBackButtonVisible::Collapsed)
             .open_pane_length(220.0)
