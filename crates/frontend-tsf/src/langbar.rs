@@ -36,8 +36,8 @@ use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLIP_DEFAULT_PRECIS, CreateBitmap,
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DEFAULT_PITCH,
     DIB_RGB_COLORS, DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
-    DrawTextW, FF_DONTCARE, FW_BOLD, GdiFlush, HBITMAP, HGDIOBJ, OUT_DEFAULT_PRECIS, SelectObject,
-    SetBkMode, SetTextColor, TRANSPARENT,
+    DrawTextW, FF_DONTCARE, FW_BOLD, GdiFlush, HBITMAP, HDC, HGDIOBJ, OUT_DEFAULT_PRECIS,
+    SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::TextServices::{
@@ -406,15 +406,58 @@ fn badge_pixel(coverage: u8) -> u32 {
     0xFF00_0000 | (mix(BADGE[0]) << 16) | (mix(BADGE[1]) << 8) | mix(BADGE[2])
 }
 
-/// The icon for `language`: its letter in white on the dark badge, with the
-/// alpha the taskbar needs. `None` if Windows would not make the pieces. The
-/// caller owns the icon.
-pub(crate) fn render_icon(language: Language) -> Option<HICON> {
-    let size = icon_size();
-    let glyph: Vec<u16> = language_glyph(language)
-        .to_string()
-        .encode_utf16()
-        .collect();
+/// How much of the icon's side the letter's ink takes at most, tall and wide:
+/// the letter is the icon, the badge only its ground.
+const INK_HEIGHT: f32 = 0.8;
+const INK_WIDTH: f32 = 0.88;
+
+/// A pixel the letter covers by at least this much (of 255) is ink.
+const INK_LEVEL: u8 = 64;
+
+/// The smallest box (left, top, right, bottom, all inclusive) around the ink of
+/// `coverage`, a `size` square of 0 to 255 per pixel. `None` if there is none.
+fn ink_bounds(coverage: &[u8], size: i32) -> Option<(i32, i32, i32, i32)> {
+    let mut found: Option<(i32, i32, i32, i32)> = None;
+    for y in 0..size {
+        for x in 0..size {
+            if coverage[(y * size + x) as usize] < INK_LEVEL {
+                continue;
+            }
+            found = Some(match found {
+                None => (x, y, x, y),
+                Some((left, top, right, bottom)) => {
+                    (left.min(x), top.min(y), right.max(x), bottom.max(y))
+                }
+            });
+        }
+    }
+    found
+}
+
+/// The font height (in pixels) that would make a letter of `em` pixels, whose
+/// ink is the box `ink`, as big as the icon of side `size` lets it be.
+fn fitted_em(ink: (i32, i32, i32, i32), em: i32, size: i32) -> i32 {
+    let width = (ink.2 - ink.0 + 1) as f32;
+    let height = (ink.3 - ink.1 + 1) as f32;
+    let scale = (INK_HEIGHT * size as f32 / height).min(INK_WIDTH * size as f32 / width);
+    ((em as f32 * scale).round() as i32).clamp(size / 2, size * 2)
+}
+
+/// How far to move a letter whose ink is the box `ink` to put the ink in the
+/// middle of the icon of side `size`.
+fn centring(ink: (i32, i32, i32, i32), size: i32) -> (i32, i32) {
+    // Twice the middle of the ink, so that odd widths keep their half pixel.
+    let (twice_x, twice_y) = (ink.0 + ink.2 + 1, ink.1 + ink.3 + 1);
+    ((size - twice_x) / 2, (size - twice_y) / 2)
+}
+
+/// A `size` square top-down 32-bit bitmap in a memory device context of its
+/// own, and the pointer to its `size * size` pixels. The caller frees both
+/// with [`release_canvas`].
+///
+/// # Safety
+/// Plain GDI calls; the pointer is good for as long as the bitmap lives.
+unsafe fn canvas(size: i32) -> Option<(HDC, HBITMAP, *mut u32)> {
     let info = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -427,28 +470,59 @@ pub(crate) fn render_icon(language: Language) -> Option<HICON> {
         },
         ..BITMAPINFO::default()
     };
-    // SAFETY: plain GDI calls on objects made here and released below; the
-    // bitmap's memory is `size * size` 32-bit pixels, which is what is read
-    // and written, and it is only touched while the bitmap is alive.
+    // SAFETY: as the caller promises; what is made here is released on failure.
     unsafe {
         let dc = CreateCompatibleDC(None);
         if dc.is_invalid() {
             return None;
         }
         let mut bits: *mut c_void = std::ptr::null_mut();
-        let color = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        let Ok(bitmap) = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0)
+        else {
+            let _ = DeleteDC(dc);
+            return None;
+        };
         if bits.is_null() {
-            let _ = DeleteObject(HGDIOBJ(color.0));
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
             let _ = DeleteDC(dc);
             return None;
         }
-        let previous = SelectObject(dc, HGDIOBJ(color.0));
+        Some((dc, bitmap, bits as *mut u32))
+    }
+}
 
-        // White letter on black first: the grey it leaves is how much of each
-        // pixel the letter covers.
-        let height = (size as f32 * 0.8).round() as i32;
+/// Free what [`canvas`] made.
+///
+/// # Safety
+/// The bitmap must not be selected into another device context.
+unsafe fn release_canvas(dc: HDC, bitmap: HBITMAP) {
+    // SAFETY: objects made by `canvas`, no longer used.
+    unsafe {
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(dc);
+    }
+}
+
+/// Draw `glyph` in white on black, in a font `em` pixels high, into the bitmap
+/// at `bits` (selected into `dc`), moved by (`dx`, `dy`), and say how much each
+/// pixel is covered (0 to 255): the grey the letter leaves.
+///
+/// # Safety
+/// `bits` must point to `size * size` pixels of the bitmap selected into `dc`.
+unsafe fn draw_letter(
+    dc: HDC,
+    bits: *mut u32,
+    size: i32,
+    language: Language,
+    glyph: &[u16],
+    (em, dx, dy): (i32, i32, i32),
+) -> Vec<u8> {
+    // SAFETY: as the caller promises; the font is made and freed here.
+    unsafe {
+        let pixels = std::slice::from_raw_parts_mut(bits, (size * size) as usize);
+        pixels.fill(0);
         let font = CreateFontW(
-            -height,
+            -em,
             0,
             0,
             0,
@@ -467,12 +541,12 @@ pub(crate) fn render_icon(language: Language) -> Option<HICON> {
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, windows::Win32::Foundation::COLORREF(0x00FF_FFFF));
         let mut area = RECT {
-            left: 0,
-            top: 0,
-            right: size,
-            bottom: size,
+            left: dx,
+            top: dy,
+            right: size + dx,
+            bottom: size + dy,
         };
-        let mut text = glyph;
+        let mut text = glyph.to_vec();
         DrawTextW(
             dc,
             &mut text,
@@ -480,26 +554,82 @@ pub(crate) fn render_icon(language: Language) -> Option<HICON> {
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
         );
         let _ = GdiFlush();
+        SelectObject(dc, old_font);
+        let _ = DeleteObject(HGDIOBJ(font.0));
+        pixels
+            .iter()
+            .map(|word| {
+                (word & 0xFF)
+                    .max((word >> 8) & 0xFF)
+                    .max((word >> 16) & 0xFF) as u8
+            })
+            .collect()
+    }
+}
 
-        let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, (size * size) as usize);
+/// How much of each pixel of an icon of side `size` the letter of `language`
+/// covers. The letter is drawn three times: a first time to see how much room
+/// its ink takes, a second time at the size that fills the icon, a third time
+/// moved to the middle (the font's own line box does not put the ink there). So
+/// `A`, `한` and `あ` all fill the badge. `None` if Windows would not make the
+/// pieces.
+fn glyph_coverage(language: Language, size: i32) -> Option<Vec<u8>> {
+    let glyph: Vec<u16> = language_glyph(language)
+        .to_string()
+        .encode_utf16()
+        .collect();
+    // SAFETY: a canvas made here and freed below; `draw_letter` gets the
+    // pointer of the bitmap that is selected into the same device context.
+    unsafe {
+        let (dc, bitmap, bits) = canvas(size)?;
+        let previous = SelectObject(dc, HGDIOBJ(bitmap.0));
+        let draw =
+            |placing: (i32, i32, i32)| draw_letter(dc, bits, size, language, &glyph, placing);
+        // The first draw is a little smaller than the icon, so that the glyph's
+        // box is not cut off at the edges where the ink is measured.
+        let first_em = size * 3 / 4;
+        let first = draw((first_em, 0, 0));
+        let coverage = match ink_bounds(&first, size) {
+            None => first,
+            Some(ink) => {
+                let em = fitted_em(ink, first_em, size);
+                let second = draw((em, 0, 0));
+                match ink_bounds(&second, size) {
+                    None => second,
+                    Some(ink) => {
+                        let (dx, dy) = centring(ink, size);
+                        draw((em, dx, dy))
+                    }
+                }
+            }
+        };
+        SelectObject(dc, previous);
+        release_canvas(dc, bitmap);
+        Some(coverage)
+    }
+}
+
+/// The icon for `language`: its letter in white on the dark badge, as large as
+/// the badge allows, with the alpha the taskbar needs. `None` if Windows would
+/// not make the pieces. The caller owns the icon.
+pub(crate) fn render_icon(language: Language) -> Option<HICON> {
+    let size = icon_size();
+    let coverage = glyph_coverage(language, size)?;
+    // SAFETY: a canvas made here, written within its `size * size` pixels, and
+    // freed below once the icon has its own copy.
+    unsafe {
+        let (dc, color, bits) = canvas(size)?;
+        let pixels = std::slice::from_raw_parts_mut(bits, (size * size) as usize);
         for y in 0..size {
             for x in 0..size {
-                let slot = &mut pixels[(y * size + x) as usize];
-                let word = *slot;
-                let coverage = (word & 0xFF)
-                    .max((word >> 8) & 0xFF)
-                    .max((word >> 16) & 0xFF) as u8;
-                *slot = if in_badge(x, y, size) {
-                    badge_pixel(coverage)
+                let at = (y * size + x) as usize;
+                pixels[at] = if in_badge(x, y, size) {
+                    badge_pixel(coverage[at])
                 } else {
                     0
                 };
             }
         }
-
-        SelectObject(dc, old_font);
-        let _ = DeleteObject(HGDIOBJ(font.0));
-        SelectObject(dc, previous);
         let mask = CreateBitmap(size, size, 1, 1, None);
         let icon = CreateIconIndirect(&ICONINFO {
             fIcon: BOOL(1),
@@ -510,8 +640,7 @@ pub(crate) fn render_icon(language: Language) -> Option<HICON> {
         })
         .ok();
         let _ = DeleteObject(HGDIOBJ(mask.0));
-        let _ = DeleteObject(HGDIOBJ(color.0));
-        let _ = DeleteDC(dc);
+        release_canvas(dc, color);
         icon
     }
 }
@@ -541,6 +670,74 @@ mod tests {
     fn a_letter_is_white_on_the_badge() {
         assert_eq!(badge_pixel(0), 0xFF20_2226, "no letter: the badge colour");
         assert_eq!(badge_pixel(255), 0xFFFF_FFFF, "all letter: white");
+    }
+
+    #[test]
+    fn the_ink_of_a_letter_is_measured() {
+        let mut coverage = vec![0u8; 16 * 16];
+        assert_eq!(ink_bounds(&coverage, 16), None, "nothing drawn");
+        coverage[(3 * 16 + 5) as usize] = 255;
+        coverage[(9 * 16 + 11) as usize] = 200;
+        coverage[(16 + 1) as usize] = INK_LEVEL - 1; // too faint to count
+        assert_eq!(ink_bounds(&coverage, 16), Some((5, 3, 11, 9)));
+    }
+
+    #[test]
+    fn a_small_letter_grows_and_a_wide_one_shrinks() {
+        // 8 by 8 ink at 12 pixels in a 16 icon: far from filling it.
+        let grown = fitted_em((4, 4, 11, 11), 12, 16);
+        assert!(grown > 12, "grows, got {grown}");
+        // 16 wide ink in a 16 icon is too wide; it must shrink.
+        let shrunk = fitted_em((0, 2, 15, 13), 16, 16);
+        assert!(shrunk < 16, "shrinks, got {shrunk}");
+        // Never absurd, even for a speck.
+        assert!(fitted_em((7, 7, 7, 7), 12, 16) <= 32);
+    }
+
+    #[test]
+    fn ink_is_moved_to_the_middle() {
+        // Ink on the left and top: move right and down.
+        let (dx, dy) = centring((0, 0, 7, 7), 16);
+        assert_eq!((dx, dy), (4, 4));
+        // Ink already in the middle stays.
+        assert_eq!(centring((4, 4, 11, 11), 16), (0, 0));
+    }
+
+    #[test]
+    fn each_letter_fills_the_badge_and_sits_in_the_middle() {
+        for language in [Language::English, Language::Korean, Language::Japanese] {
+            for size in [16, 20, 24, 32] {
+                let coverage = glyph_coverage(language, size)
+                    .unwrap_or_else(|| panic!("{language:?}: the letter is drawn"));
+                let ink = ink_bounds(&coverage, size)
+                    .unwrap_or_else(|| panic!("{language:?} at {size}: the letter leaves ink"));
+                let (width, height) = (ink.2 - ink.0 + 1, ink.3 - ink.1 + 1);
+                let longest = width.max(height) as f32;
+                assert!(
+                    longest >= 0.7 * size as f32,
+                    "{language:?} at {size}: the letter is {width}x{height}, too small"
+                );
+                assert!(
+                    width as f32 <= 0.95 * size as f32 && height as f32 <= 0.95 * size as f32,
+                    "{language:?} at {size}: the letter is {width}x{height}, too big"
+                );
+                // Centred within a pixel.
+                let off_x = (ink.0 + ink.2 + 1 - size).abs();
+                let off_y = (ink.1 + ink.3 + 1 - size).abs();
+                assert!(
+                    off_x <= 2 && off_y <= 2,
+                    "{language:?} at {size}: the ink {ink:?} is off the middle"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_icon_is_made() {
+        for language in [Language::English, Language::Korean, Language::Japanese] {
+            let icon = render_icon(language).expect("an icon");
+            destroy_icon(icon);
+        }
     }
 
     #[test]
