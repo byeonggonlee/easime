@@ -1391,7 +1391,13 @@ fn language_bar(app: &Application, context: &ITfContext) {
         // closes it, as a user who changes their mind would: nothing is chosen.
         right_click_and_close(&button);
         assert_eq!(letter(), "한", "closing the menu chooses nothing");
-        assert_eq!(compositions(context), 1, "and the syllable is untouched");
+        // The menu takes the focus, so the document may finish the syllable
+        // (as clicking the taskbar does); what matters is that no text is lost.
+        assert_eq!(
+            app.text(),
+            format!("{before}gk하"),
+            "and the text is intact"
+        );
 
         // Choosing a language from the menu finishes what is being composed.
         button.OnMenuSelect(items[2].0).unwrap();
