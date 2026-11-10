@@ -75,3 +75,4 @@
 ## 정리할 것
 
 - 형님의 로컬 브랜치 `settings-gui-kde`(Kirigami 설정 앱 중간본)와 `candidate-window`(후보창 중간본)는 2026-11-07 토큰 소진으로 멈춘 작업이다. 같은 기능이 이미 `main`에 구현되어 있어(`settings/kde`, `frontend-wayland/src/candidate.rs`) **합치지 않는다.** 필요한 부분(화면 구성, 스크린샷)이 있으면 비교해서 가져오고, 브랜치를 지울지는 사용자가 정한다.
+- **릴리스(v0.1.0) 뒤에 문서 정리**(2026-11-10 사용자 결정): 같은 사실이 여러 문서에 풀어 쓰여 있고(작업 표시줄 단추는 5개 문서, W19 상태는 4개 문서) 표 한 칸이 문단이 되어 있다. 새 규칙([AGENTS.md](../AGENTS.md) "One fact, one home")에 맞춰 `implementation/windows.md`, `testing/windows.md`, `platforms.md`, `DESIGN.md`부터 줄인다. 릴리스 전에는 고치는 문서에만 새 규칙을 적용한다.
