@@ -15,6 +15,9 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{
     E_FAIL, E_NOTIMPL, E_UNEXPECTED, HWND, LPARAM, POINT, RECT, S_OK, WPARAM,
 };
@@ -38,15 +41,17 @@ use windows::Win32::UI::TextServices::{
     ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS, TF_ATTR_TARGET_CONVERTED,
     TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ, TF_ES_SYNC,
     TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE,
-    TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT, TF_LBI_STYLE_SHOWNINTRAY,
-    TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR, TF_LS_DOT, TF_PROFILETYPE_INPUTPROCESSOR,
-    TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC,
-    TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS, TS_TEXTCHANGE,
+    TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT, TF_LBI_CLK_RIGHT,
+    TF_LBI_STYLE_SHOWNINTRAY, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR, TF_LS_DOT,
+    TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
+    TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS,
+    TS_TEXTCHANGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyIcon, DestroyWindow, DispatchMessageW, FindWindowW, GetWindowRect,
-    IsWindowVisible, MSG, PM_REMOVE, PeekMessageW, SetForegroundWindow, TranslateMessage,
-    WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    IsWindowVisible, MSG, PM_REMOVE, PeekMessageW, PostMessageW, SetForegroundWindow,
+    TranslateMessage, WINDOW_EX_STYLE, WM_CANCELMODE, WM_KEYDOWN, WM_KEYUP, WS_OVERLAPPEDWINDOW,
+    WS_VISIBLE,
 };
 use windows::core::{
     BOOL, ComObject, GUID, HRESULT, IUnknown, Interface, OutRef, PCWSTR, PWSTR, Ref, Result,
@@ -1352,6 +1357,13 @@ fn language_bar(app: &Application, context: &ITfContext) {
             "Korean is the current language"
         );
 
+        // A right click shows the menu itself (a push button has none of
+        // Windows' own). A second thread looks for the menu on the screen and
+        // closes it, as a user who changes their mind would: nothing is chosen.
+        right_click_and_close(&button);
+        assert_eq!(letter(), "한", "closing the menu chooses nothing");
+        assert_eq!(compositions(context), 1, "and the syllable is untouched");
+
         // Choosing a language from the menu finishes what is being composed.
         button.OnMenuSelect(items[2].0).unwrap();
         assert_eq!(letter(), "あ");
@@ -1363,6 +1375,48 @@ fn language_bar(app: &Application, context: &ITfContext) {
         assert_eq!(letter(), "A", "Japanese, then English");
         assert_eq!(tooltip(), "easime: English");
     }
+}
+
+/// Right-click the button, which opens its pop-up menu and waits for the user;
+/// a second thread finds the menu on the screen and closes it again (Escape, and
+/// a request to leave the menu mode). The log says whether the menu was seen.
+/// A menu that will not close ends the test run at once instead of hanging it.
+fn right_click_and_close(button: &ITfLangBarItemButton) {
+    let done = Arc::new(AtomicBool::new(false));
+    let seen = Arc::new(AtomicBool::new(false));
+    let helper = {
+        let (done, seen) = (done.clone(), seen.clone());
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            while !done.load(Ordering::SeqCst) {
+                // SAFETY: a window looked up by its class, and plain messages posted to it.
+                unsafe {
+                    if let Ok(menu) = FindWindowW(w!("#32768"), None)
+                        && IsWindowVisible(menu).as_bool()
+                    {
+                        seen.store(true, Ordering::SeqCst);
+                        let _ = PostMessageW(Some(menu), WM_KEYDOWN, WPARAM(0x1B), LPARAM(0));
+                        let _ = PostMessageW(Some(menu), WM_KEYUP, WPARAM(0x1B), LPARAM(0));
+                        let _ = PostMessageW(Some(menu), WM_CANCELMODE, WPARAM(0), LPARAM(0));
+                    }
+                }
+                if started.elapsed() > Duration::from_secs(30) {
+                    eprintln!("the pop-up menu of the button does not close: giving up");
+                    std::process::abort();
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        })
+    };
+    // SAFETY: the interface is alive for the call; the point is plain.
+    unsafe { button.OnClick(TF_LBI_CLK_RIGHT, POINT { x: 400, y: 400 }, std::ptr::null()) }
+        .unwrap();
+    done.store(true, Ordering::SeqCst);
+    helper.join().unwrap();
+    eprintln!(
+        "right click: the pop-up menu was on the screen: {}",
+        seen.load(Ordering::SeqCst)
+    );
 }
 
 /// What an application sets on its own context, as a number.

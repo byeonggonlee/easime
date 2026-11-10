@@ -31,7 +31,9 @@ use ime_core::Language;
 use ime_session::indicator::{language_glyph, language_native_name};
 use std::cell::RefCell;
 use std::ffi::c_void;
-use windows::Win32::Foundation::{E_FAIL, E_INVALIDARG, E_POINTER, HWND, POINT, RECT};
+use windows::Win32::Foundation::{
+    E_FAIL, E_INVALIDARG, E_POINTER, HWND, LPARAM, POINT, RECT, WPARAM,
+};
 use windows::Win32::Graphics::Gdi::{
     ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CLIP_DEFAULT_PRECIS, CreateBitmap,
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DEFAULT_PITCH,
@@ -43,11 +45,15 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::TextServices::{
     GUID_LBI_INPUTMODE, ITfLangBarItem, ITfLangBarItem_Impl, ITfLangBarItemButton,
     ITfLangBarItemButton_Impl, ITfLangBarItemMgr, ITfLangBarItemSink, ITfMenu, TF_LANGBARITEMINFO,
-    TF_LBI_CLK_LEFT, TF_LBI_ICON, TF_LBI_STYLE_BTN_BUTTON, TF_LBI_STYLE_SHOWNINTRAY, TF_LBI_TEXT,
-    TF_LBI_TOOLTIP, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR, TfLBIClick,
+    TF_LBI_CLK_LEFT, TF_LBI_CLK_RIGHT, TF_LBI_ICON, TF_LBI_STYLE_BTN_BUTTON,
+    TF_LBI_STYLE_SHOWNINTRAY, TF_LBI_TEXT, TF_LBI_TOOLTIP, TF_LBMENUF_RADIOCHECKED,
+    TF_LBMENUF_SEPARATOR, TfLBIClick,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, DestroyIcon, HICON, ICONINFO, SW_SHOWNORMAL,
+    AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DestroyIcon, DestroyMenu,
+    DestroyWindow, HICON, ICONINFO, MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
+    PostMessageW, SW_SHOWNORMAL, SetForegroundWindow, TPM_BOTTOMALIGN, TPM_NONOTIFY, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{BOOL, BSTR, GUID, IUnknown, Interface, PCWSTR, Ref, Result, implement, w};
 
@@ -64,6 +70,61 @@ pub enum Request {
 
 /// The id of the menu entry that opens the settings; the languages count up from 1.
 const SETTINGS_ID: u32 = 1000;
+
+/// One line of the button's menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    pub id: u32,
+    pub text: String,
+    pub kind: Kind,
+}
+
+/// What a line of the menu is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// A choice; `checked` marks the language that is on.
+    Item { checked: bool },
+    /// The line between the languages and the settings.
+    Separator,
+}
+
+/// The lines of the menu: the languages of the cycle (the one that is on
+/// marked), a separator, the settings. The same lines are given to TSF
+/// (`InitMenu`) and shown by the button itself on a right click.
+pub fn menu_entries(current: Language, cycle: &[Language], settings_text: &str) -> Vec<Entry> {
+    let mut lines: Vec<Entry> = cycle
+        .iter()
+        .enumerate()
+        .map(|(index, language)| Entry {
+            id: 1 + index as u32,
+            text: language_native_name(*language).to_string(),
+            kind: Kind::Item {
+                checked: *language == current,
+            },
+        })
+        .collect();
+    lines.push(Entry {
+        id: 0,
+        text: String::new(),
+        kind: Kind::Separator,
+    });
+    lines.push(Entry {
+        id: SETTINGS_ID,
+        text: settings_text.to_string(),
+        kind: Kind::Item { checked: false },
+    });
+    lines
+}
+
+/// What choosing the line `id` of the menu asks for. `None` for an id that is
+/// no line of it.
+pub fn request_for(id: u32, cycle: &[Language]) -> Option<Request> {
+    if id == SETTINGS_ID {
+        return Some(Request::Settings);
+    }
+    let index = id.checked_sub(1)?;
+    cycle.get(index as usize).copied().map(Request::Select)
+}
 
 /// The cookie of the one sink TSF gives us.
 const SINK_COOKIE: u32 = 1;
@@ -135,6 +196,85 @@ impl ModeButton {
     fn language(&self) -> Language {
         self.face.borrow().language
     }
+
+    /// The lines of the menu for what the button shows now.
+    fn entries(&self) -> Vec<Entry> {
+        let face = self.face.borrow();
+        menu_entries(face.language, &face.cycle, &self.settings_text)
+    }
+
+    /// Show the menu at `at` (screen coordinates) and do what the user picks.
+    /// Nothing is borrowed while the menu is open: TSF may call the button.
+    fn pop_up(&self, at: POINT) {
+        let entries = self.entries();
+        let cycle = self.face.borrow().cycle.clone();
+        let Some(id) = track_popup(&entries, at) else {
+            return;
+        };
+        if let Some(request) = request_for(id, &cycle) {
+            (self.handler)(request);
+        }
+    }
+}
+
+/// Show `entries` as a pop-up menu with its bottom edge at `at` (the button is
+/// in the taskbar; Windows moves the menu where it fits), wait for the user,
+/// and return the id they chose, `None` if they chose nothing.
+fn track_popup(entries: &[Entry], at: POINT) -> Option<u32> {
+    // SAFETY: a window and a menu of ours, made and destroyed here; the texts
+    // live for the calls that read them.
+    unsafe {
+        // The menu belongs to a window, and closes when the user clicks away
+        // only if that window is the foreground one.
+        let owner = CreateWindowExW(
+            WS_EX_TOOLWINDOW,
+            w!("STATIC"),
+            w!("easime"),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+        )
+        .ok()?;
+        let Ok(menu) = CreatePopupMenu() else {
+            let _ = DestroyWindow(owner);
+            return None;
+        };
+        for entry in entries {
+            let added = match entry.kind {
+                Kind::Separator => AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()),
+                Kind::Item { checked } => {
+                    let text: Vec<u16> = entry.text.encode_utf16().chain(Some(0)).collect();
+                    let flags = MF_STRING | if checked { MF_CHECKED } else { MF_UNCHECKED };
+                    AppendMenuW(menu, flags, entry.id as usize, PCWSTR(text.as_ptr()))
+                }
+            };
+            if let Err(e) = added {
+                diag::log(&format!("language bar: could not add a menu line: {e}"));
+            }
+        }
+        let _ = SetForegroundWindow(owner);
+        let chosen = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN,
+            at.x,
+            at.y,
+            None,
+            owner,
+            None,
+        );
+        // Without this a menu opened from the taskbar may close at once the
+        // second time (Windows' documented remedy for notification menus).
+        let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
+        let _ = DestroyMenu(menu);
+        let _ = DestroyWindow(owner);
+        u32::try_from(chosen.0).ok().filter(|id| *id > 0)
+    }
 }
 
 /// `text` in a fixed-size UTF-16 field, cut to fit and ending in NUL.
@@ -183,76 +323,60 @@ impl ITfLangBarItem_Impl for ModeButton_Impl {
 }
 
 impl ITfLangBarItemButton_Impl for ModeButton_Impl {
-    fn OnClick(&self, click: TfLBIClick, _point: &POINT, _area: *const RECT) -> Result<()> {
-        // A right click opens the menu on its own (`InitMenu`).
+    fn OnClick(&self, click: TfLBIClick, point: &POINT, _area: *const RECT) -> Result<()> {
+        // Said in the log, so that a PC where a click does not do what it should
+        // can tell whether Windows hands the click to us at all.
+        diag::log(&format!(
+            "language bar: click {} at ({}, {})",
+            if click == TF_LBI_CLK_LEFT {
+                "left"
+            } else if click == TF_LBI_CLK_RIGHT {
+                "right"
+            } else {
+                "other"
+            },
+            point.x,
+            point.y
+        ));
         if click == TF_LBI_CLK_LEFT {
             (self.handler)(Request::Toggle);
+        } else if click == TF_LBI_CLK_RIGHT {
+            // A push button has no menu of Windows' own: the menu is ours to show.
+            self.pop_up(*point);
         }
         Ok(())
     }
 
     fn InitMenu(&self, menu: Ref<ITfMenu>) -> Result<()> {
         let menu = menu.ok()?;
-        let (current, cycle) = {
-            let face = self.face.borrow();
-            (face.language, face.cycle.clone())
-        };
-        for (index, language) in cycle.iter().enumerate() {
-            let name: Vec<u16> = language_native_name(*language).encode_utf16().collect();
-            let flags = if *language == current {
-                TF_LBMENUF_RADIOCHECKED
-            } else {
-                0
+        let entries = self.entries();
+        for entry in &entries {
+            let (flags, text) = match entry.kind {
+                Kind::Item { checked: true } => (TF_LBMENUF_RADIOCHECKED, entry.text.as_str()),
+                Kind::Item { checked: false } => (0, entry.text.as_str()),
+                Kind::Separator => (TF_LBMENUF_SEPARATOR, ""),
             };
+            let text: Vec<u16> = text.encode_utf16().collect();
             // SAFETY: the menu and the text live for the call; no sub menu.
             unsafe {
                 menu.AddMenuItem(
-                    1 + index as u32,
+                    entry.id,
                     flags,
                     HBITMAP::default(),
                     HBITMAP::default(),
-                    &name,
+                    &text,
                     std::ptr::null_mut(),
                 )?;
             }
-        }
-        let none: [u16; 0] = [];
-        let text: Vec<u16> = self.settings_text.encode_utf16().collect();
-        // SAFETY: as above.
-        unsafe {
-            menu.AddMenuItem(
-                0,
-                TF_LBMENUF_SEPARATOR,
-                HBITMAP::default(),
-                HBITMAP::default(),
-                &none,
-                std::ptr::null_mut(),
-            )?;
-            menu.AddMenuItem(
-                SETTINGS_ID,
-                0,
-                HBITMAP::default(),
-                HBITMAP::default(),
-                &text,
-                std::ptr::null_mut(),
-            )?;
         }
         Ok(())
     }
 
     fn OnMenuSelect(&self, id: u32) -> Result<()> {
-        if id == SETTINGS_ID {
-            (self.handler)(Request::Settings);
-            return Ok(());
-        }
-        let language = {
-            let face = self.face.borrow();
-            id.checked_sub(1)
-                .and_then(|index| face.cycle.get(index as usize).copied())
-        };
-        match language {
-            Some(language) => {
-                (self.handler)(Request::Select(language));
+        let cycle = self.face.borrow().cycle.clone();
+        match request_for(id, &cycle) {
+            Some(request) => {
+                (self.handler)(request);
                 Ok(())
             }
             None => Err(E_INVALIDARG.into()),
@@ -670,6 +794,57 @@ mod tests {
     fn a_letter_is_white_on_the_badge() {
         assert_eq!(badge_pixel(0), 0xFF20_2226, "no letter: the badge colour");
         assert_eq!(badge_pixel(255), 0xFFFF_FFFF, "all letter: white");
+    }
+
+    const CYCLE: [Language; 3] = [Language::English, Language::Korean, Language::Japanese];
+
+    #[test]
+    fn the_menu_lists_the_languages_then_the_settings() {
+        let lines = menu_entries(Language::Korean, &CYCLE, "easime settings");
+        let kinds: Vec<Kind> = lines.iter().map(|line| line.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                Kind::Item { checked: false },
+                Kind::Item { checked: true },
+                Kind::Item { checked: false },
+                Kind::Separator,
+                Kind::Item { checked: false },
+            ],
+            "the language that is on is marked"
+        );
+        assert_eq!(lines[1].text, "한국어");
+        assert_eq!(lines[4].text, "easime settings");
+        assert_eq!(lines[4].id, SETTINGS_ID);
+    }
+
+    #[test]
+    fn a_choice_is_a_language_or_the_settings() {
+        assert_eq!(
+            request_for(1, &CYCLE),
+            Some(Request::Select(Language::English))
+        );
+        assert_eq!(
+            request_for(3, &CYCLE),
+            Some(Request::Select(Language::Japanese))
+        );
+        assert_eq!(request_for(SETTINGS_ID, &CYCLE), Some(Request::Settings));
+        assert_eq!(request_for(0, &CYCLE), None, "the separator is no choice");
+        assert_eq!(request_for(4, &CYCLE), None, "past the languages");
+    }
+
+    #[test]
+    fn every_line_the_menu_offers_can_be_chosen() {
+        for line in menu_entries(Language::English, &CYCLE, "settings") {
+            match line.kind {
+                Kind::Item { .. } => assert!(
+                    request_for(line.id, &CYCLE).is_some(),
+                    "{:?} asks for nothing",
+                    line.text
+                ),
+                Kind::Separator => assert_eq!(request_for(line.id, &CYCLE), None),
+            }
+        }
     }
 
     #[test]
