@@ -12,7 +12,7 @@
 
 ## 입력 시험 (앱마다 한 번씩)
 
-앱 후보: 메모장, 브라우저(Edge 또는 Chrome)의 입력창, 메신저, 워드패드 같은 서식 있는 편집기. 32비트 프로그램에서는 쓸 수 없는 것이 현재의 알려진 한계이므로 실패로 세지 않고 따로 적는다. 시험 중에 키를 잃는 경우를 찾으려면 환경 변수 `EASIME_LOG_KEYS=1`로 앱을 다시 시작해 `easime.log`에 모든 키가 남게 한다.
+앱 후보: 메모장, 브라우저(Edge 또는 Chrome)의 입력창, 메신저, 워드패드 같은 서식 있는 편집기. 32비트 프로그램에서도 되어야 하므로(32비트 DLL을 함께 설치한다) 안 되면 실패로 적는다(W23). 시험 중에 키를 잃는 경우를 찾으려면 환경 변수 `EASIME_LOG_KEYS=1`로 앱을 다시 시작해 `easime.log`에 모든 키가 남게 한다.
 
 | 번호 | 절차 | 기대 | 확인할 점 |
 |---|---|---|---|
@@ -38,6 +38,7 @@
 | W20 | 언어를 영어, 한국어, 일본어 세 개 켠 뒤(설정 앱 언어 페이지) 한/영 키를 누른다. Shift를 누른 채 한/영 키를 누른다. 설정 앱 단축키 화면에서 "순서대로 순환"을 골라 같은 것을 한다 | 기본: 한/영 키는 한국어 ↔ 영어를 오가고(조합 중인 글자는 확정), Shift+한/영 키는 한국어 → 일본어 → 영어 → 한국어 순으로 가고, 일본어에서 나간 뒤 한/영 키로 돌아오면 일본어다. 순환을 고르면 한/영 키만으로 한국어 → 일본어 → 영어다 | Shift+오른쪽 Alt 탭도 되는지, Windows의 Alt+Shift 입력 언어 단축키와 겹치지 않는지, 상자와 작업 표시줄 아이콘이 따라 바뀌는지, 프로그램을 새로 열면 첫 언어로 시작하는지 |
 | W21 | Windows 설정 → 시간 및 언어 → 언어 및 지역에서 한국어(또는 일본어)의 `…` → 언어 옵션 → 키보드의 `easime`를 눌러 옵션(Keyboard options) 단추가 있는지 본다. 있으면 누른다. 옛 "텍스트 서비스 및 입력 언어"(`control input.dll`) 창이 있는 Windows라면 목록의 easime에서 속성도 눌러 본다 | easime 설정 앱이 열린다 | 2026-11-10 보고: 설정 화면으로는 easime 설정에 **들어갈 수 없었다**(이 경로는 텍스트 서비스가 `ITfFnConfigure`에 답해야 열린다. 구현했고 CI는 Windows가 하는 방식으로 서비스를 만들어 답하는지만 본다). 이번에 볼 것: 옵션 단추가 보이는지(Windows 버전별로 다를 수 있다), 누르면 설정 앱이 열리는지, 아무 일도 없으면 `easime.log`에 `options asked for by Windows`가 남았는지 |
 | W22 | **Excel**(가능하면 Word도)에서 한국어로 `gksrmf`: 셀을 고른 상태에서 바로 치기, `F2`로 편집 중인 셀, 수식 입력줄 | `한글` | 2026-11-10 보고: 자모가 낱개로 들어간다. **Word에서는 문제가 없다**(같은 회사 PC에서 확인했으므로 easime가 Office 프로세스에 로드되는 64비트 Office다). 이번에 적을 것: Excel 버전(LTSC 16.0과 집의 365 모두 같다고 보고), 세 경우 중 어디서 그런지, 그리고 `%LOCALAPPDATA%\easime\easime.log`에서 Excel의 프로세스 번호(작업 관리자 → 세부 정보의 PID)가 앞에 붙은 줄이 무엇인지. 키를 적지 않는 진단 줄이 있다(2026-11-11 이후 빌드, `EASIME_LOG_KEYS` 없이): `start in EXCEL.EXE`(Excel에서 easime가 켜졌다), `keys: the first key reached easime in this program`(키가 easime에 온다), `keys: the application asks easime to stay out of the way here (empty context)` 또는 `(keyboard disabled)`(Excel이 이 칸은 텍스트가 아니라고 알린다), `the application ended the composition`(Excel이 조합을 끝낸다), `could not edit the document`(Excel이 편집을 거부한다). 어느 줄이 있고 없는지만 알려 주면 된다 **고침(2026-11-11)**: 로그로 원인이 확인되었다(`the application ended the composition`이 키마다 한 번, 키는 easime에 도착함). Excel이 조합을 키마다 끝내면 엔진이 상태를 잊어 자모가 낱개가 되었다. 이제 끝난 음절을 엔진이 들고 있다가 커서 바로 앞에 그대로 있으면 다음 키에서 이어 받는다(옮겨 갔으면 버린다). 재확인할 것: 셀 선택 상태·`F2`·수식 입력줄에서 `gksrmf`가 `한글`이 되는지, Backspace가 자모를 지우는지, Space·Enter와 한/영 키 전환에서 글자가 사라지거나 두 번 들어가지 않는지, 밑줄이 없어도 입력 중인 음절이 보이는지 |
+| W23 | **회사 메신저**(32비트로 추정)에서 한국어로 입력. 먼저 작업 관리자 → 프로세스 탭에서 이름 옆에 `(32비트)`가 있는지, 세부 정보 탭의 "상승됨" 열(관리자 실행인지)을 본다. 같은 PC의 VS Code(64비트)도 같이 | 한글이 입력된다. 32비트면 `%LOCALAPPDATA%\easime\easime.log`에 `start in 메신저이름.exe`와 `keys: the first key reached easime…`가 있다 | 2026-11-11 보고: 입력이 아예 안 된다(고치기 전 빌드). 이번에 적을 것: 32비트 여부, 관리자 실행 여부, 위 로그 줄의 유무, 영어 모드에서는 글자가 들어가는지, Microsoft 한국어 IME로는 되는지. 32비트로 확인되고도 안 되면 그때의 로그가 필요하다 |
 
 ## 제거
 
