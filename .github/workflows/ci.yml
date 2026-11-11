@@ -60,6 +60,38 @@ jobs:
           cmd /c ver
           cargo test -p frontend-tsf --test languages -- --ignored --nocapture
 
+  # The Windows text service as a 32-bit DLL, for the 32-bit programs of a PC
+  # (an older messenger, a 32-bit Office, game launchers: a 32-bit program cannot
+  # load a 64-bit DLL). The DLL is built for i686 and the tests of the crate run
+  # as 32-bit programs: regsvr32 (the 32-bit one, from SysWOW64) registers the DLL
+  # in the 32-bit view of the registry, COM loads it from there and the fake
+  # application types Korean and Japanese through the real TSF.
+  windows-32bit:
+    name: Text service, 32-bit (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: i686
+      - name: Build the 32-bit text service DLL
+        run: cargo build -p frontend-tsf --target i686-pc-windows-msvc
+      # What the DLL exports: regsvr32 and COM look for the plain names
+      # (DllRegisterServer, DllGetClassObject), not stdcall-decorated ones.
+      - name: What the 32-bit DLL exports
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($dumpbin) { & $dumpbin.FullName /exports target\i686-pc-windows-msvc\debug\frontend_tsf.dll } else { "no dumpbin found" }
+      - name: Test it as a 32-bit program
+        run: cargo test -p frontend-tsf --target i686-pc-windows-msvc
+        env:
+          EASIME_REQUIRE_DLL: "1"
+
   # The Linux packages (one .rpm, one .deb) are built, installed into a clean
   # Fedora or Debian, and started; each CI run keeps them for download
   # (Actions run page -> Artifacts, easime-linux-packages-<commit>). They are the
