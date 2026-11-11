@@ -5,13 +5,15 @@
 
     wix build -arch x64 -ext WixToolset.UI.wixext \
       -d Version=0.1.0 -d Binaries=<dir with easime-cli.exe> -d TsfDll=<frontend_tsf.dll, built with the dll profile> \
+      -d TsfDll32=<frontend_tsf.dll built for i686-pc-windows-msvc with the dll profile> \
       -d Dictionary=<mozc.bin from scripts/build-dictionary.sh mozc> -d Root=<repository root> \
       -d SettingsExe=<easime-settings.exe from settings/windows, release build> \
       -o easime.msi packaging/windows/easime.wxs
 
   WHAT IT INSTALLS
-    - the text service (easime_tsf.dll), registered with Windows (regsvr32)
-      with one profile listed under Korean;
+    - the text service (easime_tsf.dll, and easime_tsf32.dll for 32-bit programs),
+      registered with Windows (regsvr32, each in the registry view of its own
+      bitness) with one profile listed under Korean;
     - for the user who installs it, easime is switched on in their input methods
       under Korean (the "easime keyboard" feature below; Windows adds Korean to
       their languages if they do not have it), so nobody has to add anything by
@@ -44,8 +46,12 @@
   registration go at once, the DLL still in use is deleted at the next restart.
   The installer test checks both.
 
-  The DLL is 64-bit: 32-bit programs cannot use the input method (docs/platforms.md).
-  Everything the custom actions do is in crates/frontend-tsf (registration.rs,
+  THE TWO DLLS. A program loads the text service into itself, so a 32-bit program
+  needs a 32-bit DLL (an older messenger, a 32-bit Office, a game launcher). The same crate is built
+  twice and both are installed next to each other; the 32-bit one is registered by the
+  32-bit regsvr32 (SysWOW64), which writes the COM class in the 32-bit view of the registry
+  (WOW6432Node). Everything else (the profile, the user's input methods) is the same for
+  both. Everything the custom actions do is in crates/frontend-tsf (registration.rs,
   setup.rs, the exports in lib.rs).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
@@ -76,6 +82,10 @@
              built with the `dll` profile (panics unwind and are caught). -->
         <Component Id="TextService">
           <File Id="EasimeTsfDll" Name="easime_tsf.dll" Source="$(TsfDll)" />
+        </Component>
+        <!-- The same text service built for 32-bit programs. -->
+        <Component Id="TextService32">
+          <File Id="EasimeTsf32Dll" Name="easime_tsf32.dll" Source="$(TsfDll32)" />
         </Component>
         <Component Id="Demo">
           <File Id="EasimeCliExe" Source="$(Binaries)/easime-cli.exe" />
@@ -142,6 +152,7 @@
              Display="expand"
              Description="The Windows input method, its settings app, the terminal demo and the licenses.">
       <ComponentRef Id="TextService" />
+      <ComponentRef Id="TextService32" />
       <ComponentRef Id="Demo" />
       <ComponentRef Id="AppIcon" />
       <ComponentRef Id="LicenseMit" />
@@ -180,6 +191,17 @@
     <CustomAction Id="UnregisterTextService" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="ignore"
                   ExeCommand="&quot;[System64Folder]regsvr32.exe&quot; /s /u &quot;[INSTALLFOLDER]easime_tsf.dll&quot;" />
 
+    <!-- The same for the 32-bit DLL, with the 32-bit regsvr32 ([SystemFolder] is
+         SysWOW64 on a 64-bit Windows), which writes the COM class in the 32-bit
+         view of the registry. A failure stops the install here too: a 32-bit
+         program must not be left without the input method unnoticed. -->
+    <CustomAction Id="RegisterTextService32" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="check"
+                  ExeCommand="&quot;[SystemFolder]regsvr32.exe&quot; /s &quot;[INSTALLFOLDER]easime_tsf32.dll&quot;" />
+    <CustomAction Id="RegisterTextService32Rollback" Directory="INSTALLFOLDER" Execute="rollback" Impersonate="no" Return="ignore"
+                  ExeCommand="&quot;[SystemFolder]regsvr32.exe&quot; /s /u &quot;[INSTALLFOLDER]easime_tsf32.dll&quot;" />
+    <CustomAction Id="UnregisterTextService32" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="ignore"
+                  ExeCommand="&quot;[SystemFolder]regsvr32.exe&quot; /s /u &quot;[INSTALLFOLDER]easime_tsf32.dll&quot;" />
+
     <!-- Switching easime on or off for the user who installs (as that user: the
          input methods are theirs). rundll32 always exits with 0, so a failure
          is written to easime.log and does not stop the install; the installer's
@@ -204,7 +226,9 @@
       <!-- Switching on and off: &Feature is what will be, !Feature what is. -->
       <Custom Action="RegisterTextServiceRollback" After="InstallFiles" Condition="&amp;Main=3" />
       <Custom Action="RegisterTextService" After="RegisterTextServiceRollback" Condition="&amp;Main=3" />
-      <Custom Action="ListUnderUserLanguages" After="RegisterTextService" Condition="&amp;Main=3" />
+      <Custom Action="RegisterTextService32Rollback" After="RegisterTextService" Condition="&amp;Main=3" />
+      <Custom Action="RegisterTextService32" After="RegisterTextService32Rollback" Condition="&amp;Main=3" />
+      <Custom Action="ListUnderUserLanguages" After="RegisterTextService32" Condition="&amp;Main=3" />
       <Custom Action="EnableKeyboard" After="ListUnderUserLanguages" Condition="&amp;Keyboard=3" />
 
       <!-- Removing: the user's entry first, then Windows' registration, then the files.
@@ -212,7 +236,8 @@
            registers and switches on easime again (taking away what an earlier
            build switched on), and taking the user's entry away in between could
            reorder their input methods. -->
-      <Custom Action="DisableKeyboard" Before="UnregisterTextService" Condition="&amp;Keyboard=2 AND !Keyboard=3 AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="DisableKeyboard" Before="UnregisterTextService32" Condition="&amp;Keyboard=2 AND !Keyboard=3 AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="UnregisterTextService32" Before="UnregisterTextService" Condition="&amp;Main=2 AND !Main=3 AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="UnregisterTextService" Before="RemoveFiles" Condition="&amp;Main=2 AND !Main=3 AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
   </Package>

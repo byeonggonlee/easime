@@ -129,6 +129,11 @@ function Class-Dll {
     $key = Get-Item "HKLM:\SOFTWARE\Classes\CLSID\$clsid\InprocServer32" -ErrorAction SilentlyContinue
     if ($key) { $key.GetValue("") } else { $null }
 }
+# The 32-bit view of the registry (WOW6432Node), where 32-bit programs look for the class.
+function Class-Dll32 {
+    $key = Get-Item "HKLM:\SOFTWARE\Classes\WOW6432Node\CLSID\$clsid\InprocServer32" -ErrorAction SilentlyContinue
+    if ($key) { $key.GetValue("") } else { $null }
+}
 function Profile-Registered($language) {
     Test-Path "HKLM:\SOFTWARE\Microsoft\CTF\TIP\$clsid\LanguageProfile\0x0000$($language.Lang)\$($language.Profile)"
 }
@@ -177,7 +182,7 @@ function Setup-Lines([string]$step) {
 # What to read when a check fails: the user's language list and easime's own log.
 function Show-State([string]$when) {
     Write-Host "---- state $when"
-    Write-Host "class DLL: $(Class-Dll)"
+    Write-Host "class DLL: $(Class-Dll); 32-bit class DLL: $(Class-Dll32)"
     Write-Host "profile registered: $(Profile-Registered $profile); earlier profiles: $(Earlier-Registered)"
     Write-Host "easime tips of this user: $((User-Tips) -join ', ')"
     Get-ChildItem $userProfiles -ErrorAction SilentlyContinue | ForEach-Object {
@@ -192,6 +197,7 @@ function Show-State([string]$when) {
 # Everything an install leaves in Windows, and nothing of it afterwards.
 function Assert-Registered([string]$what) {
     Assert ((Class-Dll) -eq (Join-Path $dir "easime_tsf.dll")) "$what`: Windows knows the text service, pointing at the installed DLL"
+    Assert ((Class-Dll32) -eq (Join-Path $dir "easime_tsf32.dll")) "$what`: 32-bit programs know it too, pointing at the installed 32-bit DLL"
     Assert (Profile-Registered $profile) "$what`: the profile is registered under Korean"
     Assert (-not (Earlier-Registered)) "$what`: no per-language profile of an earlier build is left"
     # Also listed under the user's own languages (so "Add a keyboard" of their language has it).
@@ -203,12 +209,14 @@ function Assert-Registered([string]$what) {
 }
 function Assert-Unregistered([string]$what) {
     Assert ($null -eq (Class-Dll)) "$what`: Windows no longer knows the text service"
+    Assert ($null -eq (Class-Dll32)) "$what`: nor do 32-bit programs"
     Assert (-not (Profile-Registered $profile)) "$what`: the profile is gone from the list"
     Assert ((Listed-Languages).Count -eq 0) "$what`: easime is listed under no language any more ($((Listed-Languages) -join ', '))"
 }
 
 Assert (-not (Test-Path $dir)) "nothing is installed before the test"
 Assert ($null -eq (Class-Dll)) "the text service is not registered before the test"
+Assert ($null -eq (Class-Dll32)) "nor for 32-bit programs"
 Assert ((User-Tips).Count -eq 0) "no easime input method is switched on for this user before the test"
 Write-Host "the user's languages: $((User-Languages) -join ","); easime goes under Korean ($tip)"
 
@@ -229,7 +237,7 @@ Assert ($filesInUse -notlike "*Close these applications*") "and no longer tells 
 
 # 1. A plain install: the program, the text service, and easime switched on for this user.
 Assert ((Invoke-Msi "install" @("/i", "`"$Msi`"")) -eq 0) "the MSI installs"
-foreach ($file in "easime-cli.exe", "easime_tsf.dll", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.md") {
+foreach ($file in "easime-cli.exe", "easime_tsf.dll", "easime_tsf32.dll", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_LICENSES.md") {
     Assert (Test-Path (Join-Path $dir $file)) "$file is installed"
 }
 # The Japanese dictionary is next to the DLL (where the text service looks for
@@ -266,6 +274,13 @@ Assert ($typed -eq $hangul) "easime-cli turns gksrmf into $hangul (got '$typed')
 $powershell = (Get-Process -Id $PID).Path
 & $powershell -NoProfile -Command "`$t = [type]::GetTypeFromCLSID([guid]'$clsid'); `$o = [Activator]::CreateInstance(`$t); if (`$null -eq `$o) { exit 3 }; exit 0"
 Assert ($LASTEXITCODE -eq 0) "COM creates the text service from the installed DLL"
+
+# The same for a 32-bit program: 32-bit PowerShell asks COM for the class, which
+# must come from the 32-bit DLL (a 64-bit DLL cannot be loaded into it).
+$powershell32 = Join-Path $env:SystemRoot "SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+Assert (Test-Path $powershell32) "32-bit PowerShell is there to stand for a 32-bit program"
+& $powershell32 -NoProfile -Command "`$t = [type]::GetTypeFromCLSID([guid]'$clsid'); `$o = [Activator]::CreateInstance(`$t); if (`$null -eq `$o) { exit 3 }; if ([IntPtr]::Size -ne 4) { exit 5 }; if (@([Diagnostics.Process]::GetCurrentProcess().Modules | Where-Object { `$_.ModuleName -eq 'easime_tsf32.dll' }).Count -eq 0) { exit 4 }; exit 0"
+Assert ($LASTEXITCODE -eq 0) "a 32-bit program gets the text service from easime_tsf32.dll (exit code $LASTEXITCODE; 3: no object, 4: not the 32-bit DLL, 5: not a 32-bit process)"
 
 # 2. Removing it leaves nothing behind, in the folder, in Windows or in this user's settings.
 Assert ((Invoke-Msi "uninstall" @("/x", "`"$Msi`"")) -eq 0) "the MSI uninstalls"

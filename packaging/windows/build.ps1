@@ -7,7 +7,8 @@
 # by this script.
 # Run from anywhere on Windows: pwsh packaging\windows\build.ps1 [-Version 0.1.0]
 #
-# The installer holds the text service (the 64-bit DLL), registers it with Windows,
+# The installer holds the text service (a 64-bit DLL and a 32-bit one, for 32-bit programs;
+# the 32-bit target is added with `rustup target add i686-pc-windows-msvc`), registers it with Windows,
 # switches easime on for the installing user, and has the settings app, the
 # Japanese dictionary, the terminal demo and the licenses; see
 # packaging\windows\easime.wxs.
@@ -43,6 +44,11 @@ cargo build --profile dll --locked -p frontend-tsf
 if ($LASTEXITCODE -ne 0) { throw "cargo build of the text service failed" }
 $tsfDll = Join-Path $root "target\dll\frontend_tsf.dll"
 if (-not (Test-Path $tsfDll)) { throw "frontend_tsf.dll was not built" }
+# The same DLL for 32-bit programs (a 32-bit program cannot load a 64-bit DLL).
+cargo build --profile dll --locked -p frontend-tsf --target i686-pc-windows-msvc
+if ($LASTEXITCODE -ne 0) { throw "cargo build of the 32-bit text service failed (rustup target add i686-pc-windows-msvc)" }
+$tsfDll32 = Join-Path $root "target\i686-pc-windows-msvc\dll\frontend_tsf.dll"
+if (-not (Test-Path $tsfDll32)) { throw "the 32-bit frontend_tsf.dll was not built" }
 
 # The settings app (WinUI 3), its own cargo project. It runs on the Windows App
 # Runtime installed from Microsoft, which the installer does not carry.
@@ -95,7 +101,7 @@ $binaries = Join-Path $root "target\release"
 $source = Join-Path $root "packaging\windows\easime.wxs"
 Write-Host "$(Get-Date -Format HH:mm:ss) building $out"
 $strings = Join-Path $root "packaging\windows\strings.wxl"
-& $wix build -arch x64 -ext $uiExtension -culture en-US -loc $strings -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "Dictionary=$Dictionary" -d "SettingsExe=$settingsExe" -d "Root=$root" -o $out $source
+& $wix build -arch x64 -ext $uiExtension -culture en-US -loc $strings -d "Version=$Version" -d "Binaries=$binaries" -d "TsfDll=$tsfDll" -d "TsfDll32=$tsfDll32" -d "Dictionary=$Dictionary" -d "SettingsExe=$settingsExe" -d "Root=$root" -o $out $source
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 Write-Host "built $out"
 
