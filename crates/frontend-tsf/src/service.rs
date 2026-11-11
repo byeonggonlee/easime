@@ -298,8 +298,9 @@ fn make_typist() -> (Typist, Option<ConfigReloader>, Appearance) {
     });
     let cycle = cycle_config(&config);
     diag::log(&format!(
-        "start in {}: languages {:?}, switch key {:?}",
+        "start in {} (build {}): languages {:?}, switch key {:?}",
         program_name(),
+        env!("EASIME_COMMIT"),
         cycle.languages.enabled.clone().unwrap_or_default(),
         config.shortcuts.toggle_key
     ));
@@ -481,33 +482,54 @@ impl TextService {
         let Some((field, text)) = waiting else {
             return;
         };
-        if field == *context && self.text_before_cursor_is(context, &text) {
-            return;
+        let verdict = if field == *context {
+            self.text_before_cursor_is(context, &text)
+        } else {
+            Err("another text field".to_owned())
+        };
+        if let Err(why) = verdict {
+            diag::log(&format!("an ended syllable is not taken up again: {why}"));
+            self.forget_engine();
         }
-        diag::log_key(|| {
-            "a syllable the application ended is not before the cursor: dropped".into()
-        });
-        self.forget_engine();
     }
 
     /// Whether the text just before the cursor of `context` is `text` and nothing
-    /// is selected.
-    fn text_before_cursor_is(&self, context: &ITfContext, text: &str) -> bool {
+    /// is selected; if not, why not (for the log).
+    fn text_before_cursor_is(
+        &self,
+        context: &ITfContext,
+        text: &str,
+    ) -> std::result::Result<(), String> {
         let Some(client_id) = self.client_id() else {
-            return false;
+            return Err("the service is not active".to_owned());
         };
-        let found = Rc::new(Cell::new(false));
+        let verdict = Rc::new(RefCell::new(String::from("the read did not run")));
         let session: ITfEditSession = BeforeCursor {
             context: context.clone(),
             expected: text.encode_utf16().collect(),
-            found: found.clone(),
+            verdict: verdict.clone(),
         }
         .into();
         let flags = TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_SYNC.0 | TF_ES_READ.0);
         // SAFETY: the context and the session are alive for the call; a read
         // lock is granted at once or the answer is "no".
         let asked = unsafe { context.RequestEditSession(client_id, &session, flags) };
-        matches!(asked, Ok(result) if result.is_ok()) && found.get()
+        match asked {
+            Ok(result) if result.is_ok() => {}
+            Ok(result) => {
+                return Err(format!(
+                    "the document did not give a read lock ({result:?}); {}",
+                    verdict.borrow()
+                ));
+            }
+            Err(e) => return Err(format!("the read failed: {e}")),
+        }
+        let verdict = verdict.borrow().clone();
+        if verdict == "ok" {
+            Ok(())
+        } else {
+            Err(verdict)
+        }
     }
 
     /// Make `outcome`'s edit in the document of `context`. Returns false if
@@ -1080,7 +1102,6 @@ impl ITfCompositionSink_Impl for TextService_Impl {
         guarded("OnCompositionTerminated", Ok(()), || {
             // Not by us (our own end of a composition does not come here): the
             // application did it.
-            diag::log("the application ended the composition");
             let ended = self
                 .composing
                 .try_borrow_mut()
@@ -1108,6 +1129,15 @@ impl ITfCompositionSink_Impl for TextService_Impl {
                         .map(|typist| typist.shown().to_owned())
                 })
                 .filter(|text| !text.is_empty());
+            let what = match (&ended, &holding) {
+                (Some(_), Some(text)) => format!(
+                    "its syllable ({} characters) is kept to be taken up again",
+                    text.chars().count()
+                ),
+                (None, _) => "not a composition easime knew of: the engine forgets".to_owned(),
+                (Some(_), None) => "nothing held, or a conversion: the engine forgets".to_owned(),
+            };
+            diag::log(&format!("the application ended the composition: {what}"));
             match (ended, holding) {
                 (Some(ended), Some(text)) => {
                     if let Ok(mut orphan) = self.orphan.try_borrow_mut() {
@@ -1259,7 +1289,9 @@ impl EditSession_Impl {
                         at_cursor.ShiftStart(cookie, -adopted, &mut moved, std::ptr::null())
                     };
                     if shifted.is_err() || moved != -adopted {
-                        diag::log("could not take the ended syllable up again");
+                        diag::log(&format!(
+                            "could not cover the ended syllable to replace it (moved {moved} of {adopted}: {shifted:?})"
+                        ));
                         if moved != 0 {
                             let mut back = 0;
                             // SAFETY: as above; the cursor is put back.
@@ -1325,12 +1357,13 @@ impl EditSession_Impl {
 }
 
 /// Reads whether the text just before the cursor is `expected` (and nothing is
-/// selected).
+/// selected), and leaves the answer, in words for the log, in `verdict`: "ok" or
+/// what was different.
 #[implement(ITfEditSession)]
 struct BeforeCursor {
     context: ITfContext,
     expected: Vec<u16>,
-    found: Rc<Cell<bool>>,
+    verdict: Rc<RefCell<String>>,
 }
 
 impl ITfEditSession_Impl for BeforeCursor_Impl {
@@ -1339,41 +1372,57 @@ impl ITfEditSession_Impl for BeforeCursor_Impl {
             "BeforeCursor",
             Err(windows::Win32::Foundation::E_FAIL.into()),
             || {
-                let mut selection = [TF_SELECTION::default()];
-                let mut fetched = 0;
-                // SAFETY: the buffer holds the one selection asked for.
-                unsafe {
-                    self.context.GetSelection(
-                        cookie,
-                        TF_DEFAULT_SELECTION,
-                        &mut selection,
-                        &mut fetched,
-                    )
-                }?;
-                // SAFETY: the range was handed to us by GetSelection; taken once.
-                let Some(range) = (unsafe { ManuallyDrop::take(&mut selection[0].range) }) else {
-                    return Ok(());
-                };
-                // SAFETY: the range is alive for the calls.
-                if !unsafe { range.IsEmpty(cookie) }?.as_bool() {
-                    return Ok(());
-                }
-                let wanted = self.expected.len() as i32;
-                let mut moved = 0;
-                // SAFETY: as above; the counter lives for the call.
-                unsafe { range.ShiftStart(cookie, -wanted, &mut moved, std::ptr::null()) }?;
-                if moved != -wanted {
-                    return Ok(());
-                }
-                let mut text = vec![0u16; self.expected.len()];
-                let mut got = 0;
-                // SAFETY: the buffer and the counter live for the call.
-                unsafe { range.GetText(cookie, 0, &mut text, &mut got) }?;
-                self.found
-                    .set(got as usize == text.len() && text == self.expected);
+                let verdict = self
+                    .look(cookie)
+                    .unwrap_or_else(|e| format!("could not read the document: {e}"));
+                *self.verdict.borrow_mut() = verdict;
                 Ok(())
             },
         )
+    }
+}
+
+impl BeforeCursor_Impl {
+    fn look(&self, cookie: u32) -> Result<String> {
+        let mut selection = [TF_SELECTION::default()];
+        let mut fetched = 0;
+        // SAFETY: the buffer holds the one selection asked for.
+        unsafe {
+            self.context
+                .GetSelection(cookie, TF_DEFAULT_SELECTION, &mut selection, &mut fetched)
+        }?;
+        // SAFETY: the range was handed to us by GetSelection; taken once.
+        let Some(range) = (unsafe { ManuallyDrop::take(&mut selection[0].range) }) else {
+            return Ok("the document has no selection".to_owned());
+        };
+        // SAFETY: the range is alive for the calls.
+        if !unsafe { range.IsEmpty(cookie) }?.as_bool() {
+            return Ok("something is selected".to_owned());
+        }
+        let wanted = self.expected.len() as i32;
+        let mut moved = 0;
+        // SAFETY: as above; the counter lives for the call.
+        unsafe { range.ShiftStart(cookie, -wanted, &mut moved, std::ptr::null()) }?;
+        if moved != -wanted {
+            return Ok(format!(
+                "the cursor cannot go back {wanted} characters (went back {})",
+                -moved
+            ));
+        }
+        let mut text = vec![0u16; self.expected.len()];
+        let mut got = 0;
+        // SAFETY: the buffer and the counter live for the call.
+        unsafe { range.GetText(cookie, 0, &mut text, &mut got) }?;
+        if got as usize != text.len() {
+            return Ok(format!(
+                "read {got} of {wanted} characters before the cursor"
+            ));
+        }
+        Ok(if text == self.expected {
+            "ok".to_owned()
+        } else {
+            "the text before the cursor is another text".to_owned()
+        })
     }
 }
 
