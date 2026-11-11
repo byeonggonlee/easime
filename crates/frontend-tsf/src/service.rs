@@ -167,6 +167,16 @@ struct Composing {
     composition: ITfComposition,
 }
 
+/// A syllable the engine still holds as its composition while the document has
+/// it as finished text, because the application ended the composition (Excel's
+/// cell editor does after every key). The next key takes it up again if the text
+/// is still just before the cursor of the same field: the new text then replaces
+/// it, instead of standing next to it.
+struct Orphan {
+    context: ITfContext,
+    text: String,
+}
+
 /// The text service of one thread of one application.
 #[implement(
     ITfTextInputProcessorEx,
@@ -194,6 +204,9 @@ pub struct TextService {
     /// ours: `None` = nothing yet, `Some(None)` = ours, `Some(Some(why))` = the
     /// application asked us to stay out of the way.
     told_keys: Cell<Option<Option<&'static str>>>,
+    /// The syllable the application ended the composition of, if the engine
+    /// still holds it.
+    orphan: RefCell<Option<Orphan>>,
     /// Shared with the edit sessions, which start and end compositions.
     composing: Rc<RefCell<Option<Composing>>>,
     /// TSF's numbers for the underlines, once asked for (`None` if TSF would
@@ -220,6 +233,7 @@ impl TextService {
             appearance: RefCell::new(Appearance::default()),
             told_no_caret: Cell::new(false),
             told_keys: Cell::new(None),
+            orphan: RefCell::new(None),
             composing: Rc::new(RefCell::new(None)),
             atoms: Cell::new(None),
             langbar: RefCell::new(None),
@@ -408,13 +422,100 @@ impl TextService {
             .and_then(|a| a.thread_manager.cast().ok())
     }
 
+    /// Whether the document has text of ours that is not finished: a composition,
+    /// or a syllable the application ended the composition of.
+    fn unfinished(&self) -> bool {
+        self.composing.borrow().is_some() || self.orphan.borrow().is_some()
+    }
+
+    /// Drop the engine's copy of the composition and whatever waits to be taken
+    /// up again; the document keeps the text it shows.
+    fn forget_engine(&self) {
+        if let Ok(mut orphan) = self.orphan.try_borrow_mut() {
+            orphan.take();
+        }
+        if let Ok(mut typist) = self.typist.try_borrow_mut()
+            && let Some(typist) = typist.as_mut()
+        {
+            typist.forget();
+        }
+    }
+
+    /// After the document was edited: if the engine shows a composition that no
+    /// composition of the document carries any more (the application ended it),
+    /// remember it as the one to take up again. Conversions are not taken up.
+    fn sync_orphan(&self, context: &ITfContext) {
+        let carried = self.composing.try_borrow().map_or(true, |c| c.is_some());
+        let shown = self
+            .typist
+            .try_borrow()
+            .ok()
+            .and_then(|typist| {
+                typist
+                    .as_ref()
+                    .filter(|typist| typist.candidates().is_none())
+                    .map(|typist| typist.shown().to_owned())
+            })
+            .filter(|text| !text.is_empty());
+        if let Ok(mut orphan) = self.orphan.try_borrow_mut() {
+            *orphan = match shown {
+                Some(text) if !carried => Some(Orphan {
+                    context: context.clone(),
+                    text,
+                }),
+                _ => None,
+            };
+        }
+    }
+
+    /// Before the engine is asked anything: a syllable waiting to be taken up
+    /// again is taken up only if it is still just before the cursor of this
+    /// field. If the user moved on, the engine forgets it, so that no syllable
+    /// appears out of nothing where they went.
+    fn settle_orphan(&self, context: &ITfContext) {
+        let waiting = self
+            .orphan
+            .borrow()
+            .as_ref()
+            .map(|orphan| (orphan.context.clone(), orphan.text.clone()));
+        let Some((field, text)) = waiting else {
+            return;
+        };
+        if field == *context && self.text_before_cursor_is(context, &text) {
+            return;
+        }
+        diag::log_key(|| {
+            "a syllable the application ended is not before the cursor: dropped".into()
+        });
+        self.forget_engine();
+    }
+
+    /// Whether the text just before the cursor of `context` is `text` and nothing
+    /// is selected.
+    fn text_before_cursor_is(&self, context: &ITfContext, text: &str) -> bool {
+        let Some(client_id) = self.client_id() else {
+            return false;
+        };
+        let found = Rc::new(Cell::new(false));
+        let session: ITfEditSession = BeforeCursor {
+            context: context.clone(),
+            expected: text.encode_utf16().collect(),
+            found: found.clone(),
+        }
+        .into();
+        let flags = TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_SYNC.0 | TF_ES_READ.0);
+        // SAFETY: the context and the session are alive for the call; a read
+        // lock is granted at once or the answer is "no".
+        let asked = unsafe { context.RequestEditSession(client_id, &session, flags) };
+        matches!(asked, Ok(result) if result.is_ok()) && found.get()
+    }
+
     /// Make `outcome`'s edit in the document of `context`. Returns false if
     /// the document could not be edited (the failure is in the log).
     fn perform(&self, context: &ITfContext, outcome: &Outcome) -> bool {
         let mut edited = true;
         if let Some(edit) = &outcome.edit {
-            let composing = self.composing.borrow().is_some();
-            let steps = plan(composing, edit);
+            let steps = plan(self.unfinished(), edit);
             let parts = self.parts(&edit.marks);
             if !steps.is_empty()
                 && let Err(e) = self.run(context, steps, parts, true)
@@ -474,6 +575,11 @@ impl TextService {
             if request == Request::Settings {
                 langbar::open_settings();
                 return;
+            }
+            if self.orphan.borrow().is_some()
+                && let Some(focused) = self.focused_context()
+            {
+                self.settle_orphan(&focused);
             }
             let outcome = {
                 let mut typist = self.typist.borrow_mut();
@@ -581,9 +687,8 @@ impl TextService {
             .as_mut()
             .and_then(Typist::candidates_not_shown);
         if let Some(edit) = edit {
-            let composing = self.composing.borrow().is_some();
             let parts = self.parts(&edit.marks);
-            if let Err(e) = self.run(context, plan(composing, &edit), parts, true) {
+            if let Err(e) = self.run(context, plan(self.unfinished(), &edit), parts, true) {
                 diag::log(&format!("could not edit the document: {e}"));
             }
         }
@@ -644,15 +749,42 @@ impl TextService {
         parts: Vec<(Range<usize>, u32)>,
         sync: bool,
     ) -> Result<()> {
+        let result = self.run_session(context, steps, parts, sync);
+        // Whatever the edit left of the composition, the service now knows.
+        self.sync_orphan(context);
+        result
+    }
+
+    fn run_session(
+        &self,
+        context: &ITfContext,
+        steps: Vec<Step>,
+        parts: Vec<(Range<usize>, u32)>,
+        sync: bool,
+    ) -> Result<()> {
         let Some(client_id) = self.client_id() else {
             return Ok(());
         };
+        // How much text the application left unowned just before the cursor,
+        // for the new text to take the place of.
+        let adopt = self
+            .orphan
+            .try_borrow()
+            .ok()
+            .and_then(|orphan| {
+                orphan
+                    .as_ref()
+                    .filter(|orphan| orphan.context == *context)
+                    .map(|orphan| orphan.text.encode_utf16().count())
+            })
+            .unwrap_or(0);
         let session: ITfEditSession = EditSession {
             context: context.clone(),
             sink: self.composition_sink()?,
             composing: self.composing.clone(),
             steps: steps.clone(),
             parts: parts.clone(),
+            adopt: Cell::new(adopt),
         }
         .into();
         let write = TF_ES_READWRITE.0;
@@ -675,6 +807,7 @@ impl TextService {
                 composing: self.composing.clone(),
                 steps,
                 parts,
+                adopt: Cell::new(adopt),
             }
             .into();
             // SAFETY: as above.
@@ -701,9 +834,7 @@ impl TextService {
             // Do not keep a composition we cannot reach.
             self.composing.borrow_mut().take();
         }
-        if let Some(typist) = self.typist.borrow_mut().as_mut() {
-            typist.forget();
-        }
+        self.forget_engine();
         self.candidates.end(self.elements().as_ref());
     }
 
@@ -735,6 +866,9 @@ impl TextService {
         match result {
             Ok(config) => {
                 diag::log("settings changed, using them");
+                if let Some(context) = context {
+                    self.settle_orphan(context);
+                }
                 *self.appearance.borrow_mut() = config.appearance.clone();
                 let edit = self
                     .typist
@@ -742,7 +876,7 @@ impl TextService {
                     .as_mut()
                     .and_then(|typist| typist.apply_config(&cycle_config(&config)));
                 if let (Some(edit), Some(context)) = (edit, context) {
-                    let steps = plan(self.composing.borrow().is_some(), &edit);
+                    let steps = plan(self.unfinished(), &edit);
                     if let Err(e) = self.run(context, steps, Vec::new(), true) {
                         diag::log(&format!("could not edit the document: {e}"));
                     }
@@ -861,6 +995,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             // First the other field, then new settings (which may finish the
             // composition of this one).
             self.leave_other_context(context);
+            self.settle_orphan(context);
             self.reload_settings(Some(context));
             let outcome = match self.typist.borrow_mut().as_mut() {
                 Some(typist) => typist.key_down(key, &keyboard_state()),
@@ -877,9 +1012,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 // The document did not take the text (it may refuse
                 // compositions): give the key to the application rather than
                 // lose it, and start afresh.
-                if let Some(typist) = self.typist.borrow_mut().as_mut() {
-                    typist.forget();
-                }
+                self.forget_engine();
                 self.candidates.end(self.elements().as_ref());
                 return Ok(false.into());
             }
@@ -898,6 +1031,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             }
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
             self.leave_other_context(context);
+            self.settle_orphan(context);
             let outcome = match self.typist.borrow_mut().as_mut() {
                 Some(typist) => typist.key_up(key),
                 None => return Ok(false.into()),
@@ -945,21 +1079,45 @@ impl ITfCompositionSink_Impl for TextService_Impl {
     fn OnCompositionTerminated(&self, write: u32, composition: Ref<ITfComposition>) -> Result<()> {
         guarded("OnCompositionTerminated", Ok(()), || {
             // Not by us (our own end of a composition does not come here): the
-            // application did it, which loses the engine's copy of the syllable.
+            // application did it.
             diag::log("the application ended the composition");
-            if let Ok(mut composing) = self.composing.try_borrow_mut()
-                && let Some(ended) = composing.take()
-            {
+            let ended = self
+                .composing
+                .try_borrow_mut()
+                .ok()
+                .and_then(|mut composing| composing.take());
+            if let Some(ended) = &ended {
                 // What stays in the document is finished text: no underline.
                 let composition = composition.ok().unwrap_or(&ended.composition);
                 if let Err(e) = display::unmark(&ended.context, composition, write) {
                     diag::log_key(|| format!("underline not taken off: {e}"));
                 }
             }
-            if let Ok(mut typist) = self.typist.try_borrow_mut()
-                && let Some(typist) = typist.as_mut()
-            {
-                typist.forget();
+            // The engine may be holding the syllable still. The text in the
+            // document is the same, and the next key can take it up again (Excel
+            // ends the composition after every key; forgetting the syllable
+            // there made every jamo stand alone). A conversion is not taken up.
+            let holding = self
+                .typist
+                .try_borrow()
+                .ok()
+                .and_then(|typist| {
+                    typist
+                        .as_ref()
+                        .filter(|typist| typist.candidates().is_none())
+                        .map(|typist| typist.shown().to_owned())
+                })
+                .filter(|text| !text.is_empty());
+            match (ended, holding) {
+                (Some(ended), Some(text)) => {
+                    if let Ok(mut orphan) = self.orphan.try_borrow_mut() {
+                        *orphan = Some(Orphan {
+                            context: ended.context,
+                            text,
+                        });
+                    }
+                }
+                _ => self.forget_engine(),
             }
             let elements = self.activated.try_borrow().ok().and_then(|activated| {
                 activated
@@ -1038,6 +1196,10 @@ struct EditSession {
     /// The underlines of the composition after the steps (UTF-16 ranges and
     /// TSF's numbers for the attributes).
     parts: Vec<(Range<usize>, u32)>,
+    /// How many UTF-16 units just before the cursor the application left as
+    /// finished text of an ended composition: the first text written, when no
+    /// composition is going on, takes their place.
+    adopt: Cell<usize>,
 }
 
 impl ITfEditSession_Impl for EditSession_Impl {
@@ -1087,6 +1249,26 @@ impl EditSession_Impl {
                 // SAFETY: the context is alive; `QUERYONLY` inserts nothing.
                 let at_cursor =
                     unsafe { insert.InsertTextAtSelection(cookie, TF_IAS_QUERYONLY, &[]) }?;
+                let adopted = self.adopt.take() as i32;
+                if adopted > 0 {
+                    // Cover the text the application left behind, so that the
+                    // new text takes its place instead of standing next to it.
+                    let mut moved = 0;
+                    // SAFETY: the range is alive; the counter lives for the call.
+                    let shifted = unsafe {
+                        at_cursor.ShiftStart(cookie, -adopted, &mut moved, std::ptr::null())
+                    };
+                    if shifted.is_err() || moved != -adopted {
+                        diag::log("could not take the ended syllable up again");
+                        if moved != 0 {
+                            let mut back = 0;
+                            // SAFETY: as above; the cursor is put back.
+                            let _ = unsafe {
+                                at_cursor.ShiftStart(cookie, -moved, &mut back, std::ptr::null())
+                            };
+                        }
+                    }
+                }
                 let composer: ITfContextComposition = self.context.cast()?;
                 // SAFETY: the range and the sink are alive for the call.
                 let composition =
@@ -1139,6 +1321,59 @@ impl EditSession_Impl {
             unsafe { composing.composition.EndComposition(cookie) }?;
         }
         Ok(())
+    }
+}
+
+/// Reads whether the text just before the cursor is `expected` (and nothing is
+/// selected).
+#[implement(ITfEditSession)]
+struct BeforeCursor {
+    context: ITfContext,
+    expected: Vec<u16>,
+    found: Rc<Cell<bool>>,
+}
+
+impl ITfEditSession_Impl for BeforeCursor_Impl {
+    fn DoEditSession(&self, cookie: u32) -> Result<()> {
+        guarded::<Result<()>>(
+            "BeforeCursor",
+            Err(windows::Win32::Foundation::E_FAIL.into()),
+            || {
+                let mut selection = [TF_SELECTION::default()];
+                let mut fetched = 0;
+                // SAFETY: the buffer holds the one selection asked for.
+                unsafe {
+                    self.context.GetSelection(
+                        cookie,
+                        TF_DEFAULT_SELECTION,
+                        &mut selection,
+                        &mut fetched,
+                    )
+                }?;
+                // SAFETY: the range was handed to us by GetSelection; taken once.
+                let Some(range) = (unsafe { ManuallyDrop::take(&mut selection[0].range) }) else {
+                    return Ok(());
+                };
+                // SAFETY: the range is alive for the calls.
+                if !unsafe { range.IsEmpty(cookie) }?.as_bool() {
+                    return Ok(());
+                }
+                let wanted = self.expected.len() as i32;
+                let mut moved = 0;
+                // SAFETY: as above; the counter lives for the call.
+                unsafe { range.ShiftStart(cookie, -wanted, &mut moved, std::ptr::null()) }?;
+                if moved != -wanted {
+                    return Ok(());
+                }
+                let mut text = vec![0u16; self.expected.len()];
+                let mut got = 0;
+                // SAFETY: the buffer and the counter live for the call.
+                unsafe { range.GetText(cookie, 0, &mut text, &mut got) }?;
+                self.found
+                    .set(got as usize == text.len() && text == self.expected);
+                Ok(())
+            },
+        )
     }
 }
 

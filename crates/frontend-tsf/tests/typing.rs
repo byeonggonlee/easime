@@ -34,16 +34,17 @@ use windows::Win32::UI::TextServices::{
     CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
     GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, GUID_LBI_INPUTMODE, GUID_PROP_ATTRIBUTE,
     GUID_TFCAT_TIP_KEYBOARD, IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl,
-    ITextStoreACPSink, ITfCandidateListUIElement, ITfCategoryMgr, ITfCompartmentMgr, ITfContext,
-    ITfContextComposition, ITfDisplayAttributeMgr, ITfEditSession, ITfEditSession_Impl,
-    ITfFnConfigure, ITfFunction, ITfInputProcessorProfileMgr, ITfKeystrokeMgr,
-    ITfLangBarItemButton, ITfLangBarItemMgr, ITfMenu, ITfMenu_Impl, ITfRange, ITfSource,
-    ITfThreadMgr, ITfUIElementMgr, ITfUIElementSink, ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS,
-    TF_ATTR_TARGET_CONVERTED, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ,
-    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
-    TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT,
-    TF_LBI_CLK_RIGHT, TF_LBI_STYLE_SHOWNINTRAY, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR,
-    TF_LS_DOT, TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
+    ITextStoreACPSink, ITfCandidateListUIElement, ITfCategoryMgr, ITfCompartmentMgr,
+    ITfCompositionView, ITfContext, ITfContextComposition, ITfContextOwnerCompositionServices,
+    ITfDisplayAttributeMgr, ITfEditSession, ITfEditSession_Impl, ITfFnConfigure, ITfFunction,
+    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfMenu,
+    ITfMenu_Impl, ITfRange, ITfSource, ITfThreadMgr, ITfUIElementMgr, ITfUIElementSink,
+    ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS, TF_ATTR_TARGET_CONVERTED,
+    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ, TF_ES_SYNC,
+    TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE,
+    TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT, TF_LBI_CLK_RIGHT,
+    TF_LBI_STYLE_SHOWNINTRAY, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR, TF_LS_DOT,
+    TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
     TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS,
     TS_TEXTCHANGE,
 };
@@ -564,6 +565,9 @@ struct Application {
     field: Rc<RefCell<Field>>,
     thread_manager: ITfThreadMgr,
     elements: Rc<Elements>,
+    /// Set to make the application end every composition right after each key
+    /// (what Excel's cell editor does).
+    ends: RefCell<Option<ITfContextOwnerCompositionServices>>,
 }
 
 impl Application {
@@ -582,6 +586,10 @@ impl Application {
             && unsafe { self.keystrokes.KeyDown(wparam, down) }
                 .expect("KeyDown")
                 .as_bool();
+        if let Some(services) = self.ends.borrow().as_ref() {
+            // SAFETY: the services are alive; no composition given ends them all.
+            let _ = unsafe { services.TerminateComposition(None::<&ITfCompositionView>) };
+        }
         if !taken {
             match typed {
                 Some("\u{8}") => self.field.borrow_mut().backspace(),
@@ -1017,6 +1025,7 @@ fn type_through_tsf() {
         field: field.clone(),
         thread_manager: thread_manager.clone(),
         elements,
+        ends: RefCell::new(None),
     };
 
     // Run the scenario; whatever happens, show what TSF asked of the document.
@@ -1272,6 +1281,71 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
 
     language_bar(app, context);
     options_entry();
+    composition_ended_by_the_application(app, context);
+}
+
+/// An application that ends the composition after every key, as Excel's cell
+/// editor does (its log shows one end per key, and the syllables came out as
+/// loose jamo): the syllables must still come out whole, nothing may be lost or
+/// doubled, and a syllable is not carried to a place the user moved to.
+fn composition_ended_by_the_application(app: &Application, context: &ITfContext) {
+    // The scenario so far ends in English; the cycle goes on to Korean.
+    assert!(app.press(VK_HANGUL, 0x72, None), "English to Korean");
+    let services: ITfContextOwnerCompositionServices = context
+        .cast()
+        .expect("the context ends compositions for its owner");
+    *app.ends.borrow_mut() = Some(services);
+    let before = app.text();
+
+    app.letters("gksrmf");
+    assert_eq!(
+        app.text(),
+        format!("{before}한글"),
+        "whole syllables although every composition is ended"
+    );
+    // Space finishes the last syllable (another jamo would join it), and the
+    // space is the application's.
+    assert!(!app.press(VK_SPACE, 0x39, Some(" ")));
+    let base = app.text();
+    assert_eq!(base, format!("{before}한글 "));
+
+    // Backspace takes back the jamo of the syllable, one by one.
+    app.letters("gks");
+    assert_eq!(app.text(), format!("{base}한"));
+    for left in ["하", "ㅎ", ""] {
+        assert!(
+            app.press(VK_BACK, 0x0E, Some("\u{8}")),
+            "Backspace is taken"
+        );
+        assert_eq!(app.text(), format!("{base}{left}"));
+    }
+
+    // Space finishes a syllable once, not twice.
+    app.letters("gk");
+    assert!(!app.press(VK_SPACE, 0x39, Some(" ")));
+    let base = app.text();
+    assert_eq!(base, format!("{before}한글 하 "));
+
+    // A switch in the middle of a syllable finishes it once, not twice.
+    app.letters("gk");
+    assert!(app.press(VK_HANGUL, 0x72, None), "Korean to Japanese");
+    assert_eq!(app.text(), format!("{base}하"));
+    assert!(app.press(VK_HANGUL, 0x72, None), "Japanese to English");
+    assert!(app.press(VK_HANGUL, 0x72, None), "English to Korean");
+
+    // The user moves the cursor away (a click) in the middle of a syllable:
+    // the syllable does not follow them, a new one starts there.
+    app.letters("gk");
+    let moved_from = app.text();
+    app.field.borrow_mut().selection = (0, 0);
+    app.letters("k");
+    assert_eq!(
+        app.text(),
+        format!("ㅏ{moved_from}"),
+        "a new syllable where the cursor is, the old one stays where it was"
+    );
+
+    *app.ends.borrow_mut() = None;
 }
 
 /// The places Windows keeps for a text service's options (the keyboard's
