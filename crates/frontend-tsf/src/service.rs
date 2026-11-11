@@ -18,6 +18,16 @@
 //! ([`crate::langbar`]); a click there is not a key, so the service handles it
 //! itself (`tray_request`).
 //!
+//! **Korean the way Windows expects it** ([`crate::mode`]). The service tells
+//! Windows that the keyboard is open and in native mode while it composes a
+//! language (`publish_mode`, and again before a key if something closed it),
+//! and selects the Korean syllable being composed as an *interim character*.
+//! Programs that use the old input method interface (Excel's cells) reach the
+//! service through a bridge of Windows, which finishes a composition made while
+//! the keyboard is closed: every jamo then stood alone. When an application
+//! ends a composition, its text is finished text and the engine starts afresh,
+//! with the cursor put after the text (`settle_selection`).
+//!
 //! **What it does not do yet:** share the mode between programs. See
 //! `docs/platforms.md`.
 //!
@@ -38,6 +48,7 @@ use crate::install;
 use crate::keys::{self, KeyInfo, KeyboardState};
 use crate::langbar::{self, LangBar, Request};
 use crate::marks::Mark;
+use crate::mode;
 use crate::page;
 use crate::placement::Rect;
 use crate::profiles;
@@ -57,19 +68,22 @@ use windows::Win32::Foundation::{
     CLASS_E_NOAGGREGATION, E_FAIL, E_INVALIDARG, E_POINTER, HWND, LPARAM, WPARAM,
 };
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl};
+use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardState;
 use windows::Win32::UI::TextServices::{
-    GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED, IEnumTfDisplayAttributeInfo,
-    ITfCompartmentMgr, ITfComposition, ITfCompositionSink, ITfCompositionSink_Impl, ITfContext,
-    ITfContextComposition, ITfContextView, ITfDisplayAttributeInfo, ITfDisplayAttributeProvider,
-    ITfDisplayAttributeProvider_Impl, ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl,
-    ITfFnConfigure, ITfFnConfigure_Impl, ITfFunction_Impl, ITfInsertAtSelection, ITfKeyEventSink,
-    ITfKeyEventSink_Impl, ITfKeystrokeMgr, ITfLangBarItemMgr, ITfSource, ITfTextInputProcessor,
-    ITfTextInputProcessor_Impl, ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl,
-    ITfThreadMgr, ITfThreadMgrEventSink, ITfThreadMgrEventSink_Impl, ITfThreadMgrEx,
-    ITfUIElementMgr, TF_AE_NONE, TF_ANCHOR_END, TF_CONTEXT_EDIT_CONTEXT_FLAGS,
-    TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS, TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION, TF_SELECTIONSTYLE, TF_TMF_UIELEMENTENABLEDONLY,
+    GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
+    GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
+    IEnumTfDisplayAttributeInfo, ITfCompartmentMgr, ITfComposition, ITfCompositionSink,
+    ITfCompositionSink_Impl, ITfContext, ITfContextComposition, ITfContextView,
+    ITfDisplayAttributeInfo, ITfDisplayAttributeProvider, ITfDisplayAttributeProvider_Impl,
+    ITfDocumentMgr, ITfEditSession, ITfEditSession_Impl, ITfFnConfigure, ITfFnConfigure_Impl,
+    ITfFunction_Impl, ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl, ITfKeystrokeMgr,
+    ITfLangBarItemMgr, ITfRange, ITfSource, ITfTextInputProcessor, ITfTextInputProcessor_Impl,
+    ITfTextInputProcessorEx, ITfTextInputProcessorEx_Impl, ITfThreadMgr, ITfThreadMgrEventSink,
+    ITfThreadMgrEventSink_Impl, ITfThreadMgrEx, ITfUIElementMgr, TF_AE_NONE, TF_ANCHOR_END,
+    TF_ANCHOR_START, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DEFAULT_SELECTION, TF_E_SYNCHRONOUS,
+    TF_ES_ASYNCDONTCARE, TF_ES_READ, TF_ES_READWRITE, TF_ES_SYNC, TF_IAS_QUERYONLY, TF_SELECTION,
+    TF_SELECTIONSTYLE, TF_SS_TRANSITORY, TF_TMF_UIELEMENTENABLEDONLY,
 };
 use windows::core::{BOOL, BSTR, GUID, IUnknown, IUnknownImpl, Interface, Ref, Result, implement};
 
@@ -124,6 +138,84 @@ fn keyboard_state() -> KeyboardState {
     state
 }
 
+/// Set a number in a compartment of the thread (the values Windows keeps for the
+/// keyboard of a thread). Returns whether it was another number before.
+fn set_thread_number(
+    thread_manager: &ITfThreadMgr,
+    client_id: u32,
+    which: &GUID,
+    value: i32,
+) -> Result<bool> {
+    let compartments: ITfCompartmentMgr = thread_manager.cast()?;
+    // SAFETY: the manager is alive; the GUID and the value live for the calls.
+    let compartment = unsafe { compartments.GetCompartment(which) }?;
+    let current = unsafe { compartment.GetValue() }
+        .ok()
+        .and_then(|value| i32::try_from(&value).ok());
+    if current == Some(value) {
+        return Ok(false);
+    }
+    unsafe { compartment.SetValue(client_id, &VARIANT::from(value)) }?;
+    Ok(true)
+}
+
+/// Whether the document of `context` is one Windows makes for a program that
+/// does not speak TSF itself (it uses the old input method interface, and a
+/// bridge of Windows stands between it and the text service). Such a document
+/// holds only the text being composed.
+fn transitory(context: &ITfContext) -> Option<bool> {
+    // SAFETY: the context is alive for the call.
+    let status = unsafe { context.GetStatus() }.ok()?;
+    Some(status.dwStaticFlags & TF_SS_TRANSITORY != 0)
+}
+
+/// Make `range` the selection of `context`: the interim character of a Korean
+/// syllable (`interim`, the range covers the syllable) or a plain cursor.
+fn select(context: &ITfContext, cookie: u32, range: ITfRange, interim: bool) -> Result<()> {
+    let mut selection = TF_SELECTION {
+        range: ManuallyDrop::new(Some(range)),
+        style: TF_SELECTIONSTYLE {
+            ase: TF_AE_NONE,
+            fInterimChar: interim.into(),
+        },
+    };
+    // SAFETY: the selection holds a live range; TSF takes its own reference.
+    let set = unsafe { context.SetSelection(cookie, std::slice::from_ref(&selection)) };
+    // SAFETY: the range was put there above and is released once.
+    unsafe { ManuallyDrop::drop(&mut selection.range) };
+    set
+}
+
+/// A composition is about to end, or has just been ended by the application: if
+/// the selection still covers its text (the interim character of a Korean
+/// syllable), put the cursor after the text instead. Left as it is, the next
+/// thing typed would replace the syllable. A selection the application put
+/// somewhere else is its own business.
+fn settle_selection(context: &ITfContext, composition: &ITfComposition, cookie: u32) -> Result<()> {
+    // SAFETY: the composition, the context and the ranges are alive for the calls.
+    let range = unsafe { composition.GetRange() }?;
+    if unsafe { range.IsEmpty(cookie) }?.as_bool() {
+        return Ok(());
+    }
+    let mut selection = [TF_SELECTION::default()];
+    let mut fetched = 0;
+    // SAFETY: the buffer holds the one selection asked for.
+    unsafe { context.GetSelection(cookie, TF_DEFAULT_SELECTION, &mut selection, &mut fetched) }?;
+    // SAFETY: the range was handed to us by GetSelection; taken once.
+    let Some(selected) = (unsafe { ManuallyDrop::take(&mut selection[0].range) }) else {
+        return Ok(());
+    };
+    // SAFETY: as above.
+    let covers = unsafe { selected.IsEqualStart(cookie, &range, TF_ANCHOR_START) }?.as_bool()
+        && unsafe { selected.IsEqualEnd(cookie, &range, TF_ANCHOR_END) }?.as_bool();
+    if !covers {
+        return Ok(());
+    }
+    // SAFETY: as above.
+    unsafe { range.Collapse(cookie, TF_ANCHOR_END) }?;
+    select(context, cookie, range, false)
+}
+
 /// Whether the application asks text services to leave this context's keys
 /// alone: a password field (keyboard disabled) or a place that takes no text,
 /// such as a web page itself (an empty context, where letters are shortcuts).
@@ -167,16 +259,6 @@ struct Composing {
     composition: ITfComposition,
 }
 
-/// A syllable the engine still holds as its composition while the document has
-/// it as finished text, because the application ended the composition (Excel's
-/// cell editor does after every key). The next key takes it up again if the text
-/// is still just before the cursor of the same field: the new text then replaces
-/// it, instead of standing next to it.
-struct Orphan {
-    context: ITfContext,
-    text: String,
-}
-
 /// The text service of one thread of one application.
 #[implement(
     ITfTextInputProcessorEx,
@@ -204,9 +286,8 @@ pub struct TextService {
     /// ours: `None` = nothing yet, `Some(None)` = ours, `Some(Some(why))` = the
     /// application asked us to stay out of the way.
     told_keys: Cell<Option<Option<&'static str>>>,
-    /// The syllable the application ended the composition of, if the engine
-    /// still holds it.
-    orphan: RefCell<Option<Orphan>>,
+    /// How often the log said that the keyboard had been closed under easime.
+    told_reopened: Cell<u32>,
     /// Shared with the edit sessions, which start and end compositions.
     composing: Rc<RefCell<Option<Composing>>>,
     /// TSF's numbers for the underlines, once asked for (`None` if TSF would
@@ -233,7 +314,7 @@ impl TextService {
             appearance: RefCell::new(Appearance::default()),
             told_no_caret: Cell::new(false),
             told_keys: Cell::new(None),
-            orphan: RefCell::new(None),
+            told_reopened: Cell::new(0),
             composing: Rc::new(RefCell::new(None)),
             atoms: Cell::new(None),
             langbar: RefCell::new(None),
@@ -377,6 +458,7 @@ impl TextService_Impl {
         });
         *self.self_sink.borrow_mut() = Some(self.to_interface());
         self.add_langbar(thread_manager);
+        self.publish_mode();
         Ok(())
     }
 
@@ -423,121 +505,13 @@ impl TextService {
             .and_then(|a| a.thread_manager.cast().ok())
     }
 
-    /// Whether the document has text of ours that is not finished: a composition,
-    /// or a syllable the application ended the composition of.
-    fn unfinished(&self) -> bool {
-        self.composing.borrow().is_some() || self.orphan.borrow().is_some()
-    }
-
-    /// Drop the engine's copy of the composition and whatever waits to be taken
-    /// up again; the document keeps the text it shows.
-    fn forget_engine(&self) {
-        if let Ok(mut orphan) = self.orphan.try_borrow_mut() {
-            orphan.take();
-        }
-        if let Ok(mut typist) = self.typist.try_borrow_mut()
-            && let Some(typist) = typist.as_mut()
-        {
-            typist.forget();
-        }
-    }
-
-    /// After the document was edited: if the engine shows a composition that no
-    /// composition of the document carries any more (the application ended it),
-    /// remember it as the one to take up again. Conversions are not taken up.
-    fn sync_orphan(&self, context: &ITfContext) {
-        let carried = self.composing.try_borrow().map_or(true, |c| c.is_some());
-        let shown = self
-            .typist
-            .try_borrow()
-            .ok()
-            .and_then(|typist| {
-                typist
-                    .as_ref()
-                    .filter(|typist| typist.candidates().is_none())
-                    .map(|typist| typist.shown().to_owned())
-            })
-            .filter(|text| !text.is_empty());
-        if let Ok(mut orphan) = self.orphan.try_borrow_mut() {
-            *orphan = match shown {
-                Some(text) if !carried => Some(Orphan {
-                    context: context.clone(),
-                    text,
-                }),
-                _ => None,
-            };
-        }
-    }
-
-    /// Before the engine is asked anything: a syllable waiting to be taken up
-    /// again is taken up only if it is still just before the cursor of this
-    /// field. If the user moved on, the engine forgets it, so that no syllable
-    /// appears out of nothing where they went.
-    fn settle_orphan(&self, context: &ITfContext) {
-        let waiting = self
-            .orphan
-            .borrow()
-            .as_ref()
-            .map(|orphan| (orphan.context.clone(), orphan.text.clone()));
-        let Some((field, text)) = waiting else {
-            return;
-        };
-        let verdict = if field == *context {
-            self.text_before_cursor_is(context, &text)
-        } else {
-            Err("another text field".to_owned())
-        };
-        if let Err(why) = verdict {
-            diag::log(&format!("an ended syllable is not taken up again: {why}"));
-            self.forget_engine();
-        }
-    }
-
-    /// Whether the text just before the cursor of `context` is `text` and nothing
-    /// is selected; if not, why not (for the log).
-    fn text_before_cursor_is(
-        &self,
-        context: &ITfContext,
-        text: &str,
-    ) -> std::result::Result<(), String> {
-        let Some(client_id) = self.client_id() else {
-            return Err("the service is not active".to_owned());
-        };
-        let verdict = Rc::new(RefCell::new(String::from("the read did not run")));
-        let session: ITfEditSession = BeforeCursor {
-            context: context.clone(),
-            expected: text.encode_utf16().collect(),
-            verdict: verdict.clone(),
-        }
-        .into();
-        let flags = TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_SYNC.0 | TF_ES_READ.0);
-        // SAFETY: the context and the session are alive for the call; a read
-        // lock is granted at once or the answer is "no".
-        let asked = unsafe { context.RequestEditSession(client_id, &session, flags) };
-        match asked {
-            Ok(result) if result.is_ok() => {}
-            Ok(result) => {
-                return Err(format!(
-                    "the document did not give a read lock ({result:?}); {}",
-                    verdict.borrow()
-                ));
-            }
-            Err(e) => return Err(format!("the read failed: {e}")),
-        }
-        let verdict = verdict.borrow().clone();
-        if verdict == "ok" {
-            Ok(())
-        } else {
-            Err(verdict)
-        }
-    }
-
     /// Make `outcome`'s edit in the document of `context`. Returns false if
     /// the document could not be edited (the failure is in the log).
     fn perform(&self, context: &ITfContext, outcome: &Outcome) -> bool {
         let mut edited = true;
         if let Some(edit) = &outcome.edit {
-            let steps = plan(self.unfinished(), edit);
+            let composing = self.composing.borrow().is_some();
+            let steps = plan(composing, edit);
             let parts = self.parts(&edit.marks);
             if !steps.is_empty()
                 && let Err(e) = self.run(context, steps, parts, true)
@@ -567,20 +541,96 @@ impl TextService {
         if let (Some((language, cycle)), Some(button)) = (state, button) {
             button.get().set(language, cycle);
         }
+        // And Windows hears of the mode (see `mode`).
+        self.publish_mode();
+    }
+
+    /// Tell Windows the mode of the keyboard: open and native while easime
+    /// composes a language, closed and alphanumeric in English ([`mode`]).
+    /// Returns whether Windows had it otherwise. Programs that use the old
+    /// input method interface read these values, and Windows finishes a
+    /// composition that goes on while the keyboard is closed.
+    fn publish_mode(&self) -> bool {
+        let Some((thread_manager, client_id)) = self
+            .activated
+            .borrow()
+            .as_ref()
+            .map(|a| (a.thread_manager.clone(), a.client_id))
+        else {
+            return false;
+        };
+        let Some(language) = self
+            .typist
+            .try_borrow()
+            .ok()
+            .and_then(|typist| typist.as_ref().map(Typist::language))
+        else {
+            return false;
+        };
+        let wanted = mode::of(language);
+        let mut changed = false;
+        for (which, value, name) in [
+            (
+                GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
+                i32::from(wanted.open),
+                "open state",
+            ),
+            (
+                GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION,
+                wanted.conversion as i32,
+                "conversion mode",
+            ),
+        ] {
+            match set_thread_number(&thread_manager, client_id, &which, value) {
+                Ok(was_different) => changed |= was_different,
+                Err(e) => diag::log(&format!("input mode: could not set the {name}: {e}")),
+            }
+        }
+        changed
+    }
+
+    /// Before a key is composed: the keyboard must be open and native, or
+    /// Windows finishes the composition at once in programs that use the old
+    /// input method interface. A program (or Windows, when the focus moves to
+    /// another input context) may have closed it since easime last said so.
+    fn keep_open(&self) {
+        let composing_language = self
+            .typist
+            .borrow()
+            .as_ref()
+            .is_some_and(|typist| typist.language() != ime_core::Language::English);
+        if composing_language && self.publish_mode() {
+            let told = self.told_reopened.get();
+            if told < 3 {
+                self.told_reopened.set(told + 1);
+                diag::log("input mode: the keyboard had been closed under easime; opened again");
+            }
+        }
     }
 
     /// Say in the log, when it changes, whether the application lets easime have
     /// the keys of the text field in focus. No key is named: it is the answer to
     /// "do the keys reach easime here at all, and if not why", the first thing to
     /// know when typing does nothing in some program.
-    fn note_keys(&self, why: Option<&'static str>) {
+    fn note_keys(&self, why: Option<&'static str>, context: Option<&ITfContext>) {
         let now = Some(why);
         let before = self.told_keys.replace(now);
         if before == now {
             return;
         }
         match (before, why) {
-            (None, None) => diag::log("keys: the first key reached easime in this program"),
+            (None, None) => {
+                let document = match context.and_then(transitory) {
+                    Some(true) => {
+                        "a transitory one: the program uses the old input method interface"
+                    }
+                    Some(false) => "the program's own",
+                    None => "unknown",
+                };
+                diag::log(&format!(
+                    "keys: the first key reached easime in this program (document: {document})"
+                ));
+            }
             (_, Some(why)) => diag::log(&format!(
                 "keys: the application asks easime to stay out of the way here ({why})"
             )),
@@ -597,11 +647,6 @@ impl TextService {
             if request == Request::Settings {
                 langbar::open_settings();
                 return;
-            }
-            if self.orphan.borrow().is_some()
-                && let Some(focused) = self.focused_context()
-            {
-                self.settle_orphan(&focused);
             }
             let outcome = {
                 let mut typist = self.typist.borrow_mut();
@@ -709,8 +754,9 @@ impl TextService {
             .as_mut()
             .and_then(Typist::candidates_not_shown);
         if let Some(edit) = edit {
+            let composing = self.composing.borrow().is_some();
             let parts = self.parts(&edit.marks);
-            if let Err(e) = self.run(context, plan(self.unfinished(), &edit), parts, true) {
+            if let Err(e) = self.run(context, plan(composing, &edit), parts, true) {
                 diag::log(&format!("could not edit the document: {e}"));
             }
         }
@@ -771,42 +817,22 @@ impl TextService {
         parts: Vec<(Range<usize>, u32)>,
         sync: bool,
     ) -> Result<()> {
-        let result = self.run_session(context, steps, parts, sync);
-        // Whatever the edit left of the composition, the service now knows.
-        self.sync_orphan(context);
-        result
-    }
-
-    fn run_session(
-        &self,
-        context: &ITfContext,
-        steps: Vec<Step>,
-        parts: Vec<(Range<usize>, u32)>,
-        sync: bool,
-    ) -> Result<()> {
         let Some(client_id) = self.client_id() else {
             return Ok(());
         };
-        // How much text the application left unowned just before the cursor,
-        // for the new text to take the place of.
-        let adopt = self
-            .orphan
+        let language = self
+            .typist
             .try_borrow()
             .ok()
-            .and_then(|orphan| {
-                orphan
-                    .as_ref()
-                    .filter(|orphan| orphan.context == *context)
-                    .map(|orphan| orphan.text.encode_utf16().count())
-            })
-            .unwrap_or(0);
+            .and_then(|typist| typist.as_ref().map(Typist::language))
+            .unwrap_or(ime_core::Language::English);
         let session: ITfEditSession = EditSession {
             context: context.clone(),
             sink: self.composition_sink()?,
             composing: self.composing.clone(),
             steps: steps.clone(),
             parts: parts.clone(),
-            adopt: Cell::new(adopt),
+            language,
         }
         .into();
         let write = TF_ES_READWRITE.0;
@@ -829,7 +855,7 @@ impl TextService {
                 composing: self.composing.clone(),
                 steps,
                 parts,
-                adopt: Cell::new(adopt),
+                language,
             }
             .into();
             // SAFETY: as above.
@@ -856,7 +882,9 @@ impl TextService {
             // Do not keep a composition we cannot reach.
             self.composing.borrow_mut().take();
         }
-        self.forget_engine();
+        if let Some(typist) = self.typist.borrow_mut().as_mut() {
+            typist.forget();
+        }
         self.candidates.end(self.elements().as_ref());
     }
 
@@ -888,9 +916,6 @@ impl TextService {
         match result {
             Ok(config) => {
                 diag::log("settings changed, using them");
-                if let Some(context) = context {
-                    self.settle_orphan(context);
-                }
                 *self.appearance.borrow_mut() = config.appearance.clone();
                 let edit = self
                     .typist
@@ -898,7 +923,7 @@ impl TextService {
                     .as_mut()
                     .and_then(|typist| typist.apply_config(&cycle_config(&config)));
                 if let (Some(edit), Some(context)) = (edit, context) {
-                    let steps = plan(self.unfinished(), &edit);
+                    let steps = plan(self.composing.borrow().is_some(), &edit);
                     if let Err(e) = self.run(context, steps, Vec::new(), true) {
                         diag::log(&format!("could not edit the document: {e}"));
                     }
@@ -972,7 +997,7 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
     ) -> Result<BOOL> {
         guarded("OnTestKeyDown", Ok(false.into()), || {
             let why = why_not_ours(context.as_ref());
-            self.note_keys(why);
+            self.note_keys(why, context.as_ref());
             if why.is_some() {
                 return Ok(false.into());
             }
@@ -1017,8 +1042,8 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             // First the other field, then new settings (which may finish the
             // composition of this one).
             self.leave_other_context(context);
-            self.settle_orphan(context);
             self.reload_settings(Some(context));
+            self.keep_open();
             let outcome = match self.typist.borrow_mut().as_mut() {
                 Some(typist) => typist.key_down(key, &keyboard_state()),
                 None => return Ok(false.into()),
@@ -1034,7 +1059,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
                 // The document did not take the text (it may refuse
                 // compositions): give the key to the application rather than
                 // lose it, and start afresh.
-                self.forget_engine();
+                if let Some(typist) = self.typist.borrow_mut().as_mut() {
+                    typist.forget();
+                }
                 self.candidates.end(self.elements().as_ref());
                 return Ok(false.into());
             }
@@ -1053,7 +1080,6 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
             }
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
             self.leave_other_context(context);
-            self.settle_orphan(context);
             let outcome = match self.typist.borrow_mut().as_mut() {
                 Some(typist) => typist.key_up(key),
                 None => return Ok(false.into()),
@@ -1101,53 +1127,27 @@ impl ITfCompositionSink_Impl for TextService_Impl {
     fn OnCompositionTerminated(&self, write: u32, composition: Ref<ITfComposition>) -> Result<()> {
         guarded("OnCompositionTerminated", Ok(()), || {
             // Not by us (our own end of a composition does not come here): the
-            // application did it.
-            let ended = self
-                .composing
-                .try_borrow_mut()
-                .ok()
-                .and_then(|mut composing| composing.take());
-            if let Some(ended) = &ended {
+            // application did it, which loses the engine's copy of the syllable.
+            diag::log("the application ended the composition");
+            if let Ok(mut composing) = self.composing.try_borrow_mut()
+                && let Some(ended) = composing.take()
+            {
                 // What stays in the document is finished text: no underline.
                 let composition = composition.ok().unwrap_or(&ended.composition);
                 if let Err(e) = display::unmark(&ended.context, composition, write) {
                     diag::log_key(|| format!("underline not taken off: {e}"));
                 }
-            }
-            // The engine may be holding the syllable still. The text in the
-            // document is the same, and the next key can take it up again (Excel
-            // ends the composition after every key; forgetting the syllable
-            // there made every jamo stand alone). A conversion is not taken up.
-            let holding = self
-                .typist
-                .try_borrow()
-                .ok()
-                .and_then(|typist| {
-                    typist
-                        .as_ref()
-                        .filter(|typist| typist.candidates().is_none())
-                        .map(|typist| typist.shown().to_owned())
-                })
-                .filter(|text| !text.is_empty());
-            let what = match (&ended, &holding) {
-                (Some(_), Some(text)) => format!(
-                    "its syllable ({} characters) is kept to be taken up again",
-                    text.chars().count()
-                ),
-                (None, _) => "not a composition easime knew of: the engine forgets".to_owned(),
-                (Some(_), None) => "nothing held, or a conversion: the engine forgets".to_owned(),
-            };
-            diag::log(&format!("the application ended the composition: {what}"));
-            match (ended, holding) {
-                (Some(ended), Some(text)) => {
-                    if let Ok(mut orphan) = self.orphan.try_borrow_mut() {
-                        *orphan = Some(Orphan {
-                            context: ended.context,
-                            text,
-                        });
-                    }
+                // The syllable stays as finished text with the cursor after it.
+                if let Err(e) = settle_selection(&ended.context, composition, write) {
+                    diag::log(&format!(
+                        "could not put the cursor after the ended composition: {e}"
+                    ));
                 }
-                _ => self.forget_engine(),
+            }
+            if let Ok(mut typist) = self.typist.try_borrow_mut()
+                && let Some(typist) = typist.as_mut()
+            {
+                typist.forget();
             }
             let elements = self.activated.try_borrow().ok().and_then(|activated| {
                 activated
@@ -1226,10 +1226,9 @@ struct EditSession {
     /// The underlines of the composition after the steps (UTF-16 ranges and
     /// TSF's numbers for the attributes).
     parts: Vec<(Range<usize>, u32)>,
-    /// How many UTF-16 units just before the cursor the application left as
-    /// finished text of an ended composition: the first text written, when no
-    /// composition is going on, takes their place.
-    adopt: Cell<usize>,
+    /// The language whose text is composed (a Korean syllable is selected as
+    /// an interim character, see [`mode::interim_character`]).
+    language: ime_core::Language,
 }
 
 impl ITfEditSession_Impl for EditSession_Impl {
@@ -1238,9 +1237,12 @@ impl ITfEditSession_Impl for EditSession_Impl {
             "DoEditSession",
             Err(windows::Win32::Foundation::E_FAIL.into()),
             || {
-                for step in &self.steps {
+                for (index, step) in self.steps.iter().enumerate() {
                     match step {
-                        Step::Text(text) => self.write(cookie, text)?,
+                        // The text of the last step stays as the composition.
+                        Step::Text(text) => {
+                            self.write(cookie, text, index + 1 == self.steps.len())?
+                        }
                         Step::End => self.end(cookie)?,
                     }
                 }
@@ -1265,8 +1267,10 @@ impl ITfEditSession_Impl for EditSession_Impl {
 
 impl EditSession_Impl {
     /// Make `text` the text of the composition, starting one at the cursor if
-    /// there is none, and put the cursor after it.
-    fn write(&self, cookie: u32, text: &str) -> Result<()> {
+    /// there is none. The cursor goes after it, unless the text `stays` as the
+    /// composition and is one Korean syllable: that is selected as an interim
+    /// character, the way Korean input works on Windows.
+    fn write(&self, cookie: u32, text: &str, stays: bool) -> Result<()> {
         let existing = self
             .composing
             .borrow()
@@ -1279,28 +1283,6 @@ impl EditSession_Impl {
                 // SAFETY: the context is alive; `QUERYONLY` inserts nothing.
                 let at_cursor =
                     unsafe { insert.InsertTextAtSelection(cookie, TF_IAS_QUERYONLY, &[]) }?;
-                let adopted = self.adopt.take() as i32;
-                if adopted > 0 {
-                    // Cover the text the application left behind, so that the
-                    // new text takes its place instead of standing next to it.
-                    let mut moved = 0;
-                    // SAFETY: the range is alive; the counter lives for the call.
-                    let shifted = unsafe {
-                        at_cursor.ShiftStart(cookie, -adopted, &mut moved, std::ptr::null())
-                    };
-                    if shifted.is_err() || moved != -adopted {
-                        diag::log(&format!(
-                            "could not cover the ended syllable to replace it (moved {moved} of {adopted}: {shifted:?})"
-                        ));
-                        if moved != 0 {
-                            let mut back = 0;
-                            // SAFETY: as above; the cursor is put back.
-                            let _ = unsafe {
-                                at_cursor.ShiftStart(cookie, -moved, &mut back, std::ptr::null())
-                            };
-                        }
-                    }
-                }
                 let composer: ITfContextComposition = self.context.cast()?;
                 // SAFETY: the range and the sink are alive for the call.
                 let composition =
@@ -1317,22 +1299,12 @@ impl EditSession_Impl {
         let wide: Vec<u16> = text.encode_utf16().collect();
         // SAFETY: the range is alive; `wide` lives for the call.
         unsafe { range.SetText(cookie, 0, &wide) }?;
-        // SAFETY: as above.
-        unsafe { range.Collapse(cookie, TF_ANCHOR_END) }?;
-        let mut selection = TF_SELECTION {
-            range: ManuallyDrop::new(Some(range)),
-            style: TF_SELECTIONSTYLE {
-                ase: TF_AE_NONE,
-                fInterimChar: false.into(),
-            },
-        };
-        // SAFETY: the selection holds a live range; TSF takes its own reference.
-        let moved = unsafe {
-            self.context
-                .SetSelection(cookie, std::slice::from_ref(&selection))
-        };
-        // SAFETY: the range was put there above and is released once.
-        unsafe { ManuallyDrop::drop(&mut selection.range) };
+        let interim = stays && mode::interim_character(self.language, wide.len());
+        if !interim {
+            // SAFETY: as above.
+            unsafe { range.Collapse(cookie, TF_ANCHOR_END) }?;
+        }
+        let moved = select(&self.context, cookie, range, interim);
         // The text is written; a cursor that could not be moved must not stop
         // the steps after this one (ending the composition, for one).
         if let Err(e) = moved {
@@ -1349,80 +1321,14 @@ impl EditSession_Impl {
             if let Err(e) = display::unmark(&composing.context, &composing.composition, cookie) {
                 diag::log_key(|| format!("underline not taken off: {e}"));
             }
+            // And the cursor after it, not the interim selection on it.
+            if let Err(e) = settle_selection(&composing.context, &composing.composition, cookie) {
+                diag::log(&format!("could not put the cursor after the text: {e}"));
+            }
             // SAFETY: the composition is alive.
             unsafe { composing.composition.EndComposition(cookie) }?;
         }
         Ok(())
-    }
-}
-
-/// Reads whether the text just before the cursor is `expected` (and nothing is
-/// selected), and leaves the answer, in words for the log, in `verdict`: "ok" or
-/// what was different.
-#[implement(ITfEditSession)]
-struct BeforeCursor {
-    context: ITfContext,
-    expected: Vec<u16>,
-    verdict: Rc<RefCell<String>>,
-}
-
-impl ITfEditSession_Impl for BeforeCursor_Impl {
-    fn DoEditSession(&self, cookie: u32) -> Result<()> {
-        guarded::<Result<()>>(
-            "BeforeCursor",
-            Err(windows::Win32::Foundation::E_FAIL.into()),
-            || {
-                let verdict = self
-                    .look(cookie)
-                    .unwrap_or_else(|e| format!("could not read the document: {e}"));
-                *self.verdict.borrow_mut() = verdict;
-                Ok(())
-            },
-        )
-    }
-}
-
-impl BeforeCursor_Impl {
-    fn look(&self, cookie: u32) -> Result<String> {
-        let mut selection = [TF_SELECTION::default()];
-        let mut fetched = 0;
-        // SAFETY: the buffer holds the one selection asked for.
-        unsafe {
-            self.context
-                .GetSelection(cookie, TF_DEFAULT_SELECTION, &mut selection, &mut fetched)
-        }?;
-        // SAFETY: the range was handed to us by GetSelection; taken once.
-        let Some(range) = (unsafe { ManuallyDrop::take(&mut selection[0].range) }) else {
-            return Ok("the document has no selection".to_owned());
-        };
-        // SAFETY: the range is alive for the calls.
-        if !unsafe { range.IsEmpty(cookie) }?.as_bool() {
-            return Ok("something is selected".to_owned());
-        }
-        let wanted = self.expected.len() as i32;
-        let mut moved = 0;
-        // SAFETY: as above; the counter lives for the call.
-        unsafe { range.ShiftStart(cookie, -wanted, &mut moved, std::ptr::null()) }?;
-        if moved != -wanted {
-            return Ok(format!(
-                "the cursor cannot go back {wanted} characters (went back {})",
-                -moved
-            ));
-        }
-        let mut text = vec![0u16; self.expected.len()];
-        let mut got = 0;
-        // SAFETY: the buffer and the counter live for the call.
-        unsafe { range.GetText(cookie, 0, &mut text, &mut got) }?;
-        if got as usize != text.len() {
-            return Ok(format!(
-                "read {got} of {wanted} characters before the cursor"
-            ));
-        }
-        Ok(if text == self.expected {
-            "ok".to_owned()
-        } else {
-            "the text before the cursor is another text".to_owned()
-        })
     }
 }
 

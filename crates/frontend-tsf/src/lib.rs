@@ -34,6 +34,7 @@
 pub mod install;
 pub mod keys;
 pub mod marks;
+pub mod mode;
 pub mod page;
 pub mod placement;
 pub mod profiles;

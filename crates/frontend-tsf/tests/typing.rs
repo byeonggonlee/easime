@@ -32,19 +32,19 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{HKL, SetFocus};
 use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_DisplayAttributeMgr, CLSID_TF_InputProcessorProfiles,
     CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
-    GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, GUID_LBI_INPUTMODE, GUID_PROP_ATTRIBUTE,
-    GUID_TFCAT_TIP_KEYBOARD, IEnumITfCompositionView, ITextStoreACP, ITextStoreACP_Impl,
-    ITextStoreACPSink, ITfCandidateListUIElement, ITfCategoryMgr, ITfCompartmentMgr,
-    ITfCompositionView, ITfContext, ITfContextComposition, ITfContextOwnerCompositionServices,
-    ITfDisplayAttributeMgr, ITfEditSession, ITfEditSession_Impl, ITfFnConfigure, ITfFunction,
-    ITfInputProcessorProfileMgr, ITfKeystrokeMgr, ITfLangBarItemButton, ITfLangBarItemMgr, ITfMenu,
-    ITfMenu_Impl, ITfRange, ITfSource, ITfThreadMgr, ITfUIElementMgr, ITfUIElementSink,
-    ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS, TF_ATTR_TARGET_CONVERTED,
-    TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ, TF_ES_SYNC,
-    TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE, TF_IPPMF_ENABLEPROFILE,
-    TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT, TF_LBI_CLK_RIGHT,
-    TF_LBI_STYLE_SHOWNINTRAY, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR, TF_LS_DOT,
-    TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
+    GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE,
+    GUID_LBI_INPUTMODE, GUID_PROP_ATTRIBUTE, GUID_TFCAT_TIP_KEYBOARD, IEnumITfCompositionView,
+    ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink, ITfCandidateListUIElement,
+    ITfCategoryMgr, ITfCompartmentMgr, ITfCompositionView, ITfContext, ITfContextComposition,
+    ITfContextOwnerCompositionServices, ITfDisplayAttributeMgr, ITfEditSession,
+    ITfEditSession_Impl, ITfFnConfigure, ITfFunction, ITfInputProcessorProfileMgr, ITfKeystrokeMgr,
+    ITfLangBarItemButton, ITfLangBarItemMgr, ITfMenu, ITfMenu_Impl, ITfRange, ITfSource,
+    ITfThreadMgr, ITfUIElementMgr, ITfUIElementSink, ITfUIElementSink_Impl, TEXT_STORE_LOCK_FLAGS,
+    TF_ATTR_TARGET_CONVERTED, TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_DISPLAYATTRIBUTE, TF_ES_READ,
+    TF_ES_SYNC, TF_INPUTPROCESSORPROFILE, TF_IPPMF_DONTCARECURRENTINPUTLANGUAGE,
+    TF_IPPMF_ENABLEPROFILE, TF_IPPMF_FORPROCESS, TF_LANGBARITEMINFO, TF_LBI_CLK_LEFT,
+    TF_LBI_CLK_RIGHT, TF_LBI_STYLE_SHOWNINTRAY, TF_LBMENUF_RADIOCHECKED, TF_LBMENUF_SEPARATOR,
+    TF_LS_DOT, TF_PROFILETYPE_INPUTPROCESSOR, TS_AE_END, TS_ATTRVAL, TS_E_SYNCHRONOUS, TS_LF_SYNC,
     TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC, TS_SELECTION_ACP, TS_SELECTIONSTYLE, TS_STATUS,
     TS_TEXTCHANGE,
 };
@@ -84,6 +84,9 @@ fn regsvr32(dll: &PathBuf, unregister: bool) -> bool {
 struct Field {
     text: Vec<u16>,
     selection: (i32, i32),
+    /// Whether the selection was set as an interim character (the Korean
+    /// syllable being composed).
+    interim: bool,
     trace: Vec<String>,
 }
 
@@ -100,6 +103,7 @@ impl Field {
             .splice(start as usize..end as usize, wide.iter().copied());
         let at = start + wide.len() as i32;
         self.selection = (at, at);
+        self.interim = false;
     }
 
     /// The application deletes the character before the cursor.
@@ -222,8 +226,16 @@ impl ITextStoreACP_Impl for TextStore_Impl {
         if count >= 1 {
             // SAFETY: TSF passes `count` selections.
             let selection = unsafe { *selection };
-            self.note(|| format!("SetSelection {},{}", selection.acpStart, selection.acpEnd));
-            self.field.borrow_mut().selection = (selection.acpStart, selection.acpEnd);
+            let interim = selection.style.fInterimChar.as_bool();
+            self.note(|| {
+                format!(
+                    "SetSelection {},{} interim={interim}",
+                    selection.acpStart, selection.acpEnd
+                )
+            });
+            let mut field = self.field.borrow_mut();
+            field.selection = (selection.acpStart, selection.acpEnd);
+            field.interim = interim;
         }
         Ok(())
     }
@@ -616,6 +628,44 @@ impl Application {
 
     fn text(&self) -> String {
         self.field.borrow().string()
+    }
+
+    /// The selection of the document, and whether it is an interim character.
+    fn selection(&self) -> ((i32, i32), bool) {
+        let field = self.field.borrow();
+        (field.selection, field.interim)
+    }
+
+    /// What Windows knows of the keyboard of this thread: the open state and
+    /// the conversion mode (what a program using the old input method
+    /// interface reads as the open status and the Hangul mode).
+    fn input_mode(&self) -> (Option<i32>, Option<i32>) {
+        let compartments: ITfCompartmentMgr = self.thread_manager.cast().unwrap();
+        let read = |which: &GUID| {
+            // SAFETY: the manager is alive; the GUID lives for the calls.
+            unsafe { compartments.GetCompartment(which) }
+                .and_then(|compartment| unsafe { compartment.GetValue() })
+                .ok()
+                .and_then(|value| i32::try_from(&value).ok())
+        };
+        (
+            read(&GUID_COMPARTMENT_KEYBOARD_OPENCLOSE),
+            read(&GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION),
+        )
+    }
+
+    /// Something else (a program, or Windows when the focus moves to another
+    /// input context) closes the keyboard of the thread.
+    fn close_keyboard(&self, client: u32) {
+        let compartments: ITfCompartmentMgr = self.thread_manager.cast().unwrap();
+        // SAFETY: the manager is alive; the GUID and the value live for the calls.
+        unsafe {
+            compartments
+                .GetCompartment(&GUID_COMPARTMENT_KEYBOARD_OPENCLOSE)
+                .unwrap()
+                .SetValue(client, &VARIANT::from(0))
+                .expect("closing the keyboard");
+        }
     }
 
     /// The candidate list that is up, read through TSF the way an application
@@ -1052,6 +1102,9 @@ fn type_through_tsf() {
             "keys: the application asks easime to stay out of the way here (keyboard disabled)",
             "keys: the application asks easime to stay out of the way here (empty context)",
             "keys: easime has the keys of this text field",
+            "(document: the program's own)",
+            "input mode: the keyboard had been closed under easime; opened again",
+            "the application ended the composition",
         ] {
             assert!(
                 outcome.is_err() || text.contains(wanted),
@@ -1077,15 +1130,31 @@ fn type_through_tsf() {
 
 fn scenario(app: &Application, context: &ITfContext, client: u32) {
     // Hangul: gksrmf is 한글, and only the last syllable is still being composed.
+    // Windows is told that the keyboard is open and in Hangul mode from the
+    // start (the first language is Korean): programs that use the old input
+    // method interface lose a composition made while the keyboard is closed.
+    assert_eq!(
+        app.input_mode(),
+        (Some(1), Some(1)),
+        "open and native in Korean"
+    );
     app.letters("g");
     assert_eq!(app.text(), "ㅎ", "the first jamo shows at once");
     assert_eq!(compositions(context), 1, "and starts a composition");
+    // The syllable being composed is selected as an interim character, the
+    // way Korean input works on Windows.
+    assert_eq!(app.selection(), ((0, 1), true), "an interim character");
     // Underlined as a Korean composition (a thin solid line), as an
     // application drawing TSF's display attributes sees it.
     assert_eq!(underlines(context, client), [("ㅎ".into(), COMPOSING)]);
     app.letters("ksrmf");
     assert_eq!(app.text(), "한글");
     assert_eq!(compositions(context), 1);
+    assert_eq!(
+        app.selection(),
+        ((1, 2), true),
+        "only the syllable in progress"
+    );
     // The finished syllable has no line; the one still composed has.
     assert_eq!(underlines(context, client), [("글".into(), COMPOSING)]);
 
@@ -1093,6 +1162,11 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     let taken = app.press(VK_SPACE, 0x39, Some(" "));
     assert!(!taken, "the application gets the space itself");
     assert_eq!(app.text(), "한글 ");
+    assert_eq!(
+        app.selection(),
+        ((3, 3), false),
+        "a plain cursor after the finished text"
+    );
     assert_eq!(
         compositions(context),
         0,
@@ -1130,9 +1204,20 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     assert!(shown.right - shown.left >= 32 && shown.right - shown.left == shown.bottom - shown.top);
     pump(1500);
     assert!(mode_box().is_none(), "and goes away after its time");
+    assert_eq!(
+        app.input_mode(),
+        (Some(0), Some(0)),
+        "closed and alphanumeric in English"
+    );
     app.letters("gk");
     assert_eq!(app.text(), "한글gk");
     assert!(app.press(VK_HANGUL, 0x72, None));
+    assert_eq!(app.input_mode(), (Some(1), Some(1)), "open again in Korean");
+    // Something closes the keyboard under easime (a program, or Windows when
+    // the focus moves to another input context): the next key opens it again
+    // before it composes, and the syllable is composed as usual.
+    app.close_keyboard(client);
+    assert_eq!(app.input_mode().0, Some(0));
     assert!(
         mode_box().is_some(),
         "the second switch shows the box again"
@@ -1142,6 +1227,11 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     app.letters("gk");
     assert!(mode_box().is_none(), "typing ends the box before its time");
     assert_eq!(app.text(), "한글gk하");
+    assert_eq!(
+        app.input_mode(),
+        (Some(1), Some(1)),
+        "the key opened the keyboard again"
+    );
 
     // The Hangul key in the middle of a syllable finishes it first.
     assert!(app.press(VK_HANGUL, 0x72, None));
@@ -1234,9 +1324,16 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     pump(2200);
     let before = app.text();
     assert!(app.press(VK_HANGUL, 0x72, None), "Korean to Japanese");
+    assert_eq!(app.input_mode(), (Some(1), Some(1)), "open in Japanese too");
     app.letters("nihon");
     assert_eq!(app.text(), format!("{before}にほn"));
     assert_eq!(underlines(context, client), [("にほn".into(), READING)]);
+    let end = app.field.borrow().text.len() as i32;
+    assert_eq!(
+        app.selection(),
+        ((end, end), false),
+        "a reading grows: a cursor after it, no interim character"
+    );
     assert!(app.press(VK_SPACE, 0x39, Some(" ")), "Space converts");
     assert_eq!(app.text(), format!("{before}日本"));
     assert!(
@@ -1284,10 +1381,17 @@ fn scenario(app: &Application, context: &ITfContext, client: u32) {
     composition_ended_by_the_application(app, context);
 }
 
-/// An application that ends the composition after every key, as Excel's cell
-/// editor does (its log shows one end per key, and the syllables came out as
-/// loose jamo): the syllables must still come out whole, nothing may be lost or
-/// doubled, and a syllable is not carried to a place the user moved to.
+/// An application that ends the composition after every key. What it ended is
+/// finished text, as with every Korean input method (a click that ends a
+/// composition finishes the syllable): the next jamo starts a new syllable.
+/// Nothing may be lost or doubled, and the cursor must be after the ended
+/// syllable, not on it as the interim character was: the next thing typed
+/// would replace it.
+///
+/// (Excel's cells showed loose jamo for another reason: the keyboard was never
+/// reported as open, see `frontend_tsf::mode`. An earlier attempt took the
+/// ended syllable up again; that is not what the other input methods do, and
+/// it did not help Excel, whose document keeps no text after a composition.)
 fn composition_ended_by_the_application(app: &Application, context: &ITfContext) {
     // The scenario so far ends in English; the cycle goes on to Korean.
     assert!(app.press(VK_HANGUL, 0x72, None), "English to Korean");
@@ -1296,54 +1400,37 @@ fn composition_ended_by_the_application(app: &Application, context: &ITfContext)
         .expect("the context ends compositions for its owner");
     *app.ends.borrow_mut() = Some(services);
     let before = app.text();
-
-    app.letters("gksrmf");
-    assert_eq!(
-        app.text(),
-        format!("{before}한글"),
-        "whole syllables although every composition is ended"
-    );
-    // Space finishes the last syllable (another jamo would join it), and the
-    // space is the application's.
-    assert!(!app.press(VK_SPACE, 0x39, Some(" ")));
-    let base = app.text();
-    assert_eq!(base, format!("{before}한글 "));
-
-    // Backspace takes back the jamo of the syllable, one by one.
-    app.letters("gks");
-    assert_eq!(app.text(), format!("{base}한"));
-    for left in ["하", "ㅎ", ""] {
-        assert!(
-            app.press(VK_BACK, 0x0E, Some("\u{8}")),
-            "Backspace is taken"
+    let cursor_after_text = |app: &Application| {
+        let end = app.field.borrow().text.len() as i32;
+        assert_eq!(
+            app.selection(),
+            ((end, end), false),
+            "a plain cursor after the ended syllable"
         );
-        assert_eq!(app.text(), format!("{base}{left}"));
-    }
+    };
 
-    // Space finishes a syllable once, not twice.
-    app.letters("gk");
-    assert!(!app.press(VK_SPACE, 0x39, Some(" ")));
-    let base = app.text();
-    assert_eq!(base, format!("{before}한글 하 "));
-
-    // A switch in the middle of a syllable finishes it once, not twice.
-    app.letters("gk");
-    assert!(app.press(VK_HANGUL, 0x72, None), "Korean to Japanese");
-    assert_eq!(app.text(), format!("{base}하"));
-    assert!(app.press(VK_HANGUL, 0x72, None), "Japanese to English");
-    assert!(app.press(VK_HANGUL, 0x72, None), "English to Korean");
-
-    // The user moves the cursor away (a click) in the middle of a syllable:
-    // the syllable does not follow them, a new one starts there.
-    app.letters("gk");
-    let moved_from = app.text();
-    app.field.borrow_mut().selection = (0, 0);
+    app.letters("g");
+    assert_eq!(app.text(), format!("{before}ㅎ"));
+    assert_eq!(compositions(context), 0, "the application ended it");
+    cursor_after_text(app);
     app.letters("k");
     assert_eq!(
         app.text(),
-        format!("ㅏ{moved_from}"),
-        "a new syllable where the cursor is, the old one stays where it was"
+        format!("{before}ㅎㅏ"),
+        "a new syllable after the ended one, which is neither replaced nor doubled"
     );
+    cursor_after_text(app);
+
+    // Backspace and Space find nothing composed: they are the application's.
+    assert!(!app.press(VK_BACK, 0x0E, Some("\u{8}")));
+    assert_eq!(app.text(), format!("{before}ㅎ"));
+    assert!(!app.press(VK_SPACE, 0x39, Some(" ")));
+    assert_eq!(app.text(), format!("{before}ㅎ "));
+
+    // A switch finds nothing to finish and writes nothing.
+    assert!(app.press(VK_HANGUL, 0x72, None), "Korean to Japanese");
+    assert!(app.press(VK_HANGUL, 0x72, None), "Japanese to English");
+    assert_eq!(app.text(), format!("{before}ㅎ "));
 
     *app.ends.borrow_mut() = None;
 }
