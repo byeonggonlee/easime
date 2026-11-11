@@ -1035,6 +1035,20 @@ fn type_through_tsf() {
     if let Some(log) = easime_config::log_path()
         && let Ok(text) = std::fs::read_to_string(log)
     {
+        // What the log says without any key in it (`EASIME_LOG_KEYS` is on for
+        // this test, but these lines are written whatever it says).
+        for wanted in [
+            "start in typing-",
+            "keys: the first key reached easime in this program",
+            "keys: the application asks easime to stay out of the way here (keyboard disabled)",
+            "keys: the application asks easime to stay out of the way here (empty context)",
+            "keys: easime has the keys of this text field",
+        ] {
+            assert!(
+                outcome.is_err() || text.contains(wanted),
+                "the log does not say {wanted:?}"
+            );
+        }
         eprintln!("---- easime.log (last lines):");
         for line in text
             .lines()

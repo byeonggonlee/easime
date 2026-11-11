@@ -129,18 +129,20 @@ fn keyboard_state() -> KeyboardState {
 /// such as a web page itself (an empty context, where letters are shortcuts).
 /// TSF leaves honoring this to the text service.
 fn keys_not_ours(context: Option<&ITfContext>) -> bool {
-    let Some(context) = context else {
-        return false;
-    };
-    let Ok(compartments) = context.cast::<ITfCompartmentMgr>() else {
-        return false;
-    };
+    why_not_ours(context).is_some()
+}
+
+/// Why the application asks text services to leave this context's keys alone,
+/// in words for the log; `None` if it does not.
+fn why_not_ours(context: Option<&ITfContext>) -> Option<&'static str> {
+    let context = context?;
+    let compartments = context.cast::<ITfCompartmentMgr>().ok()?;
     [
-        GUID_COMPARTMENT_KEYBOARD_DISABLED,
-        GUID_COMPARTMENT_EMPTYCONTEXT,
+        (GUID_COMPARTMENT_KEYBOARD_DISABLED, "keyboard disabled"),
+        (GUID_COMPARTMENT_EMPTYCONTEXT, "empty context"),
     ]
     .iter()
-    .any(|which| {
+    .find(|(which, _)| {
         // SAFETY: the compartment manager is alive; the GUID lives for the call.
         unsafe { compartments.GetCompartment(which) }
             .and_then(|compartment| unsafe { compartment.GetValue() })
@@ -148,6 +150,7 @@ fn keys_not_ours(context: Option<&ITfContext>) -> bool {
             .and_then(|value| i32::try_from(&value).ok())
             .is_some_and(|value| value != 0)
     })
+    .map(|(_, why)| *why)
 }
 
 /// What TSF gave the service when it was activated.
@@ -187,6 +190,10 @@ pub struct TextService {
     appearance: RefCell<Appearance>,
     /// Whether the log already says that no cursor position could be found.
     told_no_caret: Cell<bool>,
+    /// What the log last said about whether the keys of the text field are
+    /// ours: `None` = nothing yet, `Some(None)` = ours, `Some(Some(why))` = the
+    /// application asked us to stay out of the way.
+    told_keys: Cell<Option<Option<&'static str>>>,
     /// Shared with the edit sessions, which start and end compositions.
     composing: Rc<RefCell<Option<Composing>>>,
     /// TSF's numbers for the underlines, once asked for (`None` if TSF would
@@ -212,6 +219,7 @@ impl TextService {
             ui_elements_only: Cell::new(false),
             appearance: RefCell::new(Appearance::default()),
             told_no_caret: Cell::new(false),
+            told_keys: Cell::new(None),
             composing: Rc::new(RefCell::new(None)),
             atoms: Cell::new(None),
             langbar: RefCell::new(None),
@@ -255,6 +263,18 @@ fn cycle_config(config: &Config) -> Config {
     )
 }
 
+/// The file name of the program the service runs in, for the log (which of the
+/// programs that share the log a line is about).
+fn program_name() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "an unknown program".to_owned())
+}
+
 /// The input method this thread starts with: the user's settings, with the
 /// languages of the one easime profile as the cycle (English, then each language).
 fn make_typist() -> (Typist, Option<ConfigReloader>, Appearance) {
@@ -264,7 +284,8 @@ fn make_typist() -> (Typist, Option<ConfigReloader>, Appearance) {
     });
     let cycle = cycle_config(&config);
     diag::log(&format!(
-        "start: languages {:?}, switch key {:?}",
+        "start in {}: languages {:?}, switch key {:?}",
+        program_name(),
         cycle.languages.enabled.clone().unwrap_or_default(),
         config.shortcuts.toggle_key
     ));
@@ -422,6 +443,27 @@ impl TextService {
         let button = self.langbar.borrow().as_ref().map(LangBar::button);
         if let (Some((language, cycle)), Some(button)) = (state, button) {
             button.get().set(language, cycle);
+        }
+    }
+
+    /// Say in the log, when it changes, whether the application lets easime have
+    /// the keys of the text field in focus. No key is named: it is the answer to
+    /// "do the keys reach easime here at all, and if not why", the first thing to
+    /// know when typing does nothing in some program.
+    fn note_keys(&self, why: Option<&'static str>) {
+        let now = Some(why);
+        let before = self.told_keys.replace(now);
+        if before == now {
+            return;
+        }
+        match (before, why) {
+            (None, None) => diag::log("keys: the first key reached easime in this program"),
+            (_, Some(why)) => diag::log(&format!(
+                "keys: the application asks easime to stay out of the way here ({why})"
+            )),
+            (Some(Some(_)), None) | (Some(None), None) => {
+                diag::log("keys: easime has the keys of this text field")
+            }
         }
     }
 
@@ -773,7 +815,9 @@ impl ITfKeyEventSink_Impl for TextService_Impl {
         lparam: LPARAM,
     ) -> Result<BOOL> {
         guarded("OnTestKeyDown", Ok(false.into()), || {
-            if keys_not_ours(context.as_ref()) {
+            let why = why_not_ours(context.as_ref());
+            self.note_keys(why);
+            if why.is_some() {
                 return Ok(false.into());
             }
             let key = KeyInfo::from_message(wparam.0 as u16, lparam.0);
@@ -900,6 +944,9 @@ impl ITfCompositionSink_Impl for TextService_Impl {
     /// has to go.
     fn OnCompositionTerminated(&self, write: u32, composition: Ref<ITfComposition>) -> Result<()> {
         guarded("OnCompositionTerminated", Ok(()), || {
+            // Not by us (our own end of a composition does not come here): the
+            // application did it, which loses the engine's copy of the syllable.
+            diag::log("the application ended the composition");
             if let Ok(mut composing) = self.composing.try_borrow_mut()
                 && let Some(ended) = composing.take()
             {
